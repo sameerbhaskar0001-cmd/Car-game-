@@ -1,0 +1,15 @@
+{
+  "appId": "com.deskracer.app",
+  "appName": "Desk Racer 3D",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "backgroundColor": "#04070f",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "backgroundColor": "#04070f",
+    "allowMixedContent": true,
+    "captureInput": true
+  }
+}

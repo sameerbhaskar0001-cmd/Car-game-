@@ -1,0 +1,72 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Clean Lock File & Install Dependencies
+        run: |
+          rm -f package-lock.json
+          npm install --include=optional
+          npm install @rollup/rollup-linux-x64-gnu
+
+      - name: Build Web App
+        run: npx vite build
+
+      - name: Setup Java JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Accept Android SDK Licenses
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
+      - name: Add Android & Sync Capacitor
+        run: |
+          rm -rf android/capacitor-cordova-android-plugins
+          npx cap sync android
+
+      - name: Ensure Gradle 8.4 Wrapper
+        run: sed -i 's/gradle-.*-all.zip/gradle-8.4-all.zip/g' android/gradle/wrapper/gradle-wrapper.properties || true
+
+      - name: Boost Gradle Memory & Clean
+        working-directory: android
+        run: |
+          echo "org.gradle.jvmargs=-Xmx3072m -XX:MaxMetaspaceSize=1024m -Dfile.encoding=UTF-8" >> gradle.properties
+          echo "org.gradle.daemon=false" >> gradle.properties
+          echo "org.gradle.parallel=true" >> gradle.properties
+          echo "android.useAndroidX=true" >> gradle.properties
+          echo "android.enableJetifier=true" >> gradle.properties
+          chmod +x gradlew
+          ./gradlew clean
+
+      - name: Build Debug APK via Gradle
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --info --stacktrace --no-daemon
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: game-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30

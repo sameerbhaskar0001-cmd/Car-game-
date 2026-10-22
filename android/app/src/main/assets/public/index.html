@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>The Race: Car Driving 3D</title>
+    <meta name="description" content="High-octane 3D arcade drift racing game with 360 showroom turntable, IceMaan 3-Body Kit customization, and responsive landscape controls." />
+    <meta property="og:title" content="The Race: Car Driving 3D" />
+    <meta property="og:description" content="High-octane 3D arcade drift racing game with 360 showroom turntable, IceMaan 3-Body Kit customization, and responsive landscape controls." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&family=Orbitron:ital,wght@0,600;0,700;0,800;0,900;1,700;1,800;1,900&family=Press+Start+2P&display=swap"
+      rel="stylesheet"
+    />
+    <script type="module" crossorigin src="/assets/index-UnGNynly.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BxNqPUDx.css">
+  </head>
+  <body>
+    <!-- 3D WebGL Canvas Mount -->
+    <div id="canvas-container"></div>
+
+    <!-- Helmet Visor Overlay (Visible in Camera 2: Helmet Visor POV) -->
+    <div id="helmet-visor-overlay" class="hidden">
+      <div class="visor-vignette"></div>
+    </div>
+
+    <!-- Subtle Corner Vignette Behind HUD Elements -->
+    <div id="hud-corner-vignette"></div>
+
+    <!-- React Multi-Screen Architecture Mount (SPLASH, MENU, GARAGE, RACE, GAMEOVER) -->
+    <div id="root"></div>
+
+    <!-- Legacy DOM hooks kept hidden so existing Three.js engine DOM queries never throw -->
+    <div id="hud-root" style="display: none;" aria-hidden="true">
+      <div id="hud-brand-logo"></div>
+      <div id="hud-lap-widget">
+        <div id="hud-lap-header"><span id="hud-lap-curr">1</span></div>
+        <div id="hud-lap-timer">
+          <span id="lap-d0">0</span><span id="lap-d1">0</span>
+          <span id="lap-d2">0</span><span id="lap-d3">0</span>
+          <span id="lap-d4">0</span><span id="lap-d5">0</span>
+        </div>
+        <div id="hud-lap-split" class="hidden"></div>
+      </div>
+      <button id="btn-mute-sound" type="button">
+        <svg id="icon-sound-on" class="hidden"></svg>
+        <svg id="icon-sound-off"></svg>
+      </button>
+      <div id="welcome-dialog-overlay" class="hidden">
+        <button id="btn-welcome-start" type="button">
+          <span id="welcome-start-text"></span>
+        </button>
+      </div>
+      <div id="hud-scale-speed">0</div>
+      <svg id="speedo-gauge-svg"><g id="speedo-ticks-group"></g></svg>
+      <div id="mobile-touch-controls" class="hidden">
+        <button id="btn-touch-left" type="button"></button>
+        <button id="btn-touch-right" type="button"></button>
+        <button id="btn-touch-accel" type="button"></button>
+        <button id="btn-touch-brake" type="button"></button>
+      </div>
+    </div>
+
+  </body>
+</html>

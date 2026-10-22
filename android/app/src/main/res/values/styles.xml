@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Pure Dark Fullscreen Immersive Theme (Zero White Borders on Cutout/Notch Screens) -->
+    <style name="AppTheme" parent="Theme.AppCompat.NoActionBar">
+        <item name="colorPrimary">#04070f</item>
+        <item name="colorPrimaryDark">#04070f</item>
+        <item name="colorAccent">#00e5ff</item>
+        <item name="android:windowBackground">#04070f</item>
+        <item name="android:colorBackground">#04070f</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:statusBarColor">#04070f</item>
+        <item name="android:navigationBarColor">#04070f</item>
+        <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="o_mr1">shortEdges</item>
+    </style>
+
+    <style name="AppTheme.NoActionBar" parent="AppTheme">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:background">@null</item>
+    </style>
+
+    <style name="AppTheme.NoActionBarLaunch" parent="AppTheme">
+        <item name="android:windowBackground">#04070f</item>
+    </style>
+</resources>
