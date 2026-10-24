@@ -259,6 +259,9 @@ async function initApp() {
   const microKart = buildMicroKart();
   microKart.kartRoot.scale.setScalar(0.56);
   scene.add(microKart.kartRoot);
+  if (microKart.driftSmokeMesh) {
+    scene.add(microKart.driftSmokeMesh);
+  }
 
   // -------------------------------------------------------------------------
   // 3A. BEACH BUGGY COMBAT RACING: 3x AI OPPONENT KARTS & MYSTERY BOXES
@@ -351,9 +354,9 @@ async function initApp() {
     showroomPlatform.add(tick);
   }
 
-  // Dedicated Showroom Key Light above the turntable
-  const showroomKeyLight = new THREE.PointLight(0xeef6ff, 0.55, 0.14, 1.2);
-  showroomKeyLight.position.set(0.006, 0.026, 0.014);
+  // Dedicated Showroom Key Light angled to highlight body contours and alloy rims
+  const showroomKeyLight = new THREE.DirectionalLight(0xfff5ea, 0.65);
+  showroomKeyLight.position.set(0.018, 0.042, 0.028);
   showroomGroup.add(showroomKeyLight);
 
   let currentAppScreen = 'SPLASH';
@@ -972,15 +975,16 @@ async function initApp() {
   const initSt = physics.state;
   const camCurrentPos = initSt.position
     .clone()
-    .addScaledVector(initSt.tangent, -0.0095)
-    .addScaledVector(initSt.normal, 0.0044);
+    .addScaledVector(initSt.tangent, -0.0112)
+    .addScaledVector(initSt.normal, 0.0068);
   const camCurrentLookAt = initSt.position
     .clone()
-    .addScaledVector(initSt.tangent, 0.0135)
-    .addScaledVector(initSt.normal, 0.0022);
+    .addScaledVector(initSt.tangent, 0.0165)
+    .addScaledVector(initSt.normal, 0.0018);
   const camCurrentUp = new THREE.Vector3(0, 1, 0);
   const camForward = initSt.tangent.clone();
   const _camTargetForward = new THREE.Vector3();
+  const _camSplineAhead = new THREE.Vector3();
 
   const visorOverlay = document.getElementById('helmet-visor-overlay');
   const hudCornerVignette = document.getElementById('hud-corner-vignette');
@@ -1359,24 +1363,37 @@ async function initApp() {
     }
 
     if (activeCameraMode === 1) {
-      // Close, Low Arcade Action Chase Cam (Beach Buggy / Kart style):
-      // Positioned right behind the rear spoiler (-9.5mm behind, 4.4mm above) with a 55°–62° dynamic FOV
-      // and tight lateral/yaw follow so the player feels 100% in the driver's seat!
-      const boostPullback = st.boostActive > 0 ? -0.0008 : 0.0;
+      // Elevated Arcade Chase Cam:
+      // Mounted higher (-11.2mm behind, +6.8mm above road normal) and looking 16.5mm ahead along the
+      // smoothed spline so the car body never blocks upcoming turns, ramps, or rival racers!
+      const boostPullback = st.boostActive > 0 ? -0.0016 : 0.0;
       _camDesiredPos
         .copy(st.position)
-        .addScaledVector(camForward, -0.0095 + boostPullback)
-        .addScaledVector(st.normal, 0.0044 + st.hopHeight * 0.35);
+        .addScaledVector(camForward, -0.0112 + boostPullback)
+        .addScaledVector(st.normal, 0.0068 + st.hopHeight * 0.42);
       if (shakeRight !== 0.0 || shakeUp !== 0.0) {
         _camDesiredPos
           .addScaledVector(st.right, shakeRight)
           .addScaledVector(st.normal, shakeUp);
       }
 
-      _camDesiredLook
-        .copy(st.position)
-        .addScaledVector(camForward, 0.0135)
-        .addScaledVector(st.normal, 0.0022 + st.hopHeight * 0.20);
+      // Sample 16.5mm ahead on the track spline for smooth corner anticipation
+      const aheadSample = physics.sampleTrackAtArcLength
+        ? physics.sampleTrackAtArcLength(st.s + 0.0165)
+        : null;
+      if (aheadSample && aheadSample.position) {
+        _camSplineAhead.copy(aheadSample.position);
+        _camDesiredLook
+          .copy(st.position)
+          .addScaledVector(camForward, 0.0165)
+          .lerp(_camSplineAhead, 0.42)
+          .addScaledVector(st.normal, 0.0018 + st.hopHeight * 0.22);
+      } else {
+        _camDesiredLook
+          .copy(st.position)
+          .addScaledVector(camForward, 0.0165)
+          .addScaledVector(st.normal, 0.0018 + st.hopHeight * 0.22);
+      }
 
       // Camera Obstacle Clearance: Pull camera forward if an upper/lower track tier passes between camera lens and car
       if (splineData && splineData.samples) {
@@ -1395,7 +1412,7 @@ async function initApp() {
             if (proj > 0.002 && proj < rayLen - 0.001) {
               const perpSq = (dx - proj * rayDir.x) ** 2 + (dy - proj * rayDir.y) ** 2 + (dz - proj * rayDir.z) ** 2;
               if (perpSq < 0.00018) { // within ~13mm radius
-                maxPull = Math.min(maxPull, Math.max(0.48, proj / rayLen));
+                maxPull = Math.min(maxPull, Math.max(0.52, proj / rayLen));
               }
             }
           }
@@ -1405,17 +1422,18 @@ async function initApp() {
         }
       }
 
-      // Dynamic FOV punch during Nitro / Turbo Boost
-      const targetArcadeFov = st.boostActive > 0 ? 61.5 : 55.0 + Math.min(3.0, Math.abs(st.speed) * 10.0);
+      // Dynamic FOV speed punch during acceleration & Turbo Boost (58° base -> 70° boost)
+      const targetArcadeFov = st.boostActive > 0 ? 70.0 : 58.0 + Math.min(9.0, Math.abs(st.speed) * 32.0);
       if (Math.abs(camera.fov - targetArcadeFov) > 0.15) {
-        camera.fov = THREE.MathUtils.lerp(camera.fov, targetArcadeFov, 1.0 - Math.exp(-dt * 10.0));
+        camera.fov = THREE.MathUtils.lerp(camera.fov, targetArcadeFov, 1.0 - Math.exp(-dt * 12.0));
         camera.updateProjectionMatrix();
       }
 
       const smoothUp = isScreenshotMode ? 1.0 : 1.0 - Math.exp(-dt * 20.0);
       _camBlendedUp
-        .set(0, 0.52, 0)
-        .addScaledVector(st.normal, 0.48)
+        .set(0, 0.58, 0)
+        .addScaledVector(st.normal, 0.42)
+        .addScaledVector(st.right, -(st.steerSmooth || 0) * 0.06)
         .normalize();
       camCurrentUp.lerp(_camBlendedUp, smoothUp).normalize();
 
@@ -3078,6 +3096,9 @@ async function initApp() {
       if (microKart.sparkPoints) {
         microKart.sparkPoints.visible = false;
       }
+      if (microKart.driftSmokeMesh) {
+        microKart.driftSmokeMesh.visible = false;
+      }
 
       // Frame the rotating car & turntable cleanly in the center of the viewport
       orbitControls.enabled = false;
@@ -3124,6 +3145,9 @@ async function initApp() {
       if (rivalsController && rivalsController.rootGroup) rivalsController.rootGroup.visible = true;
       if (microKart.sparkPoints) {
         microKart.sparkPoints.visible = true;
+      }
+      if (microKart.driftSmokeMesh) {
+        microKart.driftSmokeMesh.visible = true;
       }
 
       // 0. Step Formula 1 5-Light Start Countdown if active
@@ -3234,6 +3258,7 @@ async function initApp() {
             boostCharge: st.boostCharge ?? 1.0,
             boostActive: st.boostActive ?? 0.0,
             isDrifting: Boolean(st.isDrifting),
+            driftCharge: st.driftChargeTimer || 0.0,
             countdownStep,
             cameraMode: activeCameraMode,
             autopilot: Boolean(st.autopilot),
@@ -3243,6 +3268,9 @@ async function initApp() {
             heldPowerup,
             shieldActive: powerupManager.isShieldActive(),
             spinoutActive: powerupManager.isSpinoutActive(),
+            incomingAttack: powerupManager.isIncomingAttack
+              ? powerupManager.isIncomingAttack()
+              : false,
           };
           for (const cb of telemetryListeners) {
             cb(payload);

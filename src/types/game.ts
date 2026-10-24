@@ -164,6 +164,8 @@ export interface RaceTelemetry {
   heldPowerup: PowerupType | null;
   shieldActive: boolean;
   spinoutActive: boolean;
+  driftCharge?: number;
+  incomingAttack?: boolean;
 }
 
 export interface RaceFinishResult {

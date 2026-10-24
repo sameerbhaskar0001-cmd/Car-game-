@@ -81,7 +81,7 @@ export function createRivalRacersController(splineData, scene) {
       rimId: 'rim1',
       spoilerId: 'spoiler1',
       startGridOffset: -0.018, // Grid position #2
-      laneOffset: -0.0038,
+      laneOffset: -0.0058,
       baseSpeed: 0.184,
       personality: 'aggressive',
     },
@@ -95,7 +95,7 @@ export function createRivalRacersController(splineData, scene) {
       rimId: 'rim3',
       spoilerId: 'spoiler1',
       startGridOffset: -0.036, // Grid position #3
-      laneOffset: 0.0038,
+      laneOffset: 0.0058,
       baseSpeed: 0.18,
       personality: 'cornering',
     },
@@ -109,7 +109,7 @@ export function createRivalRacersController(splineData, scene) {
       rimId: 'rim2',
       spoilerId: 'spoiler2',
       startGridOffset: -0.054, // Grid position #4
-      laneOffset: -0.0015,
+      laneOffset: -0.0024,
       baseSpeed: 0.188,
       personality: 'speed',
     },
@@ -264,7 +264,7 @@ export function createRivalRacersController(splineData, scene) {
   const _rotMat = new THREE.Matrix4();
   const _baseQuat = new THREE.Quaternion();
   const _yawQuat = new THREE.Quaternion();
-  const _LANES = [-0.0044, 0.0, 0.0044];
+  const _LANES = [-0.0068, -0.0024, 0.0024, 0.0068];
   const _rankEntries = [
     { isPlayer: true, dist: 0, rival: null },
     { isPlayer: false, dist: 0, rival: rivals[0] },
@@ -304,7 +304,7 @@ export function createRivalRacersController(splineData, scene) {
   /**
    * Updates all 3 AI rivals with rubber-banded movement, lane changes, and collisions
    */
-  function update(dt, playerState, _powerupManager, audioSynth) {
+  function update(dt, playerState, powerupManager, audioSynth) {
     const isRacing = !playerState.countdownLocked && !playerState.raceFinished;
     const playerDist = playerState.totalDistanceTraveled ?? 0.0;
 
@@ -313,6 +313,9 @@ export function createRivalRacersController(splineData, scene) {
 
       if (rival.bumpCooldown > 0) {
         rival.bumpCooldown = Math.max(0.0, rival.bumpCooldown - dt);
+      }
+      if (rival.boostTimer > 0) {
+        rival.boostTimer = Math.max(0.0, rival.boostTimer - dt);
       }
 
       if (rival.hopHeight > 0 || rival.hopVel !== 0) {
@@ -344,6 +347,10 @@ export function createRivalRacersController(splineData, scene) {
             targetSpeed = rival.baseSpeed * 0.80; // Moderate slowdown when ahead
           }
 
+          if (rival.boostTimer > 0) {
+            targetSpeed *= 1.24;
+          }
+
           rival.speed = THREE.MathUtils.lerp(rival.speed, targetSpeed, dt * 1.8);
           rival.headingYaw = THREE.MathUtils.lerp(rival.headingYaw, 0.0, dt * 6.0);
         }
@@ -356,24 +363,33 @@ export function createRivalRacersController(splineData, scene) {
           Math.floor(Math.max(0, rival.totalDistanceTraveled) / totalLength) + 1
         );
 
-        // Dynamic Lane Selection & Overtaking
-        if (Math.random() < 0.012) {
+        // Smart Overtaking & Lateral Lane Weaving across the widened 30.8mm track
+        const aheadPlayerS = ((playerState.s - rival.s) % totalLength + totalLength) % totalLength;
+        if (aheadPlayerS > 0.005 && aheadPlayerS < 0.045 && Math.abs(playerState.lateralOffset - rival.lateralOffset) < 0.0046) {
+          // Steer to a wide open lane to overtake the player cleanly
+          rival.targetLane = playerState.lateralOffset >= 0 ? -0.0066 : 0.0066;
+        } else if (Math.random() < 0.015) {
           rival.targetLane = _LANES[Math.floor(Math.random() * _LANES.length)];
         }
         rival.lateralOffset = THREE.MathUtils.lerp(
           rival.lateralOffset,
           rival.targetLane,
-          dt * 1.8
+          dt * 2.4
         );
 
-        // AI Powerup Triggering
+        // Active AI Powerup Combat Triggering
         rival.itemCooldown -= dt;
         if (rival.heldItem && rival.itemCooldown <= 0 && rival.spinoutTimer <= 0) {
-          rival.itemCooldown = 6.5 + Math.random() * 4.5;
-          if (rival.heldItem === 'ROCKET' || rival.heldItem === 'HYPER_NITRO') {
-            rival.speed *= 1.24;
+          rival.itemCooldown = 4.8 + Math.random() * 3.5;
+          if (powerupManager && powerupManager.triggerRivalPowerup) {
+            powerupManager.triggerRivalPowerup(rival, playerState, rivals, audioSynth);
+          } else {
+            if (rival.heldItem === 'ROCKET' || rival.heldItem === 'HYPER_NITRO') {
+              rival.boostTimer = 1.6;
+              rival.speed *= 1.24;
+            }
+            rival.heldItem = null;
           }
-          rival.heldItem = null;
         }
       } else {
         rival.speed = 0.0;
@@ -394,9 +410,9 @@ export function createRivalRacersController(splineData, scene) {
       _yawQuat.setFromAxisAngle(frame.normal, rival.headingYaw);
       rival.mesh.quaternion.copy(_yawQuat.multiply(_baseQuat));
 
-      // Spin wheels (S64 FBX cloned wheels or fallback wheels)
+      // Spin wheels & update AI exhaust flames
       if (rival.s64WheelUpdater) {
-        rival.s64WheelUpdater(dt, rival.speed);
+        rival.s64WheelUpdater(dt, rival.speed, (rival.boostTimer || 0) > 0);
       } else {
         const spinDelta = (rival.speed / 0.002) * dt;
         for (let wIdx = 0; wIdx < rival.wheels.length; wIdx++) {
@@ -416,14 +432,14 @@ export function createRivalRacersController(splineData, scene) {
           const pushDir = Math.sign(latDelta) || (idx % 2 === 0 ? 1 : -1);
 
           playerState.lateralOffset = THREE.MathUtils.clamp(
-            playerState.lateralOffset + pushDir * 0.0022,
-            -0.0084,
-            0.0084
+            playerState.lateralOffset + pushDir * 0.0024,
+            -0.0116,
+            0.0116
           );
           rival.lateralOffset = THREE.MathUtils.clamp(
-            rival.lateralOffset - pushDir * 0.0022,
-            -0.0084,
-            0.0084
+            rival.lateralOffset - pushDir * 0.0024,
+            -0.0116,
+            0.0116
           );
 
           playerState.speed *= 0.94;
@@ -452,6 +468,7 @@ export function createRivalRacersController(splineData, scene) {
       rival.lapCount = 1;
       rival.spinoutTimer = 0.0;
       rival.bumpCooldown = 0.0;
+      rival.boostTimer = 0.0;
       rival.hopHeight = 0.0;
       rival.hopVel = 0.0;
       rival.heldItem = null;

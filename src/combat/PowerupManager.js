@@ -68,13 +68,13 @@ export function createPowerupManager(splineData, scene) {
   }
 
   // -------------------------------------------------------------------------
-  // 1. FLOATING 3D MYSTERY ITEM BOXES (4 TRACK LOCATIONS x 2 LANES)
+  // 1. FLOATING 3D MYSTERY ITEM BOXES (4 TRACK LOCATIONS x 3 WIDENED LANES)
   // -------------------------------------------------------------------------
   const boxSectorsS = [
-    totalLength * 0.12, // After start/finish straight
-    totalLength * 0.38, // Before Cat Helix
-    totalLength * 0.62, // Valley after Lamp Corkscrew
-    totalLength * 0.86, // Razer Mousepad entry
+    totalLength * 0.14, // West Sweeper exit into Back Straightaway
+    totalLength * 0.36, // Mid Back Straightaway
+    totalLength * 0.64, // East Carousel exit into Front Straightaway
+    totalLength * 0.88, // Front Straightaway approaching Start/Finish
   ];
 
   const boxGeo = new THREE.BoxGeometry(0.0052, 0.0052, 0.0052);
@@ -98,7 +98,7 @@ export function createPowerupManager(splineData, scene) {
   const mysteryBoxes = [];
 
   boxSectorsS.forEach((baseS, secIdx) => {
-    [-0.0040, 0.0040].forEach((latOffset, sideIdx) => {
+    [-0.0062, 0.0, 0.0062].forEach((latOffset, sideIdx) => {
       const frame = samplePoint(baseS);
       const boxMesh = new THREE.Mesh(boxGeo, boxMat);
       const coreMesh = new THREE.Mesh(coreGeo, coreMat);
@@ -127,6 +127,132 @@ export function createPowerupManager(splineData, scene) {
   });
 
   // -------------------------------------------------------------------------
+  // 1B. 6 NEON CHEVRON TRACK BOOST PADS & 3 ARCADE JUMP RAMPS
+  //     Positioned directly along the 2 Long High-Speed Straightaways
+  //     (Back Straightaway: sFrac 0.22..0.46, Front Straightaway: sFrac 0.72..0.96)
+  // -------------------------------------------------------------------------
+  const boostPadConfigs = [
+    { sFrac: 0.22, latOffset: -0.0045, color: 0x00f0ff }, // Back Straight entry boost
+    { sFrac: 0.33, latOffset: 0.0045, color: 0xf59e0b },  // Back Straight mid boost
+    { sFrac: 0.44, latOffset: -0.0038, color: 0x00f0ff }, // Back Straight high-speed boost
+    { sFrac: 0.72, latOffset: 0.0045, color: 0xf59e0b },  // Front Straight entry boost
+    { sFrac: 0.83, latOffset: -0.0045, color: 0x00f0ff }, // Front Straight mid boost
+    { sFrac: 0.94, latOffset: 0.0, color: 0xf59e0b },     // Front Straight finish sprint boost
+  ];
+
+  const padBaseGeo = new THREE.BoxGeometry(0.0068, 0.00035, 0.018);
+  const padBaseMat = new THREE.MeshStandardMaterial({
+    color: 0x090d16,
+    roughness: 0.3,
+    metalness: 0.8,
+  });
+  const padChevronGeo = new THREE.BoxGeometry(0.0028, 0.00048, 0.0009);
+
+  const boostPads = boostPadConfigs.map((cfg, idx) => {
+    const padS = cfg.sFrac * totalLength;
+    const frame = samplePoint(padS);
+    const padGroup = new THREE.Group();
+
+    const baseMesh = new THREE.Mesh(padBaseGeo, padBaseMat);
+    padGroup.add(baseMesh);
+
+    const chevMat = new THREE.MeshBasicMaterial({
+      color: cfg.color,
+      toneMapped: false,
+    });
+
+    // 3 V-shaped neon chevrons pointing along +Z (forward track tangent)
+    const chevronPairs = [];
+    for (let c = 0; c < 3; c++) {
+      const zOff = -0.0052 + c * 0.0052;
+      const leftWing = new THREE.Mesh(padChevronGeo, chevMat.clone());
+      leftWing.position.set(-0.0012, 0.00018, zOff);
+      leftWing.rotation.y = -0.52;
+      const rightWing = new THREE.Mesh(padChevronGeo, leftWing.material);
+      rightWing.position.set(0.0012, 0.00018, zOff);
+      rightWing.rotation.y = 0.52;
+      padGroup.add(leftWing, rightWing);
+      chevronPairs.push(leftWing.material);
+    }
+
+    padGroup.position
+      .copy(frame.pos)
+      .addScaledVector(frame.right, cfg.latOffset)
+      .addScaledVector(frame.normal, 0.00032);
+
+    const leftVec = new THREE.Vector3().crossVectors(frame.normal, frame.tangent).normalize();
+    const rotMat = new THREE.Matrix4().makeBasis(leftVec, frame.normal, frame.tangent);
+    padGroup.quaternion.setFromRotationMatrix(rotMat);
+    rootGroup.add(padGroup);
+
+    return {
+      id: `boost_pad_${idx}`,
+      s: padS,
+      latOffset: cfg.latOffset,
+      baseColor: new THREE.Color(cfg.color),
+      chevronMats: chevronPairs,
+      playerCooldown: 0.0,
+    };
+  });
+
+  // 3 Low-Profile Neon Arcade Jump Ramps positioned on the long High-Speed Straightaways
+  const jumpRampConfigs = [
+    { sFrac: 0.28, latOffset: 0.0 },      // Back Straightaway center jump ramp
+    { sFrac: 0.40, latOffset: 0.0042 },   // Back Straightaway right-lane jump ramp
+    { sFrac: 0.78, latOffset: 0.0 },      // Front Straightaway center jump ramp
+  ];
+
+  const rampDeckGeo = new THREE.BoxGeometry(0.0074, 0.0006, 0.015);
+  const rampDeckMat = new THREE.MeshStandardMaterial({
+    color: 0x161f33,
+    roughness: 0.25,
+    metalness: 0.75,
+  });
+  const rampRailGeo = new THREE.BoxGeometry(0.0006, 0.0011, 0.0152);
+  const rampRailMat = new THREE.MeshBasicMaterial({
+    color: 0xff2a85,
+    toneMapped: false,
+  });
+
+  const jumpRamps = jumpRampConfigs.map((cfg, idx) => {
+    const rampS = cfg.sFrac * totalLength;
+    const frame = samplePoint(rampS);
+    const rampGroup = new THREE.Group();
+
+    const deckGroup = new THREE.Group();
+    // Tilt upward (+0.14 rad around X) so forward +Z rises to launch the car airborne!
+    deckGroup.rotation.x = -0.14;
+    deckGroup.position.y = 0.0009;
+
+    const deckMesh = new THREE.Mesh(rampDeckGeo, rampDeckMat);
+    deckGroup.add(deckMesh);
+
+    for (const rx of [-0.0036, 0.0036]) {
+      const rail = new THREE.Mesh(rampRailGeo, rampRailMat);
+      rail.position.x = rx;
+      deckGroup.add(rail);
+    }
+    rampGroup.add(deckGroup);
+
+    rampGroup.position
+      .copy(frame.pos)
+      .addScaledVector(frame.right, cfg.latOffset)
+      .addScaledVector(frame.normal, 0.0002);
+
+    const leftVec = new THREE.Vector3().crossVectors(frame.normal, frame.tangent).normalize();
+    const rotMat = new THREE.Matrix4().makeBasis(leftVec, frame.normal, frame.tangent);
+    rampGroup.quaternion.setFromRotationMatrix(rotMat);
+    rootGroup.add(rampGroup);
+
+    return {
+      id: `jump_ramp_${idx}`,
+      s: rampS,
+      latOffset: cfg.latOffset,
+      playerCooldown: 0.0,
+    };
+  });
+
+  // -------------------------------------------------------------------------
   // 2. SHARED GEOMETRIES & MATERIALS FOR PROJECTILES & HAZARDS
   // -------------------------------------------------------------------------
   // Active Homing Rockets
@@ -136,24 +262,31 @@ export function createPowerupManager(splineData, scene) {
   const rocketMat = new THREE.MeshStandardMaterial({
     color: 0xff1e26,
     emissive: new THREE.Color(0xff5500),
-    emissiveIntensity: 1.1,
+    emissiveIntensity: 1.4,
     roughness: 0.2,
     metalness: 0.7,
   });
 
-  // Active Oil Slicks on Track
+  // Active Oil Slicks on Track (with Neon Hazard Ring so players can spot & dodge!)
   const activeOilSlicks = [];
   const oilGeo = new THREE.CircleGeometry(0.0058, 16);
   oilGeo.rotateX(-Math.PI / 2);
   const oilMat = new THREE.MeshStandardMaterial({
     color: 0x060810,
-    emissive: new THREE.Color(0x1a1025),
-    emissiveIntensity: 0.35,
-    roughness: 0.08,
+    emissive: new THREE.Color(0x3b0764),
+    emissiveIntensity: 0.65,
+    roughness: 0.06,
     metalness: 0.92,
     polygonOffset: true,
     polygonOffsetFactor: -4,
     polygonOffsetUnits: -4,
+  });
+  const oilRingGeo = new THREE.RingGeometry(0.0052, 0.0064, 20);
+  oilRingGeo.rotateX(-Math.PI / 2);
+  const oilRingMat = new THREE.MeshBasicMaterial({
+    color: 0xa855f7,
+    side: THREE.DoubleSide,
+    toneMapped: false,
   });
 
   // Active EMP Shockwaves
@@ -240,20 +373,25 @@ export function createPowerupManager(splineData, scene) {
   function spawnOilSlick(sVal, latOffset, ownerId) {
     const behindS = ((sVal - 0.018) % totalLength + totalLength) % totalLength;
     const frame = samplePoint(behindS);
+    const oilGroup = new THREE.Group();
     const oilMesh = new THREE.Mesh(oilGeo, oilMat);
-    oilMesh.position
+    const ringMesh = new THREE.Mesh(oilRingGeo, oilRingMat);
+    ringMesh.position.y = 0.0001;
+    oilGroup.add(oilMesh, ringMesh);
+
+    oilGroup.position
       .copy(frame.pos)
       .addScaledVector(frame.right, latOffset)
       .addScaledVector(frame.normal, 0.0005);
-    oilMesh.quaternion.setFromUnitVectors(_upZ, frame.tangent);
-    rootGroup.add(oilMesh);
+    oilGroup.quaternion.setFromUnitVectors(_upZ, frame.tangent);
+    rootGroup.add(oilGroup);
 
     activeOilSlicks.push({
       s: behindS,
       latOffset,
       ownerId,
       ownerGraceTimer: 3.0,
-      mesh: oilMesh,
+      mesh: oilGroup,
       timer: 18.0,
     });
   }
@@ -281,8 +419,8 @@ export function createPowerupManager(splineData, scene) {
       ownerId,
       mesh: rocketMesh,
       targetRacer,
-      speed: 0.46,
-      lifeTimer: 4.5,
+      speed: 0.44,
+      lifeTimer: 4.2,
     });
   }
 
@@ -310,6 +448,68 @@ export function createPowerupManager(splineData, scene) {
       radius: 0.004,
       timer: 0.55,
     });
+  }
+
+  /**
+   * AI Rival triggers its held powerup (Rockets, Oil Slicks, EMPs, or Hyper Nitro)
+   */
+  function triggerRivalPowerup(rival, playerState, rivalsList, audioSynth) {
+    if (!rival || !rival.heldItem || rival.spinoutTimer > 0) return false;
+    const item = rival.heldItem;
+    rival.heldItem = null;
+
+    if (item === 'HYPER_NITRO') {
+      rival.boostTimer = 2.0;
+      rival.speed = Math.max(rival.speed, rival.baseSpeed * 1.28);
+      return true;
+    }
+
+    if (item === 'OIL_SLICK') {
+      spawnOilSlick(rival.s, rival.lateralOffset, rival.id);
+      return true;
+    }
+
+    if (item === 'ROCKET') {
+      // Find nearest target ahead (either player or another AI rival)
+      let nearestTarget = null;
+      let minAheadDist = Infinity;
+
+      const playerAheadDist = ((playerState.s - rival.s) % totalLength + totalLength) % totalLength;
+      if (playerAheadDist > 0.012 && playerAheadDist < 0.85) {
+        minAheadDist = playerAheadDist;
+        nearestTarget = {
+          isPlayer: true,
+          get lateralOffset() {
+            return playerState.lateralOffset;
+          },
+        };
+      }
+
+      for (let i = 0; i < rivalsList.length; i++) {
+        const other = rivalsList[i];
+        if (other.id === rival.id) continue;
+        const aheadDist = ((other.s - rival.s) % totalLength + totalLength) % totalLength;
+        if (aheadDist > 0.012 && aheadDist < minAheadDist) {
+          minAheadDist = aheadDist;
+          nearestTarget = other;
+        }
+      }
+
+      fireRocket(rival.s, rival.lateralOffset, nearestTarget, rival.id, audioSynth);
+      return true;
+    }
+
+    if (item === 'EMP') {
+      triggerEmp(rival.position, rival.id, audioSynth);
+      const dPlayer = rival.position.distanceTo(playerState.position);
+      if (dPlayer < 0.09 && playerShieldTimer <= 0) {
+        playerSpinoutTimer = 0.75;
+        playerState.speed *= 0.55;
+      }
+      return true;
+    }
+
+    return false;
   }
 
   /**
@@ -394,12 +594,95 @@ export function createPowerupManager(splineData, scene) {
   }
 
   /**
-   * Main 60FPS update step for Mystery Boxes, Rockets, Oil, Shields & EMPs
+   * Main 60FPS update step for Mystery Boxes, Boost Pads, Jump Ramps, Rockets, Oil, Shields & EMPs
    */
   function update(dt, playerState, rivalsList, audioSynth, currentRank = 1) {
     const tSec = performance.now() * 0.001;
     if (playerPickupCooldown > 0) {
       playerPickupCooldown = Math.max(0.0, playerPickupCooldown - dt);
+    }
+
+    // 0A. Update 6 Neon Chevron Track Boost Pads
+    for (let pIdx = 0; pIdx < boostPads.length; pIdx++) {
+      const pad = boostPads[pIdx];
+      if (pad.playerCooldown > 0) {
+        pad.playerCooldown = Math.max(0.0, pad.playerCooldown - dt);
+      }
+
+      // Sequential chevron chase pulse
+      const activeWave = Math.floor((tSec * 9.0 + pIdx) % 3);
+      for (let c = 0; c < pad.chevronMats.length; c++) {
+        const mat = pad.chevronMats[c];
+        mat.color.copy(pad.baseColor).multiplyScalar(c === activeWave ? 1.5 : 0.65);
+      }
+
+      // Player hits Boost Pad
+      if (pad.playerCooldown <= 0 && !playerState.countdownLocked && playerState.speed > 0.02) {
+        const dS = Math.abs(
+          ((playerState.s - pad.s + totalLength * 0.5) % totalLength) - totalLength * 0.5
+        );
+        const dLat = Math.abs(playerState.lateralOffset - pad.latOffset);
+        if (dS < 0.015 && dLat < 0.0048) {
+          pad.playerCooldown = 1.5;
+          playerState.boostActive = Math.max(playerState.boostActive || 0, 1.45);
+          playerState.boostCharge = Math.min(1.0, (playerState.boostCharge || 0) + 0.35);
+          playerState.speed = Math.max(
+            playerState.speed,
+            0.275 * (playerState.topSpeedMultiplier || 1.0)
+          );
+          if (audioSynth && audioSynth.playNitroBoost) {
+            audioSynth.playNitroBoost();
+          }
+        }
+      }
+
+      // AI Rivals hit Boost Pad
+      for (let rIdx = 0; rIdx < rivalsList.length; rIdx++) {
+        const rival = rivalsList[rIdx];
+        const dS = Math.abs(
+          ((rival.s - pad.s + totalLength * 0.5) % totalLength) - totalLength * 0.5
+        );
+        const dLat = Math.abs(rival.lateralOffset - pad.latOffset);
+        if (dS < 0.014 && dLat < 0.0045) {
+          rival.boostTimer = 1.25;
+          rival.speed = Math.max(rival.speed, rival.baseSpeed * 1.24);
+        }
+      }
+    }
+
+    // 0B. Update 3 Arcade Jump Ramps
+    for (let jIdx = 0; jIdx < jumpRamps.length; jIdx++) {
+      const ramp = jumpRamps[jIdx];
+      if (ramp.playerCooldown > 0) {
+        ramp.playerCooldown = Math.max(0.0, ramp.playerCooldown - dt);
+      }
+
+      if (ramp.playerCooldown <= 0 && !playerState.countdownLocked && playerState.speed > 0.05) {
+        const dS = Math.abs(
+          ((playerState.s - ramp.s + totalLength * 0.5) % totalLength) - totalLength * 0.5
+        );
+        const dLat = Math.abs(playerState.lateralOffset - ramp.latOffset);
+        if (dS < 0.012 && dLat < 0.0048 && (playerState.hopHeight || 0) < 0.001) {
+          ramp.playerCooldown = 1.5;
+          playerState.hopVel = 0.042;
+          playerState.boostActive = Math.max(playerState.boostActive || 0, 1.05);
+          if (audioSynth && audioSynth.playNitroBoost) {
+            audioSynth.playNitroBoost();
+          }
+        }
+      }
+
+      for (let rIdx = 0; rIdx < rivalsList.length; rIdx++) {
+        const rival = rivalsList[rIdx];
+        const dS = Math.abs(
+          ((rival.s - ramp.s + totalLength * 0.5) % totalLength) - totalLength * 0.5
+        );
+        const dLat = Math.abs(rival.lateralOffset - ramp.latOffset);
+        if (dS < 0.012 && dLat < 0.0046 && (rival.hopHeight || 0) < 0.001) {
+          rival.hopVel = 0.038;
+          rival.boostTimer = 1.0;
+        }
+      }
     }
 
     // 1. Update Mystery Item Boxes
@@ -637,12 +920,29 @@ export function createPowerupManager(splineData, scene) {
     }
   }
 
+  function isIncomingAttack() {
+    for (let i = 0; i < activeRockets.length; i++) {
+      const r = activeRockets[i];
+      if (r.ownerId !== 'player' && r.targetRacer && r.targetRacer.isPlayer) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   function reset() {
     playerHeldPowerup = null;
     playerPickupCooldown = 0.0;
     playerShieldTimer = 0.0;
     playerSpinoutTimer = 0.0;
     playerShieldMesh.visible = false;
+
+    for (let i = 0; i < boostPads.length; i++) {
+      boostPads[i].playerCooldown = 0.0;
+    }
+    for (let i = 0; i < jumpRamps.length; i++) {
+      jumpRamps[i].playerCooldown = 0.0;
+    }
 
     for (let i = 0; i < activeRockets.length; i++) {
       rootGroup.remove(activeRockets[i].mesh);
@@ -677,9 +977,11 @@ export function createPowerupManager(splineData, scene) {
     rootGroup,
     update,
     triggerPlayerPowerup,
+    triggerRivalPowerup,
     getHeldPowerup: () => playerHeldPowerup,
     isShieldActive: () => playerShieldTimer > 0,
     isSpinoutActive: () => playerSpinoutTimer > 0,
+    isIncomingAttack,
     reset,
   };
 }

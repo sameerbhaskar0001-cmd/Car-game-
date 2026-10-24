@@ -293,10 +293,10 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
   }
 
   function computeRailZone(latOffset) {
-    if (latOffset <= -0.0089) return 'L-RAIL';
-    if (latOffset >= 0.0089) return 'R-RAIL';
-    if (latOffset <= -0.0078) return 'L-CURB';
-    if (latOffset >= 0.0078) return 'R-CURB';
+    if (latOffset <= -0.0122) return 'L-RAIL';
+    if (latOffset >= 0.0122) return 'R-RAIL';
+    if (latOffset <= -0.0108) return 'L-CURB';
+    if (latOffset >= 0.0108) return 'R-CURB';
     return 'TRACK';
   }
 
@@ -311,8 +311,8 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
     state.slope = newFrame.slope;
     state.curvature = Math.abs(newFrame.signedCurvature);
     state.signedCurvature = newFrame.signedCurvature;
-    state.distToLeftRailMm = (state.lateralOffset - -0.0090) * 1000;
-    state.distToRightRailMm = (0.0090 - state.lateralOffset) * 1000;
+    state.distToLeftRailMm = (state.lateralOffset - -0.0124) * 1000;
+    state.distToRightRailMm = (0.0124 - state.lateralOffset) * 1000;
     state.railZone = computeRailZone(state.lateralOffset);
     state.activeKeysStr = computeActiveKeysStr();
     state.tangent.copy(newFrame.tangent);
@@ -691,18 +691,21 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
       state.speed += (autoAccel + gravitySlopeAccel) * clampedDt;
       state.speed = THREE.MathUtils.clamp(state.speed, 0.0, boostMaxSpeed);
     } else {
-      // Manual mode: NO scripted Cat Helix or Lamp Corkscrew speed caps — player controls their own cornering speed!
+      // Manual mode: Progressive 3-Stage Acceleration & Drivetrain Curve
+      // 1) Low speed (0-50 km/h): smooth, non-twitchy precision launch control
+      // 2) Mid-to-high speed (50-85 km/h): strong, progressive straightaway pull
+      // 3) Nitro Boost: explosive high-speed surge down the long straightaways
       const dynamicManualTopFactor = THREE.MathUtils.clamp(
         1.0 + slopeSpeedDelta * 0.45,
         0.88,
         1.10
       );
       const currentManualMaxSpeed =
-        (state.boostActive > 0 ? boostMaxSpeed : manualMaxSpeed) * dynamicManualTopFactor;
+        (state.boostActive > 0 ? boostMaxSpeed * 1.05 : manualMaxSpeed) * dynamicManualTopFactor;
       if (throttle === 0 && state.boostActive <= 0.0) {
         // Natural coasting friction when neither Accelerate nor Brake/Reverse is held:
         // Gradually slow the car to a smooth stop (never auto-accelerates!)
-        const coastDecel = (0.38 + Math.abs(state.speed) * 1.15) * clampedDt;
+        const coastDecel = (0.34 + Math.abs(state.speed) * 1.05) * clampedDt;
         if (Math.abs(state.speed) <= coastDecel) {
           state.speed = 0.0;
         } else {
@@ -716,16 +719,24 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
         let engineAccel = 0.0;
         if (throttle > 0 || state.boostActive > 0.0) {
           const effThrottle = Math.max(throttle, state.boostActive > 0 ? 1.0 : 0.0);
-          let baseEngine = (state.boostActive > 0 ? 0.36 : manualAccel) * effThrottle;
-          // Boost low-speed torque so car easily climbs steep BoYata/Corkscrew hills without stalling at 0 KM/H
-          if (state.speed >= 0 && state.speed < 0.12) {
-            const lowSpeedTorqueBoost = Math.max(1.0, 1.8 - (state.speed / 0.12) * 0.8);
-            baseEngine *= lowSpeedTorqueBoost;
-            // Ensure net acceleration on steep hills is always strongly positive when holding throttle
-            if (frame.slope > 0) {
-              baseEngine = Math.max(baseEngine, Math.abs(gravitySlopeAccel) + 0.22);
-            }
+          const normSpeed = THREE.MathUtils.clamp(Math.abs(state.speed) / manualMaxSpeed, 0.0, 1.2);
+
+          // Progressive drivetrain torque curve:
+          // - Smooth controlled ramp from 0..50 km/h (normSpeed 0.0 -> 0.45) to eliminate low-speed twitchiness
+          // - Strong midrange torque peak (normSpeed 0.45 -> 0.88) for building high-speed momentum
+          // - Explosive 2.1x surge when Nitro / Boost Pad is triggered
+          const lowToMidRamp = THREE.MathUtils.smoothstep(normSpeed, 0.0, 0.48);
+          const highEndTaper = THREE.MathUtils.smoothstep(normSpeed, 0.72, 1.05);
+          const progressiveCurveFactor = 0.78 + 0.54 * lowToMidRamp - 0.20 * highEndTaper;
+
+          let baseEngine =
+            (state.boostActive > 0 ? 0.42 : manualAccel * progressiveCurveFactor) * effThrottle;
+
+          // Ensure positive hill-climbing torque on inclines so the car never stalls
+          if (frame.slope > 0 && state.speed < 0.10) {
+            baseEngine = Math.max(baseEngine, Math.abs(gravitySlopeAccel) + 0.20);
           }
+
           engineAccel = state.speed < -0.008 ? 1.35 * effThrottle : baseEngine;
           state.speed += (engineAccel + gravitySlopeAccel) * clampedDt;
           if (state.speed > currentManualMaxSpeed) {
@@ -761,71 +772,79 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
     const apexFactor = isAiCruise
       ? 1.0
       : THREE.MathUtils.clamp(
-          1.0 - frame.signedCurvature * state.lateralOffset * 16.0,
-          0.88,
-          1.14
+          1.0 - frame.signedCurvature * state.lateralOffset * 11.5,
+          0.90,
+          1.12
         );
 
-    // 1. Damped Curvature-Matched Heading Model (Zero Ping-Pong, Active Steering Required in Corners)
+    // 1. Progressive Speed-Damped Steering & Curvature-Matched Heading Model
     if (!isAiCruise) {
       const prevYaw = state.headingYaw;
+      const speedRatio = THREE.MathUtils.clamp(Math.abs(state.speed) / manualMaxSpeed, 0.0, 1.25);
+      const isOnStraightaway = Math.abs(frame.signedCurvature) < 0.16;
+
+      // Smooth out high-speed steering sensitivity so the car doesn't snap abruptly on straightaways
+      const highSpeedFactor = THREE.MathUtils.smoothstep(speedRatio, 0.52, 1.05);
+      const steerInputRate =
+        turnRight !== 0
+          ? THREE.MathUtils.lerp(13.5, isOnStraightaway ? 8.2 : 10.5, highSpeedFactor)
+          : 18.5;
+
       state.steerSmooth = THREE.MathUtils.lerp(
         state.steerSmooth,
         turnRight,
-        1.0 - Math.exp(-(turnRight !== 0 ? 16.0 : 20.0) * clampedDt)
+        1.0 - Math.exp(-steerInputRate * clampedDt)
       );
 
-      // Speed factor so the kart doesn't spin in place at 35° while accelerating from low speed
-      const speedRatio = THREE.MathUtils.clamp(Math.abs(state.speed) / manualMaxSpeed, 0.0, 1.15);
-      const steerSpeedFactor = THREE.MathUtils.clamp(Math.abs(state.speed) / 0.11, 0.25, 1.0);
+      const steerSpeedFactor = THREE.MathUtils.clamp(Math.abs(state.speed) / 0.10, 0.25, 1.0);
+      const highSpeedSteerDamp = THREE.MathUtils.lerp(
+        1.0,
+        isOnStraightaway ? 0.58 : 0.78,
+        highSpeedFactor
+      );
 
-      // Natural outward drift angle caused by track curvature when NOT steering (W only):
-      // Inward track banking (frame.bankDeg) naturally tilts the car into the turn and counters
-      // centrifugal understeer so high-speed corners flow cleanly without slamming into guardrails.
+      // Inward track banking naturally tilts the car into sweeping corners
       const bankAssistFactor = THREE.MathUtils.clamp(
-        1.0 - Math.abs(frame.bankDeg) / 28.0,
-        0.48,
-        0.85
+        1.0 - Math.abs(frame.bankDeg) / 26.0,
+        0.42,
+        0.82
       );
       const roadDriftYaw =
-        Math.tanh(frame.signedCurvature * 0.46) *
-        0.22 *
+        Math.tanh(frame.signedCurvature * 0.42) *
+        0.19 *
         bankAssistFactor *
         Math.max(0.25, speedRatio);
 
       // Check if player is steering WITH the corner (D in right turn, A in left turn)
-      const isSteeringWithCorner = turnRight !== 0 && turnRight * frame.signedCurvature > 0.20;
-      const isWrongWaySteer = turnRight !== 0 && turnRight * frame.signedCurvature < -0.20;
+      const isSteeringWithCorner = turnRight !== 0 && turnRight * frame.signedCurvature > 0.18;
+      const isWrongWaySteer = turnRight !== 0 && turnRight * frame.signedCurvature < -0.18;
 
-      // Inside-apex racing-line stabilizer: when steering WITH the corner (e.g. holding D in a right turn),
-      // guide the kart smoothly onto the 6.0mm inside apex line (just inside the 7.8mm FIA curb)
-      // so holding D through a sweeping right turn hugs the clean apex instead of crashing into the inside rail!
+      // Inside-apex racing-line stabilizer for the widened 30.8mm roadbed (apex line at 8.2mm, curbs at 10.8mm)
       const insideProgress = turnRight * state.lateralOffset;
-      const apexTargetOffset = 0.0058; // 5.8mm ideal inside racing line (curb starts at 7.8mm)
+      const apexTargetOffset = 0.0082;
 
       let targetYaw = 0.0;
       if (turnRight === 0) {
-        // Holding W only (no steering): banked track reduces outward understeer
         targetYaw = roadDriftYaw;
       } else if (isSteeringWithCorner) {
-        // Steering into the corner cancels outward road drift and carves onto the 5.8mm inside apex line
         const distToApex = apexTargetOffset - insideProgress;
-        const apexSteerFactor = THREE.MathUtils.clamp(distToApex / 0.0045, -0.45, 1.0);
-        const inwardCarveYaw = -state.steerSmooth * 0.23 * steerSpeedFactor * apexSteerFactor;
+        const apexSteerFactor = THREE.MathUtils.clamp(distToApex / 0.0062, -0.45, 1.0);
+        const inwardCarveYaw =
+          -state.steerSmooth * 0.21 * steerSpeedFactor * highSpeedSteerDamp * apexSteerFactor;
         targetYaw = roadDriftYaw * (1.0 - Math.abs(state.steerSmooth)) + inwardCarveYaw;
       } else if (isWrongWaySteer) {
-        // Steering toward the outside wall in a corner adds to outward drift
-        targetYaw = roadDriftYaw - state.steerSmooth * 0.20 * steerSpeedFactor;
+        targetYaw = roadDriftYaw - state.steerSmooth * 0.18 * steerSpeedFactor * highSpeedSteerDamp;
       } else {
-        // Straightaway or gentle transition steering (~10.5° max lane-change angle)
-        targetYaw = roadDriftYaw - state.steerSmooth * 0.195 * steerSpeedFactor;
+        // High-speed straightaway lane-change steering (smooth, non-snappy)
+        targetYaw = roadDriftYaw - state.steerSmooth * 0.165 * steerSpeedFactor * highSpeedSteerDamp;
       }
 
-      targetYaw = THREE.MathUtils.clamp(targetYaw, -0.34, 0.34);
+      targetYaw = THREE.MathUtils.clamp(targetYaw, -0.32, 0.32);
 
-      // Fast yaw response when steering or releasing keys so the kart feels tightly connected to player input
       const handlingBoost = state.handlingMultiplier || 1.0;
-      const yawResponseRate = (turnRight !== 0 ? 15.5 : 13.0) * handlingBoost;
+      const yawResponseRate =
+        (turnRight !== 0 ? THREE.MathUtils.lerp(14.0, 10.2, highSpeedFactor) : 13.5) *
+        handlingBoost;
       const nextYaw = THREE.MathUtils.lerp(
         prevYaw,
         targetYaw,
@@ -841,7 +860,7 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
       const roadStepRad = roadOnlyYaw - prevYaw;
       const steerStepRad = nextYaw - roadOnlyYaw;
 
-      state.headingYaw = THREE.MathUtils.clamp(nextYaw, -0.42, 0.42);
+      state.headingYaw = THREE.MathUtils.clamp(nextYaw, -0.38, 0.38);
       state.lastRoadTurnDeg = (roadStepRad * 180) / Math.PI;
       state.lastSteerTurnDeg = (steerStepRad * 180) / Math.PI;
     } else {
@@ -858,23 +877,30 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
     );
 
     if (!isAiCruise) {
-      // Automatic Cornering Slip & Sparks when steering hard into a curve at speed
+      // Responsive Arcade Cornering Drift, Tire Smoke & Drift-Exit Mini-Turbo Surge
       if (
-        Math.abs(state.steerInput) > 0.35 &&
-        Math.abs(frame.signedCurvature) > 0.30 &&
-        state.speed > 0.11
+        Math.abs(state.steerInput) > 0.25 &&
+        (Math.abs(frame.signedCurvature) > 0.20 || Math.abs(state.steerInput) > 0.58) &&
+        state.speed > 0.085
       ) {
         state.isDrifting = true;
         state.driftDir = Math.sign(turnRight) || Math.sign(state.steerInput) || 1;
         state.driftAngle = THREE.MathUtils.lerp(
           state.driftAngle,
-          -state.driftDir * 0.18,
-          1.0 - Math.exp(-10.0 * clampedDt)
+          -state.driftDir * 0.20,
+          1.0 - Math.exp(-11.0 * clampedDt)
         );
-        state.boostCharge = Math.min(1.0, state.boostCharge + clampedDt * 0.32);
+        state.driftChargeTimer = Math.min(1.0, (state.driftChargeTimer || 0.0) + clampedDt * 1.15);
+        state.boostCharge = Math.min(1.0, state.boostCharge + clampedDt * 0.48);
       } else {
+        if (state.isDrifting && (state.driftChargeTimer || 0.0) >= 0.38 && state.speed > 0.08) {
+          // Unleash Drift-Exit Mini-Turbo Surge!
+          state.boostActive = Math.max(state.boostActive, 0.95);
+          state.speed = Math.max(state.speed, manualMaxSpeed * 1.16);
+        }
         state.isDrifting = false;
         state.driftDir = 0;
+        state.driftChargeTimer = Math.max(0.0, (state.driftChargeTimer || 0.0) - clampedDt * 2.5);
         state.driftAngle = THREE.MathUtils.lerp(
           state.driftAngle,
           0.0,
@@ -886,18 +912,18 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
       if (
         state.railImpactActive ||
         state.speed <= 0.08 ||
-        Math.abs(state.lateralOffset) >= 0.0089
+        Math.abs(state.lateralOffset) >= 0.0122
       ) {
         state.cornerCleanTimer = 0.0;
       } else if (
-        Math.abs(frame.signedCurvature) > 0.35 &&
+        Math.abs(frame.signedCurvature) > 0.25 &&
         state.speed > 0.11 &&
-        Math.abs(state.lateralOffset) < 0.0085 &&
+        Math.abs(state.lateralOffset) < 0.0118 &&
         !state.railImpactActive
       ) {
         state.cornerCleanTimer += clampedDt;
-      } else if (Math.abs(frame.signedCurvature) < 0.26) {
-        if (state.cornerCleanTimer >= 0.42 && throttle > 0) {
+      } else if (Math.abs(frame.signedCurvature) < 0.20) {
+        if (state.cornerCleanTimer >= 0.38 && throttle > 0) {
           state.boostActive = Math.max(state.boostActive, 0.65);
           state.cornerCleanTimer = 0.0;
         } else {
@@ -906,7 +932,7 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
       }
     }
 
-    // 2. Direct Nose + Responsive Lateral Steering Velocity
+    // 2. Direct Nose + Smooth Progressive Lateral Steering Velocity
     let lateralDot = 0.0;
     if (isAiCruise) {
       lateralDot =
@@ -915,42 +941,41 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
     } else {
       const handlingBoost = state.handlingMultiplier || 1.0;
       lateralDot =
-        state.speed * (-Math.sin(state.headingYaw)) * 0.92 * handlingBoost +
-        state.steerSmooth * state.speed * 0.09 * handlingBoost;
+        state.speed * (-Math.sin(state.headingYaw)) * 0.88 * handlingBoost +
+        state.steerSmooth * state.speed * 0.075 * handlingBoost;
     }
     state.lateralVel = lateralDot;
     state.lateralOffset += lateralDot * clampedDt;
 
-    // 3. Two-Stage Curb Warning & Outside-Guardrail Impact / Pinning Stop
+    // 3. Two-Stage Curb Warning & Widened Outside-Guardrail Sliding Deflection (30.8mm Roadbed)
     state.curbRumble = 0.0;
     const absLat = Math.abs(state.lateralOffset);
     const signLatCurrent = Math.sign(state.lateralOffset) || 1;
-    // Determine if this rail is the INSIDE apex of a corner (e.g. R-RAIL in a right turn, or L-RAIL in a left turn)
     const isInsideApexRail =
-      Math.abs(frame.signedCurvature) > 0.35 &&
+      Math.abs(frame.signedCurvature) > 0.28 &&
       signLatCurrent * frame.signedCurvature > 0;
     state.angledIntoRail =
-      absLat >= 0.0078 &&
+      absLat >= 0.0108 &&
       !isInsideApexRail &&
       ((signLatCurrent > 0 && state.headingYaw < -0.05) ||
         (signLatCurrent < 0 && state.headingYaw > 0.05));
     state.steeringAway =
-      absLat >= 0.0078 &&
+      absLat >= 0.0108 &&
       ((signLatCurrent > 0 && turnRight < 0) || (signLatCurrent < 0 && turnRight > 0));
 
-    if (absLat < 0.0084) {
+    if (absLat < 0.0118) {
       state.railImpactActive = false;
     }
 
-    if (absLat >= 0.0076 && absLat < 0.0086) {
-      // Stage 1 — Red/White Curbs (0.0076 <= |lateralOffset| < 0.0086):
-      // Audible/tactile rumble & mild curb drag warning before the wall
-      state.curbRumble = THREE.MathUtils.clamp((absLat - 0.0076) / 0.0010, 0.0, 1.0);
+    if (absLat >= 0.0108 && absLat < 0.0122) {
+      // Stage 1 — Red/White FIA Curbs (0.0108 <= |lateralOffset| < 0.0122):
+      // Audible/tactile rumble & mild curb drag warning before the guardrail wall
+      state.curbRumble = THREE.MathUtils.clamp((absLat - 0.0108) / 0.0014, 0.0, 1.0);
       if (!isAiCruise) {
-        state.speed *= Math.max(0.75, 1.0 - 0.45 * state.curbRumble * clampedDt);
+        state.speed *= Math.max(0.78, 1.0 - 0.38 * state.curbRumble * clampedDt);
       }
-    } else if (absLat >= 0.0086) {
-      // Stage 2 — Guardrail Wall Collision (|lateralOffset| >= 0.0086):
+    } else if (absLat >= 0.0122) {
+      // Stage 2 — Guardrail Wall Collision (|lateralOffset| >= 0.0122):
       // Sliding Deflection: Glancing bounce back toward track center + 60% velocity retention!
       const signLat = Math.sign(state.lateralOffset) || 1;
       state.curbRumble = 1.0;
@@ -963,7 +988,6 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
 
         const steeringAway =
           (signLat > 0 && turnRight < 0) || (signLat < 0 && turnRight > 0);
-        const wallIncidenceRad = Math.max(0.0, -signLat * state.headingYaw);
 
         // Glancing deflection: bounce car slightly back toward track center (lateral impulse) & maintain 60% forward speed
         if (!state.railImpactActive && state.railHitCooldown <= 0.0) {
@@ -971,8 +995,8 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
           state.railHitCooldown = 0.25;
 
           // Lateral impulse bouncing car inward away from guardrail
-          state.lateralOffset = signLat * 0.0080;
-          state.lateralVel = -signLat * 0.016;
+          state.lateralOffset = signLat * 0.0114;
+          state.lateralVel = -signLat * 0.018;
 
           // Maintain 60% forward speed on glancing deflection
           state.speed *= 0.60;
@@ -980,7 +1004,7 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
           if (onRailImpactCallback) onRailImpactCallback(0.5);
         } else {
           // Keep lateral offset near guardrail during continuous slide
-          state.lateralOffset = signLat * 0.0085;
+          state.lateralOffset = signLat * 0.0120;
         }
 
         // Allow car to slide forward along the barrier maintaining 60% velocity
@@ -1002,11 +1026,10 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
         if (isHoldingAccel && isLowSpeed) {
           state.wallStuckTimer += clampedDt;
           if (state.wallStuckTimer >= 1.0) {
-            // Apply automatic lateral push toward track center line
-            state.lateralOffset -= signLat * 0.0035; // 3.5mm push inward
-            state.lateralVel = -signLat * 0.025; // strong inward impulse
-            state.headingYaw = signLat * 0.18; // point nose toward track center
-            state.speed = Math.max(state.speed, 0.038 * state.topSpeedMultiplier); // restore sliding forward motion
+            state.lateralOffset -= signLat * 0.0045;
+            state.lateralVel = -signLat * 0.025;
+            state.headingYaw = signLat * 0.18;
+            state.speed = Math.max(state.speed, 0.042 * state.topSpeedMultiplier);
             state.wallStuckTimer = 0.0;
             state.railImpactActive = false;
           }
@@ -1015,13 +1038,11 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
         }
 
         if (steeringAway) {
-          // Player actively steers away from the wall back toward track center
           state.railImpactActive = false;
           state.headingYaw = signLat * 0.14;
-          state.lateralOffset = signLat * 0.0078;
+          state.lateralOffset = signLat * 0.0110;
           state.wallStuckTimer = 0.0;
         } else {
-          // Deflect nose slightly inward to slide smoothly along barrier
           state.headingYaw = THREE.MathUtils.lerp(
             state.headingYaw,
             signLat * 0.06,
@@ -1029,7 +1050,7 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
           );
         }
       } else {
-        state.lateralOffset = signLat * 0.0086;
+        state.lateralOffset = signLat * 0.0120;
         state.lateralVel = 0.0;
       }
     } else {

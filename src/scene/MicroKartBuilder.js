@@ -685,6 +685,42 @@ export function buildMicroKart() {
   sparkPoints.frustumCulled = false;
   sparkPoints.name = 'KartDriftSparks';
 
+  // -------------------------------------------------------------------------
+  // 5B. 64-INSTANCE REAR-TIRE DRIFT SMOKE RING BUFFER (Zero-GC InstancedMesh)
+  // -------------------------------------------------------------------------
+  const smokeCount = 64;
+  const smokeGeo = new THREE.IcosahedronGeometry(0.0014, 1);
+  const smokeMat = new THREE.MeshBasicMaterial({
+    color: 0xdbeafe,
+    transparent: true,
+    opacity: 0.36,
+    depthWrite: false,
+  });
+  const driftSmokeMesh = new THREE.InstancedMesh(smokeGeo, smokeMat, smokeCount);
+  driftSmokeMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  driftSmokeMesh.frustumCulled = false;
+  driftSmokeMesh.name = 'KartDriftSmokeInstanced';
+
+  const smokePositions = [];
+  const smokeVelocities = [];
+  const smokeAges = new Float32Array(smokeCount);
+  const smokeMaxAges = new Float32Array(smokeCount);
+  const _smokeDummy = new THREE.Object3D();
+  let nextSmokeIdx = 0;
+  let hadActiveSmoke = false;
+
+  for (let i = 0; i < smokeCount; i++) {
+    smokePositions.push(new THREE.Vector3(0, -10, 0));
+    smokeVelocities.push(new THREE.Vector3());
+    smokeAges[i] = 999;
+    smokeMaxAges[i] = 0.42;
+    _smokeDummy.position.set(0, -10, 0);
+    _smokeDummy.scale.setScalar(0.0001);
+    _smokeDummy.updateMatrix();
+    driftSmokeMesh.setMatrixAt(i, _smokeDummy.matrix);
+  }
+  driftSmokeMesh.instanceMatrix.needsUpdate = true;
+
   let nextSparkIdx = 0;
   let lastWheelUpdateTime = -1;
   let hadActiveSparks = false;
@@ -743,37 +779,102 @@ export function buildMicroKart() {
       Math.abs(state.speed) > 0.005 ? Math.sin(performance.now() * 0.06) * 0.00018 : 0.0;
     chassisGroup.position.y = (state.hopHeight || 0.0) + idleBob;
 
-    // 4. Volumetric Mach-Diamond Exhaust Flames: active during turbo boost with
-    // independent left/right combustion crackle and high-frequency afterburner
-    // pulsing
+    // 4. Volumetric Mach-Diamond Exhaust Flames:
+    // Compact flickering afterburner at high speed (> 60 km/h) and massive electric-cyan/white-hot
+    // hyper-plume during Nitro Boost or Track Boost Pad surges!
     const isBoosting = state.boostActive > 0;
+    const isHighSpeed = Math.abs(state.speed) > 0.075 && !state.countdownLocked;
+    const showFlames = isBoosting || isHighSpeed;
     const tSec = performance.now() * 0.001;
 
     for (const pGroup of flameCones) {
-      pGroup.visible = isBoosting;
+      pGroup.visible = showFlames && !cockpitRoadOnly;
       if (!pGroup.visible) continue;
       const pIdx = pGroup.userData.pipeIndex || 0;
       const phase = pIdx * 1.85;
-      const crackle = 0.82 + 0.18 * Math.sin(tSec * 58.0 + phase) +
-          0.12 * Math.cos(tSec * 93.0 - phase * 1.4);
-      const rScale = 0.96 + 0.08 * Math.sin(tSec * 44.0 + phase);
-      const zScale = Math.max(0.55, 0.88 + 0.28 * crackle);
+      const crackle =
+        0.82 +
+        0.18 * Math.sin(tSec * 58.0 + phase) +
+        0.12 * Math.cos(tSec * 93.0 - phase * 1.4);
+      const rScale = (isBoosting ? 1.18 : 0.78) + 0.08 * Math.sin(tSec * 44.0 + phase);
+      const zScale = isBoosting
+        ? Math.max(0.85, 1.18 + 0.34 * crackle)
+        : Math.max(0.32, 0.46 + 0.20 * crackle);
       pGroup.scale.set(rScale, rScale, zScale);
       if (pGroup.userData.jetMat) {
         pGroup.userData.jetMat.uniforms.uTime.value = tSec;
-        pGroup.userData.jetMat.uniforms.uIntensity.value =
-            Math.min(1.35, 0.92 * crackle);
+        pGroup.userData.jetMat.uniforms.uIntensity.value = isBoosting
+          ? Math.min(1.45, 1.08 * crackle)
+          : Math.min(0.75, 0.52 * crackle);
       }
     }
 
-    // 5. Emit & step realistic glowing fire sparks (scaled to 1:150 N-scale rear wheels!)
+    // 5. Emit & step realistic glowing fire sparks + Rear-Tire Drift Smoke Clouds
     const kScale = kartRoot.scale.x || 0.58;
     sparkMat.uniforms.uSparkScale.value = kScale;
 
     const isEmitting =
-      (state.isDrifting || isBoosting || state.curbRumble > 0.2 || Math.abs(state.steerInput || 0) > 0.32) &&
+      (state.isDrifting || isBoosting || state.curbRumble > 0.2 || Math.abs(state.steerInput || 0) > 0.26) &&
       Math.abs(state.speed) > 0.03;
     const emitCount = isEmitting ? 6 : 0;
+
+    // Emit Rear-Tire Drift Smoke puffs when drifting, boosting off the line, or hard cornering
+    const isSmokeEmitting =
+      (state.isDrifting || (Math.abs(state.steerInput || 0) > 0.28 && Math.abs(state.speed) > 0.08)) &&
+      !cockpitRoadOnly;
+
+    if (isSmokeEmitting) {
+      kartRoot.getWorldPosition(_worldPos);
+      _backDir.copy(state.tangent).multiplyScalar(-1);
+      for (let side of [-1, 1]) {
+        const sIdx = nextSmokeIdx % smokeCount;
+        nextSmokeIdx++;
+        smokePositions[sIdx]
+          .copy(_worldPos)
+          .addScaledVector(state.right, side * 0.0046 * kScale)
+          .addScaledVector(_backDir, 0.0056 * kScale)
+          .addScaledVector(state.normal, 0.0012 * kScale);
+        smokeVelocities[sIdx]
+          .copy(_backDir)
+          .multiplyScalar(0.025 + Math.random() * 0.025)
+          .addScaledVector(state.normal, 0.014 + Math.random() * 0.012)
+          .addScaledVector(state.right, (Math.random() - 0.5) * 0.018);
+        smokeAges[sIdx] = 0.0;
+        smokeMaxAges[sIdx] = 0.36 + Math.random() * 0.16;
+      }
+    }
+
+    let activeSmokeNow = false;
+    if (isSmokeEmitting || hadActiveSmoke) {
+      for (let i = 0; i < smokeCount; i++) {
+        const maxAge = smokeMaxAges[i] || 0.42;
+        if (smokeAges[i] < maxAge) {
+          activeSmokeNow = true;
+          smokeAges[i] += dt;
+          const lifeRatio = smokeAges[i] / maxAge;
+          smokePositions[i].addScaledVector(smokeVelocities[i], dt);
+          smokeVelocities[i].multiplyScalar(Math.max(0.85, 1.0 - 3.2 * dt));
+          _smokeDummy.position.copy(smokePositions[i]);
+          // Expand puff early then shrink smoothly as it dissipates
+          const puffScale =
+            lifeRatio < 0.35
+              ? THREE.MathUtils.lerp(0.55, 1.85, lifeRatio / 0.35)
+              : THREE.MathUtils.lerp(1.85, 0.05, (lifeRatio - 0.35) / 0.65);
+          _smokeDummy.scale.setScalar(Math.max(0.01, puffScale * kScale));
+          _smokeDummy.rotation.set(smokeAges[i] * 3.0, smokeAges[i] * 2.2, 0);
+          _smokeDummy.updateMatrix();
+          driftSmokeMesh.setMatrixAt(i, _smokeDummy.matrix);
+        } else if (smokePositions[i].y > -5.0) {
+          smokePositions[i].y = -10.0;
+          _smokeDummy.position.set(0, -10, 0);
+          _smokeDummy.scale.setScalar(0.0001);
+          _smokeDummy.updateMatrix();
+          driftSmokeMesh.setMatrixAt(i, _smokeDummy.matrix);
+        }
+      }
+      driftSmokeMesh.instanceMatrix.needsUpdate = true;
+      hadActiveSmoke = activeSmokeNow;
+    }
 
     // Flicker warm orange firelight onto the roadbed/desk when sparks are flying,
     // scaled by the Settings "Fire Downcast Light" slider (fireLightMultiplier, default 0.12x)
@@ -816,10 +917,16 @@ export function buildMicroKart() {
         sparkLifeAttr[idx] = 1.0;
         sparkSizes[idx] = 0.65 + Math.random() * 1.15;
 
-        // Warm Fire Spark Palette: incandescent gold-orange (#ffaa22) to fiery amber-red (#ff4e08)
-        sparkColors[idx * 3 + 0] = 1.0;
-        sparkColors[idx * 3 + 1] = 0.36 + Math.random() * 0.46;
-        sparkColors[idx * 3 + 2] = 0.04 + Math.random() * 0.14;
+        // Neon Arcade Spark Palette: electric cyan during boost, fiery amber-gold during drift!
+        if (isBoosting) {
+          sparkColors[idx * 3 + 0] = 0.10 + Math.random() * 0.25;
+          sparkColors[idx * 3 + 1] = 0.85 + Math.random() * 0.15;
+          sparkColors[idx * 3 + 2] = 1.0;
+        } else {
+          sparkColors[idx * 3 + 0] = 1.0;
+          sparkColors[idx * 3 + 1] = 0.36 + Math.random() * 0.46;
+          sparkColors[idx * 3 + 2] = 0.04 + Math.random() * 0.14;
+        }
       }
     }
 
@@ -1343,6 +1450,7 @@ export function buildMicroKart() {
     kartRoot,
     chassisGroup,
     sparkPoints,
+    driftSmokeMesh,
     sparkFireLight,
     setFireLightMultiplier,
     setCockpitRoadOnly,

@@ -535,8 +535,8 @@ export function buildGoldenHourAtmosphere(scene) {
       windowGlowLight.intensity = 0.50 * sunScale;
       goldenFillLight.intensity = 0.24 * sunScale;
       rimLight.intensity = 0.22 * sunScale;
-      lampKeyLight.intensity = 2.40 * lampScale;
-      lampGlowPoint.intensity = 0.45 * lampScale;
+      lampKeyLight.intensity = 1.10 * lampScale;
+      lampGlowPoint.intensity = 0.35 * lampScale;
       kbBacklight.intensity = 0.45;
 
       // Ensure micAuraCone stays completely disabled/invisible

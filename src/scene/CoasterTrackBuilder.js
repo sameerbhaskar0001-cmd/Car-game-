@@ -652,10 +652,13 @@ export const sharedUnderTrackUniforms = {
 };
 
 /**
- * Smooths overly tight 90-degree hairpin turns by increasing curve fillet radii by ~30%,
- * and adds curvature-driven spline banking (roll angle) on high-speed corners so the track
- * naturally tilts into turns and prevents high-speed understeer into guardrails.
- * Also returns detected blind hairpin entry indices for placing neon chevron warning signs.
+ * Re-sculpts the track into a Wide, Grounded High-Speed Grand Prix Circuit:
+ * - 40% wider roadbed (30.8mm width / 15.4mm half-width) for 4-car overtaking and wide apex drifts.
+ * - Grounded elevation profile (18mm - 30mm off the desk surface) so props tower around the cars
+ *   and speed feels visceral (Hot Wheels / Micro Machines scale).
+ * - Eliminates repetitive zigzags and 360 corkscrews; structures the loop around 2 long high-speed
+ *   straightaways (Front Keyboard Straight & Back Monitor/Cat Straight) linked by 3 wide, sweeping
+ *   banked corners (West Banked Sweeper, North-East Lamp Sweeper, South-East Mousepad Sweeper).
  */
 function smoothAndBankTrackSpline(splineData) {
   const samples = splineData.samples;
@@ -665,57 +668,60 @@ function smoothAndBankTrackSpline(splineData) {
   }
   splineData._filletSmoothedAndBanked = true;
 
-  const origPositions = samples.map((s) => new THREE.Vector3(...s.position));
-  const positions = origPositions.map((p) => p.clone());
+  // Enforce 40% wider roadbed (0.022m -> 0.0308m) and proportional FIA curbs
+  splineData.track_width_m = 0.0308;
+  splineData.curb_width_m = 0.0022;
 
-  // 1. Measure local turn sharpness (chord-angle deviation over ±7 samples)
-  const turnSharpness = new Float32Array(N);
-  const vIn = new THREE.Vector3();
-  const vOut = new THREE.Vector3();
+  // Closed periodic Catmull-Rom control points defining the High-Speed Desk Circuit:
+  // Indexed so sample 646 (u ≈ 0.897) lands squarely on the Front Keyboard Straightaway (-X direction)
+  const controlWaypoints = [
+    // 0: Front Straightaway West Exit -> entering West Sweeper
+    new THREE.Vector3(-0.34, 0.019, 0.25),
+    // 1: Corner 1 (West Banked Sweeper Entry - wide radius around Coffee Mug)
+    new THREE.Vector3(-0.56, 0.024, 0.16),
+    // 2: Corner 1 (West Banked Sweeper Apex - gentle elevated banking)
+    new THREE.Vector3(-0.58, 0.029, -0.05),
+    // 3: Corner 1 Exit onto Back Straightaway
+    new THREE.Vector3(-0.40, 0.024, -0.21),
+    // 4: Back Straightaway West-Mid (Long High-Speed Boost Zone in front of Monitor & Cat)
+    new THREE.Vector3(-0.12, 0.020, -0.22),
+    // 5: Back Straightaway East-Mid (Full-throttle Nitro & Jump Ramp section)
+    new THREE.Vector3(0.20, 0.020, -0.22),
+    // 6: Corner 2 (North-East Lamp Sweeper Entry)
+    new THREE.Vector3(0.48, 0.025, -0.18),
+    // 7: Corner 2 (North-East Wide Apex)
+    new THREE.Vector3(0.60, 0.030, -0.02),
+    // 8: Corner 3 (South-East Mousepad Sweeper Apex)
+    new THREE.Vector3(0.56, 0.025, 0.17),
+    // 9: Front Straightaway East Entry (sweeping onto Start/Finish straight)
+    new THREE.Vector3(0.34, 0.019, 0.25),
+    // 10: Front Straightaway Center-East (Start/Finish Gantry at i=646 is right here!)
+    new THREE.Vector3(0.05, 0.018, 0.25),
+    // 11: Front Straightaway Center-West (Long high-speed straightaway past Keyboard)
+    new THREE.Vector3(-0.15, 0.018, 0.25),
+  ];
+
+  const closedCurve = new THREE.CatmullRomCurve3(controlWaypoints, true, 'centripetal', 0.5);
+  const spacedPoints = closedCurve.getSpacedPoints(N);
+
+  const positions = new Array(N);
   for (let i = 0; i < N; i++) {
-    const pPrev = positions[(i - 7 + N) % N];
-    const pCurr = positions[i];
-    const pNext = positions[(i + 7) % N];
-    vIn.subVectors(pCurr, pPrev).setY(0).normalize();
-    vOut.subVectors(pNext, pCurr).setY(0).normalize();
-    // 1 - dot is 0 on straights, ~1 on 90-deg turns, >1 on hairpins
-    turnSharpness[i] = Math.max(0, 1.0 - vIn.dot(vOut));
+    positions[i] = spacedPoints[i].clone();
   }
 
-  // Smooth the sharpness mask so fillet widening transitions C2-smoothly into straights
-  const filletMask = new Float32Array(N);
-  for (let i = 0; i < N; i++) {
-    let sum = 0;
-    for (let k = -8; k <= 8; k++) {
-      sum += turnSharpness[(i + k + N) % N];
-    }
-    const avgSharpness = sum / 17.0;
-    // Activate fillet widening on tight corners (increases curve fillet radius by ~30%)
-    const rawMask = THREE.MathUtils.smoothstep(avgSharpness, 0.04, 0.28);
-    // Keep the Start/Finish gantry straight (around sample 646) pinned so gantry alignment is exact
-    const distToGantry = Math.min(Math.abs(i - 646), N - Math.abs(i - 646));
-    const gantryPin = THREE.MathUtils.smoothstep(distToGantry, 8, 22);
-    filletMask[i] = rawMask * gantryPin;
-  }
-
-  // Apply 8 passes of curvature-weighted Laplacian fillet relaxation (~30% larger corner radius)
-  for (let pass = 0; pass < 8; pass++) {
+  // Apply 4 light C2-continuity smoothing passes to guarantee silky curvature derivatives
+  for (let pass = 0; pass < 4; pass++) {
     const nextPos = positions.map((p) => p.clone());
     for (let i = 0; i < N; i++) {
-      const w = 0.34 * filletMask[i];
-      if (w <= 1e-4) continue;
       const pPrev2 = positions[(i - 2 + N) % N];
       const pPrev1 = positions[(i - 1 + N) % N];
       const pCurr = positions[i];
       const pNext1 = positions[(i + 1) % N];
       const pNext2 = positions[(i + 2) % N];
-      const avgX = (pPrev2.x + 2 * pPrev1.x + 2 * pNext1.x + pNext2.x) / 6.0;
-      const avgY = (pPrev2.y + 2 * pPrev1.y + 2 * pNext1.y + pNext2.y) / 6.0;
-      const avgZ = (pPrev2.z + 2 * pPrev1.z + 2 * pNext1.z + pNext2.z) / 6.0;
       nextPos[i].set(
-        THREE.MathUtils.lerp(pCurr.x, avgX, w),
-        Math.max(origPositions[i].y * 0.95, THREE.MathUtils.lerp(pCurr.y, avgY, w * 0.5)),
-        THREE.MathUtils.lerp(pCurr.z, avgZ, w)
+        (pPrev2.x + 4 * pPrev1.x + 6 * pCurr.x + 4 * pNext1.x + pNext2.x) / 16.0,
+        (pPrev2.y + 4 * pPrev1.y + 6 * pCurr.y + 4 * pNext1.y + pNext2.y) / 16.0,
+        (pPrev2.z + 4 * pPrev1.z + 6 * pCurr.z + 4 * pNext1.z + pNext2.z) / 16.0
       );
     }
     for (let i = 0; i < N; i++) {
@@ -723,7 +729,7 @@ function smoothAndBankTrackSpline(splineData) {
     }
   }
 
-  // 2. Recompute smooth tangents & signed horizontal curvature for corner banking
+  // Compute smooth tangents & signed horizontal curvature for natural inward corner banking
   const tangents = new Array(N);
   for (let i = 0; i < N; i++) {
     const pPrev = positions[(i - 1 + N) % N];
@@ -737,27 +743,27 @@ function smoothAndBankTrackSpline(splineData) {
   const tDiff = new THREE.Vector3();
 
   for (let i = 0; i < N; i++) {
-    const tPrev = tangents[(i - 4 + N) % N];
-    const tNext = tangents[(i + 4) % N];
+    const tPrev = tangents[(i - 5 + N) % N];
+    const tNext = tangents[(i + 5) % N];
     flatRight.crossVectors(tangents[i], worldUp).normalize();
     tDiff.subVectors(tNext, tPrev);
-    rawSignedCurv[i] = tDiff.dot(flatRight) * 6.5;
+    rawSignedCurv[i] = tDiff.dot(flatRight) * 7.5;
   }
 
-  // Smooth signed curvature across ±6 samples for silky roll banking transitions
+  // Smooth signed curvature across ±10 samples for progressive roll banking transitions
   const smoothSignedCurv = new Float32Array(N);
   for (let i = 0; i < N; i++) {
     let sum = 0;
     let wSum = 0;
-    for (let k = -6; k <= 6; k++) {
-      const weight = 7 - Math.abs(k);
+    for (let k = -10; k <= 10; k++) {
+      const weight = 11 - Math.abs(k);
       sum += rawSignedCurv[(i + k + N) % N] * weight;
       wSum += weight;
     }
     smoothSignedCurv[i] = sum / wSum;
   }
 
-  // 3. Apply natural inward corner banking (roll angle) & update sample frames + arc lengths
+  // Apply inward corner banking (roll angle) & update sample frames + arc lengths
   let cumulativeArc = 0.0;
   for (let i = 0; i < N; i++) {
     const s = samples[i];
@@ -774,17 +780,13 @@ function smoothAndBankTrackSpline(splineData) {
     s.tangent[1] = t.y;
     s.tangent[2] = t.z;
 
-    // Combine original coaster banking with extra high-speed corner roll banking (up to ±22 deg)
-    const origBank = s.bank_deg || 0.0;
-    const extraCornerBankDeg = THREE.MathUtils.clamp(smoothSignedCurv[i] * 9.5, -15.0, 15.0);
+    // Progressive inward corner banking up to ±16 deg on sweeping turns, flat 0 deg at Start/Finish Gantry
+    const cornerBankDeg = THREE.MathUtils.clamp(smoothSignedCurv[i] * 11.5, -16.0, 16.0);
     const distToGantry = Math.min(Math.abs(i - 646), N - Math.abs(i - 646));
-    const gantryFade = THREE.MathUtils.smoothstep(distToGantry, 6, 20);
-    const totalBankDeg = THREE.MathUtils.clamp(
-      (origBank + extraCornerBankDeg) * gantryFade,
-      -24.0,
-      24.0
-    );
+    const gantryFade = THREE.MathUtils.smoothstep(distToGantry, 10, 32);
+    const totalBankDeg = cornerBankDeg * gantryFade;
     s.bank_deg = totalBankDeg;
+    s.zone = Math.abs(totalBankDeg) > 4.5 ? 'sweeping_banked_corner' : 'high_speed_straight';
 
     // Build orthonormal unbanked frame: baseRight = t x worldUp, baseNormal = baseRight x t
     const baseRight = new THREE.Vector3().crossVectors(t, worldUp);
@@ -795,8 +797,6 @@ function smoothAndBankTrackSpline(splineData) {
     }
     const baseNormal = new THREE.Vector3().crossVectors(baseRight, t).normalize();
 
-    // Roll normal & right around tangent so the track tilts inward into the turn:
-    // Right turn (smoothSignedCurv > 0 -> totalBankDeg > 0): right edge lowers, left edge rises
     const bankRad = THREE.MathUtils.degToRad(totalBankDeg);
     const cosB = Math.cos(bankRad);
     const sinB = Math.sin(bankRad);
@@ -823,13 +823,13 @@ function smoothAndBankTrackSpline(splineData) {
 
   splineData.total_length_m = cumulativeArc;
 
-  // 4. Identify blind hairpin curves (local maxima of |smoothSignedCurv|) for floating neon warning chevrons
+  // Identify the 3 main sweeping corners for floating neon apex chevron markers
   const candidatePeaks = [];
   for (let i = 0; i < N; i++) {
     const absC = Math.abs(smoothSignedCurv[i]);
-    if (absC < 0.52) continue;
+    if (absC < 0.28) continue;
     let isPeak = true;
-    for (let k = -18; k <= 18; k++) {
+    for (let k = -24; k <= 24; k++) {
       if (Math.abs(smoothSignedCurv[(i + k + N) % N]) > absC) {
         isPeak = false;
         break;
@@ -846,13 +846,13 @@ function smoothAndBankTrackSpline(splineData) {
   candidatePeaks.sort((a, b) => b.absCurv - a.absCurv);
   const selectedHairpins = [];
   for (const cand of candidatePeaks) {
-    if (selectedHairpins.length >= 5) break;
+    if (selectedHairpins.length >= 3) break;
     const tooClose = selectedHairpins.some((sel) => {
       const d = Math.min(
         Math.abs(sel.apexIdx - cand.apexIdx),
         N - Math.abs(sel.apexIdx - cand.apexIdx)
       );
-      return d < 85;
+      return d < 120;
     });
     if (!tooClose) {
       selectedHairpins.push(cand);
@@ -877,8 +877,8 @@ export function buildCoasterTrack(splineData) {
   const samples = splineData.samples;
   cachedSplineSamples = samples;
   const N = samples.length; // 720 periodic samples
-  const halfWidth = (splineData.track_width_m || 0.022) * 0.5; // 0.011m (11mm half-width)
-  const curbWidth = splineData.curb_width_m || 0.0017; // 1.7mm FIA curbs (1:150 scale)
+  const halfWidth = (splineData.track_width_m || 0.0308) * 0.5; // 0.0154m (15.4mm half-width, +40% wider)
+  const curbWidth = splineData.curb_width_m || 0.0022; // 2.2mm FIA curbs
   const railHeight = (splineData.rail_height_m || 0.0018) * 0.52; // Lower-profile 0.94mm side guardrails matching 0.38x kart
   const deckThickness = 0.0018;
 
@@ -1005,8 +1005,8 @@ export function buildCoasterTrack(splineData) {
     const col = isRed ? redColor : whiteColor;
 
     for (const side of [-1, 1]) {
-      const innerDist = side * (halfWidth - 0.0012);
-      const outerDist = side * (halfWidth + 0.0005);
+      const innerDist = side * (halfWidth - 0.0014);
+      const outerDist = side * (halfWidth + 0.0006);
 
       const v0Inner = p0.clone().addScaledVector(r0, innerDist).addScaledVector(n0, 0.00012);
       const v0Outer = p0.clone().addScaledVector(r0, outerDist).addScaledVector(n0, 0.00022);
@@ -1081,8 +1081,8 @@ export function buildCoasterTrack(splineData) {
     const p = new THREE.Vector3(...s.position);
     const r = new THREE.Vector3(...s.right);
     const n = new THREE.Vector3(...s.normal);
-    spinePtsLeft.push(p.clone().addScaledVector(r, -0.0065).addScaledVector(n, -0.0032));
-    spinePtsRight.push(p.clone().addScaledVector(r, 0.0065).addScaledVector(n, -0.0032));
+    spinePtsLeft.push(p.clone().addScaledVector(r, -0.0092).addScaledVector(n, -0.0032));
+    spinePtsRight.push(p.clone().addScaledVector(r, 0.0092).addScaledVector(n, -0.0032));
   }
   const curveLeft = new THREE.CatmullRomCurve3(spinePtsLeft, true);
   const curveRight = new THREE.CatmullRomCurve3(spinePtsRight, true);
@@ -1141,8 +1141,8 @@ export function buildCoasterTrack(splineData) {
   const footpadInstanced = new THREE.InstancedMesh(footpadGeo, footpadMat, numColumns);
   footpadInstanced.receiveShadow = true;
 
-  // Cross-head saddle bracket directly under the track deck
-  const saddleGeo = new THREE.BoxGeometry(0.024, 0.0022, 0.0055);
+  // Cross-head saddle bracket directly under the widened track deck
+  const saddleGeo = new THREE.BoxGeometry(0.034, 0.0022, 0.0055);
   const saddleInstanced = new THREE.InstancedMesh(saddleGeo, silverSteelMat, numColumns);
   saddleInstanced.castShadow = true;
 
@@ -1244,14 +1244,19 @@ export function buildCoasterTrack(splineData) {
   trackGroup.add(chordInstanced, footpadInstanced, saddleInstanced, ringInstanced);
 
   // -------------------------------------------------------------------------
-  // 5. START / FINISH GRAND PRIX PORTAL GANTRY IN SECTOR 6 ([0.000, 0.035, 0.255])
+  // 5. START / FINISH GRAND PRIX PORTAL GANTRY IN SECTOR 6
   // -------------------------------------------------------------------------
+  const gantrySample = samples[646] || samples[0];
   const gantryGroup = new THREE.Group();
   gantryGroup.name = 'StartFinishGantry';
-  gantryGroup.position.set(0.0183, 0.035, 0.255);
+  gantryGroup.position.set(
+    gantrySample.position[0],
+    gantrySample.position[1],
+    gantrySample.position[2]
+  );
 
-  // Overhead gantry truss towers on Z = -0.018 and Z = +0.018 (track runs East-to-West along X here)
-  for (const gz of [-0.018, 0.018]) {
+  // Overhead gantry truss towers spanning the widened 30.8mm roadbed
+  for (const gz of [-0.024, 0.024]) {
     const tower = new THREE.Mesh(
       new THREE.BoxGeometry(0.0040, 0.028, 0.0040),
       silverSteelMat
@@ -1261,9 +1266,9 @@ export function buildCoasterTrack(splineData) {
     gantryGroup.add(tower);
   }
 
-  // Overhead digital signboard spanning across the track (lowered for 1:150 N-scale)
+  // Overhead digital signboard spanning across the widened track
   const signBox = new THREE.Mesh(
-    new THREE.BoxGeometry(0.0048, 0.0082, 0.040),
+    new THREE.BoxGeometry(0.0048, 0.0082, 0.052),
     new THREE.MeshStandardMaterial({ color: 0x161922, roughness: 0.35, metalness: 0.6 })
   );
   signBox.position.set(0, 0.024, 0);
@@ -1281,13 +1286,13 @@ export function buildCoasterTrack(splineData) {
     [0.0026, Math.PI / 2],
     [-0.0026, -Math.PI / 2],
   ]) {
-    const signFace = new THREE.Mesh(new THREE.PlaneGeometry(0.036, 0.0072), signFaceMat);
+    const signFace = new THREE.Mesh(new THREE.PlaneGeometry(0.048, 0.0072), signFaceMat);
     signFace.position.set(sx, 0.024, 0);
     signFace.rotation.y = rotY;
     gantryGroup.add(signFace);
   }
 
-  // 5 F1 Starting LED Pods (0.6x scale for 1:150 N-scale)
+  // 5 F1 Starting LED Pods
   for (let l = -2; l <= 2; l++) {
     const ledPod = new THREE.Mesh(
       new THREE.SphereGeometry(0.00085, 10, 10),
@@ -1297,9 +1302,9 @@ export function buildCoasterTrack(splineData) {
     gantryGroup.add(ledPod);
   }
 
-  // Checkered Start/Finish Line Stripe directly on the Sector 6 roadbed
+  // Checkered Start/Finish Line Stripe directly on the widened Sector 6 roadbed
   const startStripe = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.0035, 0.021),
+    new THREE.PlaneGeometry(0.0040, 0.0295),
     new THREE.MeshBasicMaterial({ map: gantryTex })
   );
   startStripe.rotation.x = -Math.PI / 2;
@@ -1743,13 +1748,13 @@ export function buildCoasterTrack(splineData) {
     const gTang = new THREE.Vector3(gSample.tangent[0], 0, gSample.tangent[2]).normalize();
     const yaw = Math.atan2(-gTang.x, -gTang.z);
 
-    // Mount twin Modular Roads 3D Traffic Signal Gantries at the Starting Grid (Right & Left)
+    // Mount twin Modular Roads 3D Traffic Signal Gantries at the widened Starting Grid (Right & Left)
     for (const side of [-1, 1]) {
       const clone = glbScene.clone(true);
       clone.scale.setScalar(0.0044);
       clone.position
         .copy(gCenter)
-        .addScaledVector(gRightHoriz, side * 0.0145)
+        .addScaledVector(gRightHoriz, side * 0.0195)
         .addScaledVector(gUpVec, -0.0012);
       clone.rotation.set(0, yaw + (side === -1 ? Math.PI : 0), 0);
 

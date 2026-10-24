@@ -42,20 +42,16 @@ const WHEEL_SLOTS = [
   { name: 'RR', x: -99.5, y: 24.0, z: 58.0, side: 'R', isFront: false },
 ];
 
-function attachReadabilityRimShader(mat, _cacheKey, minFloorStrength, _topFillStrength, _rimStrength) {
-  // Use standard PBR emissive self-illumination instead of custom onBeforeCompile shader strings
-  // so Three.js shares a single compiled shader program across all meshes with zero GPU compile freeze!
-  if (mat && mat.color && (!mat.emissive || mat.emissiveIntensity === 0)) {
-    mat.emissive = mat.color.clone().multiplyScalar(minFloorStrength * 0.45);
-    mat.emissiveIntensity = 1.0;
-  }
+function attachReadabilityRimShader(mat, _cacheKey, _minFloorStrength, _topFillStrength, _rimStrength) {
+  // Keep PBR material lighting natural without artificial emissive self-illumination
+  // Emissive is strictly reserved for Headlights and Taillights!
 }
 
 function upgradeBodyMaterials(fbxObj, kitId) {
   fbxObj.traverse((child) => {
     if (!child.isMesh) return;
-    child.castShadow = false;
-    child.receiveShadow = false;
+    child.castShadow = true;
+    child.receiveShadow = true;
     if (child.geometry && !child.geometry.attributes.normal) {
       child.geometry.computeVertexNormals();
     }
@@ -68,9 +64,9 @@ function upgradeBodyMaterials(fbxObj, kitId) {
         return new THREE.MeshStandardMaterial({
           name: 'S64_Headlights',
           color: 0xffffff,
-          emissive: new THREE.Color(0xfff4d8),
-          emissiveIntensity: 2.4,
-          roughness: 0.08,
+          emissive: new THREE.Color(0xfff8e0),
+          emissiveIntensity: 3.2,
+          roughness: 0.05,
           metalness: 0.1,
           toneMapped: false,
         });
@@ -80,76 +76,66 @@ function upgradeBodyMaterials(fbxObj, kitId) {
         return new THREE.MeshStandardMaterial({
           name: 'S64_RearLights',
           color: 0xff0018,
-          emissive: new THREE.Color(0xff0a24),
-          emissiveIntensity: 1.85,
-          roughness: 0.1,
+          emissive: new THREE.Color(0xff0518),
+          emissiveIntensity: 2.5,
+          roughness: 0.08,
           metalness: 0.15,
           toneMapped: false,
         });
       }
 
       if (mName.includes('glass') || mName.includes('window') || mName.includes('windshield')) {
-        const glassMat = new THREE.MeshStandardMaterial({
+        return new THREE.MeshStandardMaterial({
           name: 'S64_Glass',
-          color: 0x0b1524,
-          emissive: new THREE.Color(0x06101e),
-          emissiveIntensity: 0.22,
-          roughness: 0.08,
-          metalness: 0.88,
-          envMapIntensity: 1.65,
+          color: 0x08101e,
+          roughness: 0.05,
+          metalness: 0.92,
+          envMapIntensity: 2.2,
         });
-        attachReadabilityRimShader(glassMat, 's64_glass_v1', 0.18, 0.26, 0.32);
-        return glassMat;
       }
 
       if (mName.includes('exhaust') || mName.includes('muffler') || mName.includes('chrome')) {
         return new THREE.MeshStandardMaterial({
           name: 'S64_Exhaust',
-          color: 0xd8e2f0,
-          roughness: 0.18,
-          metalness: 0.92,
-          envMapIntensity: 1.35,
+          color: 0xe2e8f0,
+          roughness: 0.12,
+          metalness: 0.96,
+          envMapIntensity: 2.5,
         });
       }
 
       if (mName.includes('det2') || mName.includes('accent') || mName.includes('stripe')) {
         const accentHex =
-          kitId === 'kit2' ? 0x0b1322 : kitId === 'kit3' ? 0xffc72c : 0xffffff;
-        const det2Mat = new THREE.MeshStandardMaterial({
+          kitId === 'kit2' ? 0x081220 : kitId === 'kit3' ? 0xffb800 : 0xffffff;
+        return new THREE.MeshStandardMaterial({
           name: 'S64_Det2',
           color: accentHex,
-          roughness: 0.22,
-          metalness: kitId === 'kit3' ? 0.88 : 0.52,
-          envMapIntensity: 1.3,
+          roughness: 0.16,
+          metalness: kitId === 'kit3' ? 0.90 : 0.65,
+          envMapIntensity: 2.0,
         });
-        attachReadabilityRimShader(det2Mat, `s64_det2_${kitId}`, 0.26, 0.32, 0.26);
-        return det2Mat;
       }
 
       if (mName.includes('det1') || mName.includes('under') || mName.includes('trim') || mName.includes('black')) {
-        const trimMat = new THREE.MeshStandardMaterial({
+        return new THREE.MeshStandardMaterial({
           name: 'S64_Trim',
-          color: kitId === 'kit3' ? 0x242834 : 0x151821,
-          roughness: 0.38,
-          metalness: 0.5,
-          envMapIntensity: 1.0,
+          color: kitId === 'kit3' ? 0x1f232d : 0x12151c,
+          roughness: 0.32,
+          metalness: 0.55,
+          envMapIntensity: 1.4,
         });
-        attachReadabilityRimShader(trimMat, 's64_trim_v1', 0.18, 0.22, 0.18);
-        return trimMat;
       }
 
-      // Primary paint coat per body kit (matches 'car', 'body', or default index 0)
+      // Primary metallic paint coat per body kit
       const paintHex =
-        kitId === 'kit2' ? 0x00e5ff : kitId === 'kit3' ? 0xffc72c : 0xff1e26;
-      const pbr = new THREE.MeshStandardMaterial({
+        kitId === 'kit2' ? 0x00d4ff : kitId === 'kit3' ? 0xffaa00 : 0xee1520;
+      return new THREE.MeshStandardMaterial({
         name: `S64_CarPaint_${kitId}_${matIdx}`,
         color: paintHex,
-        roughness: kitId === 'kit3' ? 0.20 : 0.15,
-        metalness: kitId === 'kit2' ? 0.65 : kitId === 'kit3' ? 0.82 : 0.48,
-        envMapIntensity: 1.55,
+        roughness: kitId === 'kit3' ? 0.14 : kitId === 'kit2' ? 0.10 : 0.12,
+        metalness: kitId === 'kit2' ? 0.88 : kitId === 'kit3' ? 0.90 : 0.82,
+        envMapIntensity: 2.5,
       });
-      attachReadabilityRimShader(pbr, `s64_paint_${kitId}`, 0.32, 0.38, 0.32);
-      return pbr;
     });
 
     child.material = Array.isArray(child.material) ? newMats : newMats[0];
@@ -159,8 +145,8 @@ function upgradeBodyMaterials(fbxObj, kitId) {
 function upgradeRimMaterials(fbxObj, rimId, kitId) {
   fbxObj.traverse((child) => {
     if (!child.isMesh) return;
-    child.castShadow = false;
-    child.receiveShadow = false;
+    child.castShadow = true;
+    child.receiveShadow = true;
     if (child.geometry && !child.geometry.attributes.normal) {
       child.geometry.computeVertexNormals();
     }
@@ -170,45 +156,41 @@ function upgradeRimMaterials(fbxObj, rimId, kitId) {
       const mName = (oldMat?.name || '').toLowerCase();
 
       if (mName.includes('tire')) {
-        const tireMat = new THREE.MeshStandardMaterial({
+        return new THREE.MeshStandardMaterial({
           name: 'S64_TireRubber',
-          color: 0x14171d,
-          roughness: 0.76,
-          metalness: 0.08,
-          envMapIntensity: 0.65,
+          color: 0x11141a,
+          roughness: 0.82,
+          metalness: 0.05,
+          envMapIntensity: 0.8,
         });
-        attachReadabilityRimShader(tireMat, 's64_tire_v1', 0.15, 0.2, 0.16);
-        return tireMat;
       }
 
       if (mName.includes('disc')) {
         return new THREE.MeshStandardMaterial({
           name: 'S64_BrakeDisc',
-          color: 0x525b6c,
-          roughness: 0.32,
-          metalness: 0.82,
+          color: 0x586274,
+          roughness: 0.28,
+          metalness: 0.88,
         });
       }
 
       // Alloy rim spokes & lip
-      let rimColor = 0xdce4f0;
+      let rimColor = 0xe2eaf5;
       if (rimId === 'rim1') {
-        rimColor = kitId === 'kit2' ? 0x00f0ff : 0x2a3140;
+        rimColor = kitId === 'kit2' ? 0x00d4ff : 0x222834;
       } else if (rimId === 'rim2') {
-        rimColor = 0xffc72c; // Deep dish gold
+        rimColor = 0xffb800; // Deep dish gold
       } else if (rimId === 'rim3') {
-        rimColor = kitId === 'kit2' ? 0x38bdf8 : 0xf4f6fa;
+        rimColor = kitId === 'kit2' ? 0x38bdf8 : 0xf8fafc;
       }
 
-      const rimMat = new THREE.MeshStandardMaterial({
+      return new THREE.MeshStandardMaterial({
         name: 'S64_RimAlloy',
         color: rimColor,
-        roughness: 0.2,
-        metalness: 0.88,
-        envMapIntensity: 1.35,
+        roughness: 0.08,
+        metalness: 0.94,
+        envMapIntensity: 2.8,
       });
-      attachReadabilityRimShader(rimMat, `s64_rim_${rimId}_${kitId}`, 0.24, 0.3, 0.24);
-      return rimMat;
     });
 
     child.material = Array.isArray(child.material) ? newMats : newMats[0];
@@ -218,36 +200,28 @@ function upgradeRimMaterials(fbxObj, rimId, kitId) {
 function upgradeSpoilerMaterials(fbxObj, spoilerId, kitId) {
   fbxObj.traverse((child) => {
     if (!child.isMesh) return;
-    child.castShadow = false;
-    child.receiveShadow = false;
+    child.castShadow = true;
+    child.receiveShadow = true;
     if (child.geometry && !child.geometry.attributes.normal) {
       child.geometry.computeVertexNormals();
     }
 
     const wingColor =
       kitId === 'kit2'
-        ? 0x00e5ff
+        ? 0x00d4ff
         : kitId === 'kit3'
-          ? 0xffc72c
+          ? 0xffaa00
           : spoilerId === 'spoiler2'
-            ? 0x181c26
-            : 0xff1e26;
+            ? 0x151922
+            : 0xee1520;
 
-    const spoilerMat = new THREE.MeshStandardMaterial({
+    child.material = new THREE.MeshStandardMaterial({
       name: 'S64_SpoilerWing',
       color: wingColor,
-      roughness: 0.2,
-      metalness: 0.68,
-      envMapIntensity: 1.35,
+      roughness: 0.12,
+      metalness: 0.80,
+      envMapIntensity: 2.2,
     });
-    attachReadabilityRimShader(
-      spoilerMat,
-      `s64_spoiler_${spoilerId}_${kitId}`,
-      0.26,
-      0.32,
-      0.26
-    );
-    child.material = spoilerMat;
   });
 }
 
@@ -350,6 +324,13 @@ export async function loadS64ModularCar() {
     rim3: [],
   };
 
+  const playerLipMat = new THREE.MeshBasicMaterial({
+    color: 0xff1e26,
+    toneMapped: false,
+  });
+  const playerLipGeo = new THREE.TorusGeometry(21.5, 1.35, 8, 24);
+  playerLipGeo.rotateY(Math.PI / 2);
+
   for (const slot of WHEEL_SLOTS) {
     const steerPivot = new THREE.Group();
     steerPivot.name = `S64_WheelPivot_${slot.name}`;
@@ -367,6 +348,10 @@ export async function loadS64ModularCar() {
       spinGroup.add(clonedRim);
       slotRimMeshes[rId].push(clonedRim);
     }
+
+    const lipRing = new THREE.Mesh(playerLipGeo, playerLipMat);
+    lipRing.position.z = slot.side === 'L' ? -9.5 : 9.5;
+    spinGroup.add(lipRing);
 
     fbxSpaceGroup.add(steerPivot);
     wheelSpinGroups.push(spinGroup);
@@ -388,6 +373,15 @@ export async function loadS64ModularCar() {
     }
     if (spoilerId !== undefined) {
       activeSpoilerId = spoilerId;
+    }
+
+    // Update Neon Arcade Rim Lip Ring color to match vehicle kit/rim
+    if (activeRimId === 'rim2' || activeBodyId === 'kit3') {
+      playerLipMat.color.setHex(0xffb800);
+    } else if (activeBodyId === 'kit2' || activeRimId === 'rim1') {
+      playerLipMat.color.setHex(0x00f0ff);
+    } else {
+      playerLipMat.color.setHex(0xff1e26);
     }
 
     // Toggle active body mesh
@@ -510,9 +504,16 @@ export async function loadS64ModularCar() {
       rivalFbxGroup.add(clonedSpoiler);
     }
 
-    // 3. Clone 4 Wheels
+      // 3. Clone 4 Wheels + Neon Arcade Rim Lip Ring
     const rivalWheelSpinGroups = [];
     const chosenRimSet = rawRims[rimId] || rawRims.rim1;
+    const rivalNeonLipMat = new THREE.MeshBasicMaterial({
+      color: paintHex,
+      toneMapped: false,
+    });
+    const rivalLipGeo = new THREE.TorusGeometry(21.5, 1.35, 8, 24);
+    rivalLipGeo.rotateY(Math.PI / 2);
+
     for (const slot of WHEEL_SLOTS) {
       const steerPivot = new THREE.Group();
       steerPivot.position.set(slot.x, slot.y, slot.z);
@@ -526,14 +527,48 @@ export async function loadS64ModularCar() {
       clonedRim.visible = true;
       spinGroup.add(clonedRim);
 
+      const lipMesh = new THREE.Mesh(rivalLipGeo, rivalNeonLipMat);
+      lipMesh.position.z = slot.side === 'L' ? -9.5 : 9.5;
+      spinGroup.add(lipMesh);
+
       rivalFbxGroup.add(steerPivot);
       rivalWheelSpinGroups.push(spinGroup);
     }
 
-    function updateRivalWheels(dt, speed) {
+    // 4. Twin Rear Exhaust Nitro Flame Cones for AI Rival Cars
+    const rivalFlameGeo = new THREE.ConeGeometry(8.5, 62.0, 10, 1, true);
+    rivalFlameGeo.rotateZ(Math.PI / 2);
+    rivalFlameGeo.translate(-31.0, 0, 0);
+    const rivalFlameMat = new THREE.MeshBasicMaterial({
+      color: 0x00f0ff,
+      transparent: true,
+      opacity: 0.88,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    const rivalFlames = [];
+    for (const zOff of [-24.0, 24.0]) {
+      const fMesh = new THREE.Mesh(rivalFlameGeo, rivalFlameMat);
+      fMesh.position.set(-156.0, 19.5, zOff);
+      fMesh.visible = false;
+      rivalFbxGroup.add(fMesh);
+      rivalFlames.push(fMesh);
+    }
+
+    function updateRivalWheels(dt, speed, isBoosting = false) {
       const spinDelta = (speed / 0.002) * dt;
       for (let i = 0; i < rivalWheelSpinGroups.length; i++) {
         rivalWheelSpinGroups[i].rotation.z -= spinDelta;
+      }
+      const showFlame = isBoosting || speed > 0.195;
+      const pulse = 0.82 + Math.random() * 0.38;
+      for (let i = 0; i < rivalFlames.length; i++) {
+        const f = rivalFlames[i];
+        f.visible = showFlame;
+        if (showFlame) {
+          f.scale.set(isBoosting ? 1.35 * pulse : 0.65 * pulse, 1.0, 1.0);
+        }
       }
     }
 

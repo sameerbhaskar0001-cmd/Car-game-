@@ -110,6 +110,9 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
   }, []);
 
   const isBoosting = telemetry.boostActive > 0.05;
+  const isHighSpeed = telemetry.speedKmh >= 85 || isBoosting;
+  const driftCharge = telemetry.driftCharge ?? 0;
+  const driftReady = driftCharge >= 0.38;
   const nitroPercent = Math.round(Math.min(1, Math.max(0, telemetry.boostCharge)) * 100);
   const rank = telemetry.positionRank || 1;
   const held =
@@ -138,12 +141,48 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
         paddingRight: 'max(0.85rem, env(safe-area-inset-right))',
       }}
     >
+      {/* NEON ARCADE SPEED LINES OVERLAY (High Speed >= 85 KM/H or Turbo Boost) */}
+      {isHighSpeed && (
+        <div
+          className="fixed inset-0 pointer-events-none z-0 transition-opacity duration-200"
+          style={{
+            opacity: isBoosting ? 0.85 : Math.min(0.55, (telemetry.speedKmh - 80) / 45),
+            background: isBoosting
+              ? 'radial-gradient(circle at 50% 50%, transparent 56%, rgba(0, 240, 255, 0.22) 86%, rgba(56, 189, 248, 0.42) 100%)'
+              : 'radial-gradient(circle at 50% 50%, transparent 64%, rgba(0, 240, 255, 0.12) 90%, rgba(251, 191, 36, 0.22) 100%)',
+          }}
+        >
+          {/* Left & Right Neon Velocity Streaks */}
+          <div className="absolute inset-y-8 left-2 w-16 flex flex-col justify-around opacity-80">
+            <div className="h-[2px] w-14 bg-gradient-to-r from-cyan-400 to-transparent animate-pulse" />
+            <div className="h-[2px] w-10 bg-gradient-to-r from-amber-300 to-transparent" />
+            <div className="h-[2px] w-16 bg-gradient-to-r from-cyan-300 to-transparent animate-pulse" />
+            <div className="h-[2px] w-12 bg-gradient-to-r from-sky-400 to-transparent" />
+          </div>
+          <div className="absolute inset-y-8 right-2 w-16 flex flex-col justify-around items-end opacity-80">
+            <div className="h-[2px] w-14 bg-gradient-to-l from-cyan-400 to-transparent animate-pulse" />
+            <div className="h-[2px] w-10 bg-gradient-to-l from-amber-300 to-transparent" />
+            <div className="h-[2px] w-16 bg-gradient-to-l from-cyan-300 to-transparent animate-pulse" />
+            <div className="h-[2px] w-12 bg-gradient-to-l from-sky-400 to-transparent" />
+          </div>
+        </div>
+      )}
+
       {/* SHIELD ACTIVE ENERGY HUD BORDER */}
       {telemetry.shieldActive && (
         <div
           className="fixed inset-0 pointer-events-none z-10 animate-pulse border-4 border-cyan-400/50 shadow-[inset_0_0_40px_rgba(0,229,255,0.4)]"
           style={{ boxSizing: 'border-box' }}
         />
+      )}
+
+      {/* INCOMING AI RIVAL MISSILE LOCK WARNING */}
+      {telemetry.incomingAttack && !telemetry.spinoutActive && (
+        <div className="fixed top-14 inset-x-0 pointer-events-none z-20 flex justify-center">
+          <div className="px-4 py-1 rounded-full bg-rose-950/90 border border-rose-400 text-rose-200 font-['Orbitron'] italic font-black text-xs tracking-widest uppercase animate-pulse shadow-[0_0_20px_rgba(244,63,94,0.85)]">
+            🚀 INCOMING MISSILE!
+          </div>
+        </div>
       )}
 
       {/* SPINOUT WARNING OVERLAY */}
@@ -363,6 +402,31 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
             </span>
           </button>
         </div>
+
+        {/* BOTTOM-CENTER: LIVE DRIFT-TURBO CHARGE METER */}
+        {(telemetry.isDrifting || driftCharge > 0.05) && (
+          <div className="pointer-events-none flex flex-col items-center mb-2">
+            <div
+              className={`px-3 py-0.5 rounded-full border font-['Orbitron'] italic font-black text-[10px] tracking-widest uppercase shadow-lg ${
+                driftReady
+                  ? 'bg-cyan-500/35 border-cyan-300 text-cyan-200 animate-pulse shadow-[0_0_16px_rgba(0,240,255,0.85)]'
+                  : 'bg-amber-500/25 border-amber-400/80 text-amber-200'
+              }`}
+            >
+              {driftReady ? '⚡ DRIFT TURBO READY!' : '💨 DRIFT CHARGING...'}
+            </div>
+            <div className="w-28 h-1.5 rounded-full bg-slate-950/85 border border-white/20 overflow-hidden mt-1">
+              <div
+                className={`h-full transition-all duration-75 ${
+                  driftReady
+                    ? 'bg-gradient-to-r from-cyan-400 via-sky-300 to-white'
+                    : 'bg-gradient-to-r from-amber-500 to-yellow-300'
+                }`}
+                style={{ width: `${Math.min(100, Math.round(driftCharge * 100))}%` }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* BOTTOM-RIGHT: NITRO + BRAKE/REV (LEFT COLUMN) & ROUND FIRE BADGE DOCKED ABOVE THROTTLE PEDAL (RIGHT COLUMN) */}
         <div
