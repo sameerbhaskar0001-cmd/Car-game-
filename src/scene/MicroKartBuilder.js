@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { createCosmoCarInstance } from './CosmoCarLoader.js';
+import { normalizeCarId } from '../types/game';
 
 /**
  * Builds the 1:87 HO Micro-Coaster Racing Go-Kart (18mm x 12mm x 8mm)
@@ -163,6 +165,7 @@ export function buildMicroKart() {
   chassisGroup.add(numberPlate);
 
   // Left & Right Side Pods
+  const sidePods = [];
   for (const sx of [-0.0044, 0.0044]) {
     const sidePod = new THREE.Mesh(
       new THREE.BoxGeometry(0.0024, 0.0024, 0.0076),
@@ -171,6 +174,7 @@ export function buildMicroKart() {
     sidePod.position.set(sx, 0.0024, -0.0004);
     sidePod.castShadow = false;
     chassisGroup.add(sidePod);
+    sidePods.push(sidePod);
   }
 
   // Rear Engine Block (right-rear kart motor + cooling fins) & Rear Wing
@@ -328,6 +332,7 @@ export function buildMicroKart() {
   const sharedJetGeos = buildExhaustJetGeometry();
 
   const flameCones = [];
+  const exhaustPipes = [];
   for (let i = 0; i < 2; i++) {
     const ex = i === 0 ? -0.00108 : 0.00108;
     const pipe = new THREE.Mesh(
@@ -337,6 +342,7 @@ export function buildMicroKart() {
     pipe.rotation.x = Math.PI / 2 + 0.12;
     pipe.position.set(ex, 0.00215, -0.0076);
     chassisGroup.add(pipe);
+    exhaustPipes.push(pipe);
 
     const plumeGroup = new THREE.Group();
     // Anchor right inside the hollow grey/aluminium muffler bore exit and angle
@@ -751,7 +757,11 @@ export function buildMicroKart() {
     steeringWheel.rotation.z = targetSteerRad * 1.6;
     driverHead.rotation.z = -targetSteerRad * 0.45;
     driverHead.rotation.y = targetSteerRad * 0.55;
-    if (attachedS64Car && attachedS64Car.updateWheels) {
+    if (attachedCosmoCar && attachedCosmoCar.assemblyRoot && attachedCosmoCar.assemblyRoot.visible) {
+      attachedCosmoCar.spinWheels(speed * dt);
+      attachedCosmoCar.steerFrontWheels(steerAngle);
+    }
+    if (attachedS64Car && attachedS64Car.carAssemblyRoot && attachedS64Car.carAssemblyRoot.visible && attachedS64Car.updateWheels) {
       attachedS64Car.updateWheels(dt, speed, steerAngle);
     }
   }
@@ -764,7 +774,12 @@ export function buildMicroKart() {
 
     updateWheels(dt, state.speed, steerAngle);
 
-    // 3. Apply drift slip-angle yaw + suspension roll/hop to chassisGroup
+    // 3. Apply drift slip-angle yaw + suspension roll/hop + weapon-hit 3D tumble to chassisGroup
+    const spinT = state.spinoutTimer || 0.0;
+    const tumblePhase = performance.now() * 0.024;
+    const tumbleRoll = spinT > 0 ? Math.sin(tumblePhase) * 0.42 * Math.min(1.0, spinT * 1.8) : 0.0;
+    const tumblePitch = spinT > 0 ? Math.cos(tumblePhase * 1.3) * 0.28 * Math.min(1.0, spinT * 1.8) : 0.0;
+
     chassisGroup.rotation.y = THREE.MathUtils.lerp(
       chassisGroup.rotation.y,
       state.driftAngle || 0.0,
@@ -772,12 +787,25 @@ export function buildMicroKart() {
     );
     chassisGroup.rotation.z = THREE.MathUtils.lerp(
       chassisGroup.rotation.z,
-      (state.steerInput || 0.0) * 0.09,
-      Math.min(1, dt * 12)
+      (state.steerInput || 0.0) * 0.09 + tumbleRoll,
+      Math.min(1, dt * 14)
+    );
+    chassisGroup.rotation.x = THREE.MathUtils.lerp(
+      chassisGroup.rotation.x,
+      (state.rampPitch || 0.0) + tumblePitch,
+      Math.min(1, dt * 18)
     );
     const idleBob =
       Math.abs(state.speed) > 0.005 ? Math.sin(performance.now() * 0.06) * 0.00018 : 0.0;
-    chassisGroup.position.y = (state.hopHeight || 0.0) + idleBob;
+    chassisGroup.position.y = idleBob + (state.rumbleLift || 0.0);
+
+    // Keep contact shadow pinned to the road surface below the car during airborne jumps
+    const kScaleCurrent = kartRoot.scale.y || 0.56;
+    const hopH = Math.max(0.0, state.hopHeight || 0.0);
+    kartShadowQuad.position.y = 0.00072 - hopH / kScaleCurrent;
+    if (kartShadowQuad.material) {
+      kartShadowQuad.material.opacity = Math.max(0.22, 0.95 - hopH * 55.0);
+    }
 
     // 4. Volumetric Mach-Diamond Exhaust Flames:
     // Compact flickering afterburner at high speed (> 60 km/h) and massive electric-cyan/white-hot
@@ -813,14 +841,18 @@ export function buildMicroKart() {
     const kScale = kartRoot.scale.x || 0.58;
     sparkMat.uniforms.uSparkScale.value = kScale;
 
+    const isSpinOrImpact = (state.spinoutTimer || 0) > 0 || (state.carImpactTimer || 0) > 0;
     const isEmitting =
-      (state.isDrifting || isBoosting || state.curbRumble > 0.2 || Math.abs(state.steerInput || 0) > 0.26) &&
-      Math.abs(state.speed) > 0.03;
-    const emitCount = isEmitting ? 6 : 0;
+      isSpinOrImpact ||
+      ((state.isDrifting || isBoosting || state.curbRumble > 0.2 || Math.abs(state.steerInput || 0) > 0.26) &&
+        Math.abs(state.speed) > 0.03);
+    const emitCount = isSpinOrImpact ? 12 : isEmitting ? 6 : 0;
 
-    // Emit Rear-Tire Drift Smoke puffs when drifting, boosting off the line, or hard cornering
+    // Emit Rear-Tire Drift Smoke puffs when drifting, spinning out, colliding, or hard cornering
     const isSmokeEmitting =
-      (state.isDrifting || (Math.abs(state.steerInput || 0) > 0.28 && Math.abs(state.speed) > 0.08)) &&
+      (isSpinOrImpact ||
+        state.isDrifting ||
+        (Math.abs(state.steerInput || 0) > 0.28 && Math.abs(state.speed) > 0.08)) &&
       !cockpitRoadOnly;
 
     if (isSmokeEmitting) {
@@ -957,13 +989,15 @@ export function buildMicroKart() {
     }
   }
 
-  // Group holding the procedural meshes so they can be hidden cleanly when kart_1to87.glb attaches
+  // Group holding the procedural meshes so they can be hidden cleanly when Cosmo/S64/GLB cars attach
   const proceduralParts = [
     floorPan,
     noseCone,
     numberPlate,
+    ...sidePods,
     engineBlock,
     rearWing,
+    ...exhaustPipes,
     seat,
     torso,
     driverHead,
@@ -1057,21 +1091,6 @@ export function buildMicroKart() {
     cyberPhantomGroup.add(skirt);
   }
 
-  for (const [rx, ry, rz, rad] of [
-    [-0.0066, 0.00185, 0.0054, 0.00175],
-    [0.0066, 0.00185, 0.0054, 0.00175],
-    [-0.0071, 0.00215, -0.0054, 0.00205],
-    [0.0071, 0.00215, -0.0054, 0.00205],
-  ]) {
-    const deepDishRing = new THREE.Mesh(
-      new THREE.TorusGeometry(rad * 0.72, 0.00032, 10, 20),
-      matteGoldMat
-    );
-    deepDishRing.rotation.y = Math.PI / 2;
-    deepDishRing.position.set(rx, ry, rz);
-    cyberPhantomGroup.add(deepDishRing);
-  }
-
   const cyberLouvers = new THREE.Mesh(
     new THREE.BoxGeometry(0.0116, 0.0008, 0.0030),
     matteGoldMat
@@ -1083,6 +1102,7 @@ export function buildMicroKart() {
   let currentBodyKit = 'kit1';
   let currentRimId = 'rim0';
   let currentSpoilerId = 'spoiler0';
+  let currentPaintHex = null;
   let attachedGlbScene = null;
   let attachedS64Car = null;
   let cockpitRoadOnly = false;
@@ -1176,41 +1196,168 @@ export function buildMicroKart() {
     }
   }
 
-  function setCustomParts({ bodyId, rimId, spoilerId } = {}) {
+  let attachedCosmoCar = null;
+  let cosmoLoadReqId = 0;
+
+  function syncActiveCarVisibility() {
+    kartShadowQuad.visible = !cockpitRoadOnly;
+    const isS64Selected =
+      currentBodyKit === 's64' ||
+      currentBodyKit === 'kit1' ||
+      currentBodyKit === 'kit2' ||
+      currentBodyKit === 'kit3';
+
+    if (isS64Selected && attachedS64Car) {
+      attachedS64Car.carAssemblyRoot.visible = !cockpitRoadOnly;
+      if (attachedCosmoCar) {
+        attachedCosmoCar.assemblyRoot.visible = false;
+      }
+      if (attachedGlbScene) {
+        attachedGlbScene.visible = false;
+      }
+      for (const part of proceduralParts) {
+        if (part) part.visible = false;
+      }
+      aeroBeastGroup.visible = false;
+      cyberPhantomGroup.visible = false;
+    } else if (attachedCosmoCar) {
+      attachedCosmoCar.assemblyRoot.visible = !cockpitRoadOnly;
+      attachedCosmoCar.assemblyRoot.traverse((c) => {
+        c.visible = true;
+      });
+      if (attachedS64Car) {
+        attachedS64Car.carAssemblyRoot.visible = false;
+      }
+      if (attachedGlbScene) {
+        attachedGlbScene.visible = false;
+      }
+      for (const part of proceduralParts) {
+        if (part) part.visible = false;
+      }
+      aeroBeastGroup.visible = false;
+      cyberPhantomGroup.visible = false;
+    } else if (attachedS64Car) {
+      attachedS64Car.carAssemblyRoot.visible = !cockpitRoadOnly;
+      if (attachedGlbScene) {
+        attachedGlbScene.visible = false;
+      }
+      for (const part of proceduralParts) {
+        if (part) part.visible = false;
+      }
+      aeroBeastGroup.visible = false;
+      cyberPhantomGroup.visible = false;
+    } else if (attachedGlbScene) {
+      attachedGlbScene.visible = !cockpitRoadOnly;
+      for (const part of proceduralParts) {
+        if (part) part.visible = false;
+      }
+      aeroBeastGroup.visible = false;
+      cyberPhantomGroup.visible = false;
+    } else {
+      for (const part of proceduralParts) {
+        if (part) part.visible = !cockpitRoadOnly;
+      }
+      aeroBeastGroup.visible = false;
+      cyberPhantomGroup.visible = false;
+    }
+
+    const hasCustomCarModel = Boolean(attachedCosmoCar || attachedS64Car);
+    for (const plane of tailLightGlowPlanes) {
+      if (plane) plane.visible = !cockpitRoadOnly && !hasCustomCarModel;
+    }
+  }
+
+  async function attachCosmoCar(carId = 'coupe', paintHex = null) {
+    const normId = normalizeCarId(carId);
+    const reqId = ++cosmoLoadReqId;
+
+    if (normId === 's64' && attachedS64Car) {
+      attachedS64Car.setConfiguration({
+        bodyId: 'kit1',
+        rimId: currentRimId,
+        spoilerId: currentSpoilerId,
+        paintHex: paintHex !== undefined ? paintHex : currentPaintHex,
+      });
+      syncActiveCarVisibility();
+      return;
+    }
+
+    const targetCarId = normId === 's64' ? 'coupe' : normId;
+
+    // Fast synchronous reuse if this exact Cosmo car is already attached
+    if (attachedCosmoCar && attachedCosmoCar.carId === targetCarId) {
+      attachedCosmoCar.setPaint(paintHex !== undefined ? paintHex : currentPaintHex);
+      syncActiveCarVisibility();
+      return attachedCosmoCar;
+    }
+
+    try {
+      const cosmoInstance = await createCosmoCarInstance(
+        targetCarId,
+        paintHex !== undefined ? paintHex : currentPaintHex
+      );
+      if (reqId !== cosmoLoadReqId) {
+        if (cosmoInstance.dispose) cosmoInstance.dispose();
+        return;
+      }
+      if (attachedCosmoCar) {
+        chassisGroup.remove(attachedCosmoCar.assemblyRoot);
+        if (attachedCosmoCar.dispose) attachedCosmoCar.dispose();
+      }
+      attachedCosmoCar = cosmoInstance;
+      chassisGroup.add(cosmoInstance.assemblyRoot);
+      syncActiveCarVisibility();
+      return cosmoInstance;
+    } catch (err) {
+      console.warn('attachCosmoCar error:', err);
+    }
+  }
+
+  function setCustomParts({ bodyId, rimId, spoilerId, paintHex } = {}) {
     if (bodyId) currentBodyKit = bodyId;
     if (rimId) currentRimId = rimId;
     if (spoilerId !== undefined) currentSpoilerId = spoilerId;
+    if (paintHex !== undefined) currentPaintHex = paintHex;
 
     applyProceduralRimAndSpoiler();
+    attachCosmoCar(currentBodyKit, currentPaintHex);
 
     if (attachedS64Car) {
       attachedS64Car.setConfiguration({
-        bodyId: currentBodyKit,
+        bodyId: currentBodyKit === 's64' ? 'kit1' : currentBodyKit,
         rimId: currentRimId,
         spoilerId: currentSpoilerId,
+        paintHex: currentPaintHex,
       });
     } else if (attachedGlbScene) {
       applyBodyKitToGlb(attachedGlbScene, currentBodyKit);
     }
+    syncActiveCarVisibility();
   }
 
   function setBodyKit(kitId, customOverrides) {
-    currentBodyKit = kitId || 'kit1';
+    currentBodyKit = kitId || 'coupe';
     const def = KIT_DEFAULT_PARTS[currentBodyKit] || KIT_DEFAULT_PARTS.kit1;
-    currentRimId = customOverrides?.rimId || def.rimId;
+    currentRimId = customOverrides?.rimId || def?.rimId || 'rim0';
     currentSpoilerId =
-      customOverrides?.spoilerId !== undefined ? customOverrides.spoilerId : def.spoilerId;
+      customOverrides?.spoilerId !== undefined ? customOverrides.spoilerId : (def?.spoilerId || 'spoiler0');
+    if (customOverrides?.paintHex !== undefined) {
+      currentPaintHex = customOverrides.paintHex;
+    }
 
-    const showProceduralKits = !cockpitRoadOnly && !attachedS64Car;
-    aeroBeastGroup.visible = showProceduralKits && currentBodyKit === 'kit2';
-    cyberPhantomGroup.visible = showProceduralKits && currentBodyKit === 'kit3';
+    attachCosmoCar(currentBodyKit, currentPaintHex);
 
-    if (currentBodyKit === 'kit2') {
+    if (currentPaintHex) {
+      redFairingMat.color.set(currentPaintHex);
+      redFairingMat.metalness = 0.68;
+      redFairingMat.roughness = 0.16;
+      whiteStripeMat.color.setHex(0x111827);
+    } else if (currentBodyKit === 'kit2' || currentBodyKit === 'kamaro') {
       redFairingMat.color.setHex(0x00e5ff);
       redFairingMat.metalness = 0.62;
       redFairingMat.roughness = 0.16;
       whiteStripeMat.color.setHex(0x0d1726);
-    } else if (currentBodyKit === 'kit3') {
+    } else if (currentBodyKit === 'kit3' || currentBodyKit === 'ghini') {
       redFairingMat.color.setHex(0xffc72c);
       redFairingMat.metalness = 0.78;
       redFairingMat.roughness = 0.24;
@@ -1228,66 +1375,32 @@ export function buildMicroKart() {
 
     if (attachedS64Car) {
       attachedS64Car.setConfiguration({
-        bodyId: currentBodyKit,
+        bodyId: currentBodyKit === 's64' ? 'kit1' : currentBodyKit,
         rimId: currentRimId,
         spoilerId: currentSpoilerId,
+        paintHex: currentPaintHex,
       });
     } else if (attachedGlbScene) {
       applyBodyKitToGlb(attachedGlbScene, currentBodyKit);
     }
+    syncActiveCarVisibility();
   }
 
   function setCockpitRoadOnly(isRoadOnly) {
     cockpitRoadOnly = Boolean(isRoadOnly);
-    kartShadowQuad.visible = !cockpitRoadOnly;
-    const showProceduralKits = !cockpitRoadOnly && !attachedS64Car;
-    aeroBeastGroup.visible = showProceduralKits && currentBodyKit === 'kit2';
-    cyberPhantomGroup.visible = showProceduralKits && currentBodyKit === 'kit3';
-
-    if (attachedS64Car) {
-      attachedS64Car.carAssemblyRoot.visible = !cockpitRoadOnly;
-      if (attachedGlbScene) attachedGlbScene.visible = false;
-    } else if (attachedGlbScene) {
-      attachedGlbScene.visible = !cockpitRoadOnly;
-    } else {
-      for (const part of proceduralParts) {
-        if (part) part.visible = !cockpitRoadOnly;
-      }
-    }
-    for (const plane of tailLightGlowPlanes) {
-      if (plane) plane.visible = !cockpitRoadOnly;
-    }
+    syncActiveCarVisibility();
   }
 
   function attachS64ModularCar(s64Car) {
     attachedS64Car = s64Car;
-    // Hide procedural kart parts, procedural kit boxes, and any older GLB kart
-    for (const part of proceduralParts) {
-      if (part) part.visible = false;
-    }
-    aeroBeastGroup.visible = false;
-    cyberPhantomGroup.visible = false;
-    if (attachedGlbScene) {
-      attachedGlbScene.visible = false;
-    }
-    chassisGroup.traverse((c) => {
-      if (
-        c.isMesh &&
-        !flameCones.includes(c) &&
-        !flameCones.includes(c.parent) &&
-        !tailLightGlowPlanes.includes(c)
-      ) {
-        c.visible = false;
-      }
-    });
-
-    s64Car.carAssemblyRoot.visible = !cockpitRoadOnly;
     chassisGroup.add(s64Car.carAssemblyRoot);
     s64Car.setConfiguration({
-      bodyId: currentBodyKit,
+      bodyId: currentBodyKit === 's64' ? 'kit1' : currentBodyKit,
       rimId: currentRimId,
       spoilerId: currentSpoilerId,
+      paintHex: currentPaintHex,
     });
+    syncActiveCarVisibility();
   }
 
   function attachGlbKart(glbScene) {
@@ -1460,5 +1573,6 @@ export function buildMicroKart() {
     updateKartVisuals,
     attachGlbKart,
     attachS64ModularCar,
+    attachCosmoCar,
   };
 }

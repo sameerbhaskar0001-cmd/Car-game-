@@ -1,9 +1,16 @@
 import * as THREE from 'three';
 
 /**
- * Beach Buggy & Mario Kart-style 3D Mystery Box Powerup & Combat Weapon System
- * Manages floating pickup cubes, homing rockets, shields, oil slicks, and EMP shockwaves.
- * Optimized for 0 per-frame GC allocations and shared geometry reuse.
+ * Beach Buggy Style 3D Mystery Pod, Roulette Roll & Combat Weapon System (Phase 1)
+ * Manages:
+ * - Floating 3D Mystery Energy Pods with dual neon rings & pickup burst
+ * - Slot-Machine Weapon Roulette Roll with audio ticks & lock chime
+ * - 3D Target Lock-On Crosshair Reticle over targeted rival ahead
+ * - Homing Fireball Missiles with 3D fins & live smoke/fire trail
+ * - Chain Lightning / EMP Shockwave with 3D jagged electric arcs
+ * - Geodesic Bubble Shield dome with explosive deflection
+ * - Glowing Toxic/Oil Hazard Traps & Nitro Afterburner Surges
+ * Optimized for 60 FPS mobile landscape with shared geometries.
  */
 export function createPowerupManager(splineData, scene) {
   const rootGroup = new THREE.Group();
@@ -13,6 +20,8 @@ export function createPowerupManager(splineData, scene) {
   const samples = splineData.samples;
   const N = samples.length;
   const totalLength = splineData.total_length_m || 3.8371;
+
+  const POWERUP_POOL = ['ROCKET', 'SHIELD', 'OIL_SLICK', 'HYPER_NITRO', 'EMP'];
 
   // Pre-allocated scratch vectors for zero-GC per-frame spline queries
   const _p0 = new THREE.Vector3();
@@ -68,7 +77,7 @@ export function createPowerupManager(splineData, scene) {
   }
 
   // -------------------------------------------------------------------------
-  // 1. FLOATING 3D MYSTERY ITEM BOXES (4 TRACK LOCATIONS x 3 WIDENED LANES)
+  // 1. BEACH BUGGY STYLE FLOATING 3D MYSTERY ENERGY PODS (4 SECTORS x 3 LANES)
   // -------------------------------------------------------------------------
   const boxSectorsS = [
     totalLength * 0.14, // West Sweeper exit into Back Straightaway
@@ -77,47 +86,71 @@ export function createPowerupManager(splineData, scene) {
     totalLength * 0.88, // Front Straightaway approaching Start/Finish
   ];
 
-  const boxGeo = new THREE.BoxGeometry(0.0052, 0.0052, 0.0052);
-  const boxMat = new THREE.MeshStandardMaterial({
-    color: 0xffaa00,
-    emissive: new THREE.Color(0xff7700),
-    emissiveIntensity: 0.95,
-    roughness: 0.18,
-    metalness: 0.25,
-    transparent: true,
-    opacity: 0.9,
-  });
+  // Outer crystalline energy pod shell
+  const podShellGeo = new THREE.OctahedronGeometry(0.0022, 1);
+  const podPalette = [
+    { shell: 0xff2a85, emissive: 0xff0055, ring: 0x00f0ff },
+    { shell: 0x00f0ff, emissive: 0x0088ff, ring: 0xffbe0b },
+    { shell: 0xa855f7, emissive: 0x7e22ce, ring: 0x00f0ff },
+  ];
 
-  // Inner spinning diamond core
-  const coreGeo = new THREE.OctahedronGeometry(0.0024);
+  // Inner glowing core
+  const coreGeo = new THREE.OctahedronGeometry(0.00125, 0);
   const coreMat = new THREE.MeshBasicMaterial({
     color: 0xffffff,
-    wireframe: true,
+    toneMapped: false,
   });
+
+  // Orbiting energy ring around each mystery pod
+  const podRingGeo = new THREE.TorusGeometry(0.0027, 0.00022, 8, 24);
 
   const mysteryBoxes = [];
 
   boxSectorsS.forEach((baseS, secIdx) => {
     [-0.0062, 0.0, 0.0062].forEach((latOffset, sideIdx) => {
       const frame = samplePoint(baseS);
-      const boxMesh = new THREE.Mesh(boxGeo, boxMat);
+      const pal = podPalette[(secIdx + sideIdx) % podPalette.length];
+
+      const podGroup = new THREE.Group();
+
+      const shellMat = new THREE.MeshStandardMaterial({
+        color: pal.shell,
+        emissive: new THREE.Color(pal.emissive),
+        emissiveIntensity: 1.15,
+        roughness: 0.15,
+        metalness: 0.3,
+        transparent: true,
+        opacity: 0.82,
+      });
+      const shellMesh = new THREE.Mesh(podShellGeo, shellMat);
+      podGroup.add(shellMesh);
+
       const coreMesh = new THREE.Mesh(coreGeo, coreMat);
-      boxMesh.add(coreMesh);
+      podGroup.add(coreMesh);
+
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: pal.ring,
+        toneMapped: false,
+      });
+      const ringMesh = new THREE.Mesh(podRingGeo, ringMat);
+      ringMesh.rotation.x = Math.PI * 0.35;
+      podGroup.add(ringMesh);
 
       const worldPos = frame.pos
         .clone()
         .addScaledVector(frame.right, latOffset)
-        .addScaledVector(frame.normal, 0.0044);
+        .addScaledVector(frame.normal, 0.0030);
 
-      boxMesh.position.copy(worldPos);
-      rootGroup.add(boxMesh);
+      podGroup.position.copy(worldPos);
+      rootGroup.add(podGroup);
 
       mysteryBoxes.push({
         id: `box_${secIdx}_${sideIdx}`,
         s: baseS,
         latOffset,
-        mesh: boxMesh,
+        mesh: podGroup,
         coreMesh,
+        ringMesh,
         basePos: worldPos,
         normal: frame.normal.clone(),
         active: true,
@@ -128,16 +161,14 @@ export function createPowerupManager(splineData, scene) {
 
   // -------------------------------------------------------------------------
   // 1B. 6 NEON CHEVRON TRACK BOOST PADS & 3 ARCADE JUMP RAMPS
-  //     Positioned directly along the 2 Long High-Speed Straightaways
-  //     (Back Straightaway: sFrac 0.22..0.46, Front Straightaway: sFrac 0.72..0.96)
   // -------------------------------------------------------------------------
   const boostPadConfigs = [
-    { sFrac: 0.22, latOffset: -0.0045, color: 0x00f0ff }, // Back Straight entry boost
-    { sFrac: 0.33, latOffset: 0.0045, color: 0xf59e0b },  // Back Straight mid boost
-    { sFrac: 0.44, latOffset: -0.0038, color: 0x00f0ff }, // Back Straight high-speed boost
-    { sFrac: 0.72, latOffset: 0.0045, color: 0xf59e0b },  // Front Straight entry boost
-    { sFrac: 0.83, latOffset: -0.0045, color: 0x00f0ff }, // Front Straight mid boost
-    { sFrac: 0.94, latOffset: 0.0, color: 0xf59e0b },     // Front Straight finish sprint boost
+    { sFrac: 0.22, latOffset: -0.0045, color: 0x00f0ff },
+    { sFrac: 0.33, latOffset: 0.0045, color: 0xf59e0b },
+    { sFrac: 0.44, latOffset: -0.0038, color: 0x00f0ff },
+    { sFrac: 0.72, latOffset: 0.0045, color: 0xf59e0b },
+    { sFrac: 0.83, latOffset: -0.0045, color: 0x00f0ff },
+    { sFrac: 0.94, latOffset: 0.0, color: 0xf59e0b },
   ];
 
   const padBaseGeo = new THREE.BoxGeometry(0.0068, 0.00035, 0.018);
@@ -161,7 +192,6 @@ export function createPowerupManager(splineData, scene) {
       toneMapped: false,
     });
 
-    // 3 V-shaped neon chevrons pointing along +Z (forward track tangent)
     const chevronPairs = [];
     for (let c = 0; c < 3; c++) {
       const zOff = -0.0052 + c * 0.0052;
@@ -195,22 +225,44 @@ export function createPowerupManager(splineData, scene) {
     };
   });
 
-  // 3 Low-Profile Neon Arcade Jump Ramps positioned on the long High-Speed Straightaways
+  // 3 Sculpted 3D Wedge Arcade Jump Ramps
   const jumpRampConfigs = [
-    { sFrac: 0.28, latOffset: 0.0 },      // Back Straightaway center jump ramp
-    { sFrac: 0.40, latOffset: 0.0042 },   // Back Straightaway right-lane jump ramp
-    { sFrac: 0.78, latOffset: 0.0 },      // Front Straightaway center jump ramp
+    { sFrac: 0.28, latOffset: 0.0 },
+    { sFrac: 0.40, latOffset: 0.0042 },
+    { sFrac: 0.78, latOffset: 0.0 },
   ];
 
-  const rampDeckGeo = new THREE.BoxGeometry(0.0074, 0.0006, 0.015);
-  const rampDeckMat = new THREE.MeshStandardMaterial({
-    color: 0x161f33,
-    roughness: 0.25,
-    metalness: 0.75,
+  const wedgeShape = new THREE.Shape();
+  wedgeShape.moveTo(-0.0095, 0.0);
+  wedgeShape.lineTo(0.0095, 0.0);
+  wedgeShape.lineTo(0.0095, 0.0036);
+  wedgeShape.lineTo(-0.0095, 0.0003);
+  wedgeShape.closePath();
+
+  const rampWedgeGeo = new THREE.ExtrudeGeometry(wedgeShape, {
+    depth: 0.0086,
+    bevelEnabled: false,
   });
-  const rampRailGeo = new THREE.BoxGeometry(0.0006, 0.0011, 0.0152);
+  rampWedgeGeo.translate(0, 0, -0.0043);
+  rampWedgeGeo.rotateY(-Math.PI / 2);
+
+  const rampDeckMat = new THREE.MeshStandardMaterial({
+    color: 0x151e32,
+    roughness: 0.22,
+    metalness: 0.78,
+  });
+  const rampRailGeo = new THREE.BoxGeometry(0.00065, 0.0012, 0.0192);
   const rampRailMat = new THREE.MeshBasicMaterial({
     color: 0xff2a85,
+    toneMapped: false,
+  });
+  const rampChevronGeo = new THREE.BoxGeometry(0.0032, 0.00035, 0.0010);
+  const rampChevronMat = new THREE.MeshBasicMaterial({
+    color: 0x00f0ff,
+    toneMapped: false,
+  });
+  const rampLipMat = new THREE.MeshBasicMaterial({
+    color: 0xffbe0b,
     toneMapped: false,
   });
 
@@ -219,25 +271,36 @@ export function createPowerupManager(splineData, scene) {
     const frame = samplePoint(rampS);
     const rampGroup = new THREE.Group();
 
-    const deckGroup = new THREE.Group();
-    // Tilt upward (+0.14 rad around X) so forward +Z rises to launch the car airborne!
-    deckGroup.rotation.x = -0.14;
-    deckGroup.position.y = 0.0009;
+    const wedgeMesh = new THREE.Mesh(rampWedgeGeo, rampDeckMat);
+    rampGroup.add(wedgeMesh);
 
-    const deckMesh = new THREE.Mesh(rampDeckGeo, rampDeckMat);
-    deckGroup.add(deckMesh);
+    const slopeGroup = new THREE.Group();
+    slopeGroup.position.set(0, 0.00195, 0);
+    slopeGroup.rotation.x = -0.172;
 
-    for (const rx of [-0.0036, 0.0036]) {
+    for (const rx of [-0.0042, 0.0042]) {
       const rail = new THREE.Mesh(rampRailGeo, rampRailMat);
-      rail.position.x = rx;
-      deckGroup.add(rail);
+      rail.position.set(rx, 0.0004, 0);
+      slopeGroup.add(rail);
     }
-    rampGroup.add(deckGroup);
+
+    for (let c = 0; c < 3; c++) {
+      const zOff = -0.0052 + c * 0.0048;
+      const lWing = new THREE.Mesh(rampChevronGeo, c === 2 ? rampLipMat : rampChevronMat);
+      lWing.position.set(-0.0013, 0.00022, zOff);
+      lWing.rotation.y = -0.48;
+      const rWing = new THREE.Mesh(rampChevronGeo, c === 2 ? rampLipMat : rampChevronMat);
+      rWing.position.set(0.0013, 0.00022, zOff);
+      rWing.rotation.y = 0.48;
+      slopeGroup.add(lWing, rWing);
+    }
+
+    rampGroup.add(slopeGroup);
 
     rampGroup.position
       .copy(frame.pos)
       .addScaledVector(frame.right, cfg.latOffset)
-      .addScaledVector(frame.normal, 0.0002);
+      .addScaledVector(frame.normal, 0.00015);
 
     const leftVec = new THREE.Vector3().crossVectors(frame.normal, frame.tangent).normalize();
     const rotMat = new THREE.Matrix4().makeBasis(leftVec, frame.normal, frame.tangent);
@@ -253,122 +316,280 @@ export function createPowerupManager(splineData, scene) {
   });
 
   // -------------------------------------------------------------------------
-  // 2. SHARED GEOMETRIES & MATERIALS FOR PROJECTILES & HAZARDS
+  // 2. SHARED GEOMETRIES & MATERIALS FOR BEACH BUGGY WEAPONS & LOCK-ON
   // -------------------------------------------------------------------------
-  // Active Homing Rockets
+  // 2A. 3D Target Lock-On Crosshair Ring (hovers over targeted rival ahead!)
+  const targetReticleGroup = new THREE.Group();
+  targetReticleGroup.visible = false;
+  const reticleOuterRing = new THREE.Mesh(
+    new THREE.RingGeometry(0.0048, 0.0062, 24),
+    new THREE.MeshBasicMaterial({
+      color: 0xff2a2a,
+      side: THREE.DoubleSide,
+      toneMapped: false,
+      depthWrite: false,
+    })
+  );
+  reticleOuterRing.rotation.x = -Math.PI / 2;
+  targetReticleGroup.add(reticleOuterRing);
+
+  const reticleDiamond = new THREE.Mesh(
+    new THREE.OctahedronGeometry(0.0014, 0),
+    new THREE.MeshBasicMaterial({
+      color: 0xffbe0b,
+      wireframe: true,
+      toneMapped: false,
+    })
+  );
+  reticleDiamond.position.y = 0.0065;
+  targetReticleGroup.add(reticleDiamond);
+  rootGroup.add(targetReticleGroup);
+
+  // 2B. Finned Homing Fireball Missiles + Smoke/Flame Trail Puffs
   const activeRockets = [];
-  const rocketGeo = new THREE.CylinderGeometry(0.001, 0.0015, 0.0056, 10);
-  rocketGeo.rotateX(Math.PI / 2);
-  const rocketMat = new THREE.MeshStandardMaterial({
+  const rocketBodyGeo = new THREE.CylinderGeometry(0.0009, 0.0014, 0.0058, 12);
+  rocketBodyGeo.rotateX(Math.PI / 2);
+  const rocketNoseGeo = new THREE.ConeGeometry(0.0014, 0.0024, 12);
+  rocketNoseGeo.rotateX(Math.PI / 2);
+  rocketNoseGeo.translate(0, 0, 0.0038);
+  const rocketFinGeo = new THREE.BoxGeometry(0.0038, 0.00035, 0.0018);
+  rocketFinGeo.translate(0, 0, -0.0022);
+
+  const rocketBodyMat = new THREE.MeshStandardMaterial({
     color: 0xff1e26,
-    emissive: new THREE.Color(0xff5500),
+    emissive: new THREE.Color(0xff4500),
     emissiveIntensity: 1.4,
     roughness: 0.2,
     metalness: 0.7,
   });
+  const rocketNoseMat = new THREE.MeshBasicMaterial({
+    color: 0xffbe0b,
+    toneMapped: false,
+  });
 
-  // Active Oil Slicks on Track (with Neon Hazard Ring so players can spot & dodge!)
+  function createRocketMesh() {
+    const grp = new THREE.Group();
+    const body = new THREE.Mesh(rocketBodyGeo, rocketBodyMat);
+    const nose = new THREE.Mesh(rocketNoseGeo, rocketNoseMat);
+    const finH = new THREE.Mesh(rocketFinGeo, rocketNoseMat);
+    const finV = new THREE.Mesh(rocketFinGeo, rocketNoseMat);
+    finV.rotation.z = Math.PI / 2;
+    grp.add(body, nose, finH, finV);
+    return grp;
+  }
+
+  // Rocket Smoke & Flame Trail Puffs
+  const rocketTrailPuffs = [];
+  const trailPuffGeo = new THREE.DodecahedronGeometry(0.0012, 0);
+  const trailFireMat = new THREE.MeshBasicMaterial({
+    color: 0xff7700,
+    transparent: true,
+    opacity: 0.85,
+    toneMapped: false,
+  });
+
+  // 2C. Active Oil / Toxic Slick Traps on Track
   const activeOilSlicks = [];
-  const oilGeo = new THREE.CircleGeometry(0.0058, 16);
+  const oilGeo = new THREE.CircleGeometry(0.0062, 20);
   oilGeo.rotateX(-Math.PI / 2);
   const oilMat = new THREE.MeshStandardMaterial({
-    color: 0x060810,
-    emissive: new THREE.Color(0x3b0764),
-    emissiveIntensity: 0.65,
-    roughness: 0.06,
-    metalness: 0.92,
+    color: 0x090b10,
+    emissive: new THREE.Color(0x581c87),
+    emissiveIntensity: 0.85,
+    roughness: 0.05,
+    metalness: 0.95,
     polygonOffset: true,
     polygonOffsetFactor: -4,
     polygonOffsetUnits: -4,
   });
-  const oilRingGeo = new THREE.RingGeometry(0.0052, 0.0064, 20);
+  const oilRingGeo = new THREE.RingGeometry(0.0054, 0.0068, 24);
   oilRingGeo.rotateX(-Math.PI / 2);
   const oilRingMat = new THREE.MeshBasicMaterial({
-    color: 0xa855f7,
+    color: 0xc084fc,
+    side: THREE.DoubleSide,
+    toneMapped: false,
+  });
+  const oilCoreRingGeo = new THREE.RingGeometry(0.0022, 0.0032, 16);
+  oilCoreRingGeo.rotateX(-Math.PI / 2);
+  const oilCoreRingMat = new THREE.MeshBasicMaterial({
+    color: 0x22c55e,
     side: THREE.DoubleSide,
     toneMapped: false,
   });
 
-  // Active EMP Shockwaves
+  // 2D. Active EMP Shockwaves & 3D Chain Lightning Bolts
   const activeEmpWaves = [];
-  const empGeo = new THREE.RingGeometry(0.0022, 0.0038, 24);
+  const empGeo = new THREE.RingGeometry(0.0024, 0.0042, 28);
   empGeo.rotateX(-Math.PI / 2);
+  const activeLightningBolts = [];
 
-  // Explosion Shockwave Sphere
+  // 2E. Multi-Stage Explosion Fireballs & Flying Debris Sparks
   const explosionSparks = [];
-  const shockwaveGeo = new THREE.SphereGeometry(0.0024, 12, 10);
+  const shockwaveGeo = new THREE.IcosahedronGeometry(0.0026, 1);
+  const debrisGeo = new THREE.OctahedronGeometry(0.00085, 0);
 
-  // Player Shield Mesh (Cyan energy bubble sized for 0.56x kart scale)
-  const shieldGeo = new THREE.SphereGeometry(0.0075, 16, 12);
-  const shieldMat = new THREE.MeshStandardMaterial({
+  // 2F. Geodesic Bubble Shield Dome (Dual-Layer Beach Buggy Energy Shield)
+  const playerShieldGroup = new THREE.Group();
+  playerShieldGroup.visible = false;
+
+  const shieldSphereGeo = new THREE.SphereGeometry(0.0076, 18, 14);
+  const shieldSphereMat = new THREE.MeshStandardMaterial({
     color: 0x00f0ff,
     emissive: new THREE.Color(0x00c8e0),
-    emissiveIntensity: 0.7,
-    roughness: 0.15,
+    emissiveIntensity: 0.75,
+    roughness: 0.12,
     metalness: 0.2,
     transparent: true,
-    opacity: 0.42,
+    opacity: 0.36,
     depthWrite: false,
     side: THREE.DoubleSide,
   });
-  const playerShieldMesh = new THREE.Mesh(shieldGeo, shieldMat);
-  playerShieldMesh.visible = false;
-  rootGroup.add(playerShieldMesh);
+  const shieldInnerMesh = new THREE.Mesh(shieldSphereGeo, shieldSphereMat);
+  playerShieldGroup.add(shieldInnerMesh);
 
-  // Player Powerup State (Strictly single-use consumable: 1 pickup = 1 fire)
+  const shieldWireGeo = new THREE.IcosahedronGeometry(0.0079, 1);
+  const shieldWireMat = new THREE.MeshBasicMaterial({
+    color: 0x7dd3fc,
+    wireframe: true,
+    transparent: true,
+    opacity: 0.65,
+    toneMapped: false,
+    depthWrite: false,
+  });
+  const shieldWireMesh = new THREE.Mesh(shieldWireGeo, shieldWireMat);
+  playerShieldGroup.add(shieldWireMesh);
+  rootGroup.add(playerShieldGroup);
+
+  // Player Powerup & Roulette State
   let playerHeldPowerup = null;
+  let pendingPowerup = null;
+  let rouletteTimer = 0.0;
+  let rouletteCycleIdx = 0;
+  let roulettePreview = null;
   let playerPickupCooldown = 0.0;
   let playerShieldTimer = 0.0;
   let playerSpinoutTimer = 0.0;
+  let playerSpinoutReason = null;
+
+  // Combat Feed Toast & Target Lock Info
+  let combatFeedMessage = null;
+  let combatFeedTimer = 0.0;
+  let lockedTargetInfo = { name: null, distM: null };
+  let incomingThreatInfo = { active: false, attackerName: null, urgency: 0.0 };
+
+  function setCombatFeed(msg, duration = 2.4) {
+    combatFeedMessage = msg;
+    combatFeedTimer = duration;
+  }
 
   /**
-   * Rolls a weighted mystery box powerup based on rank (1st = defense/oil, 4th = rockets/nitro)
+   * Rolls a weighted mystery pod powerup based on rank (1st = defense/traps, 2nd-4th = offensive/boost)
    */
   function rollPowerup(rank = 1) {
     const roll = Math.random();
     if (rank >= 4) {
-      if (roll < 0.45) return 'ROCKET';
-      if (roll < 0.78) return 'HYPER_NITRO';
+      if (roll < 0.46) return 'ROCKET';
+      if (roll < 0.76) return 'HYPER_NITRO';
       if (roll < 0.92) return 'EMP';
       return 'SHIELD';
     } else if (rank >= 2) {
-      if (roll < 0.38) return 'ROCKET';
-      if (roll < 0.62) return 'HYPER_NITRO';
-      if (roll < 0.82) return 'SHIELD';
-      return 'EMP';
+      if (roll < 0.40) return 'ROCKET';
+      if (roll < 0.64) return 'HYPER_NITRO';
+      if (roll < 0.84) return 'EMP';
+      return 'SHIELD';
     } else {
-      if (roll < 0.42) return 'SHIELD';
-      if (roll < 0.78) return 'OIL_SLICK';
+      if (roll < 0.36) return 'SHIELD';
+      if (roll < 0.68) return 'OIL_SLICK';
+      if (roll < 0.86) return 'ROCKET';
       return 'HYPER_NITRO';
     }
   }
 
   /**
-   * Spawns an explosion blast at a 3D location
+   * Spawns a multi-layered Beach Buggy explosion fireball + flying debris embers at a 3D location
    */
-  function triggerExplosion(pos, audioSynth) {
+  function triggerExplosion(pos, audioSynth, colorHex = 0xff6600) {
     if (audioSynth && audioSynth.playExplosion) {
       audioSynth.playExplosion();
     }
     const shockwaveMat = new THREE.MeshBasicMaterial({
-      color: 0xffaa00,
+      color: colorHex,
       transparent: true,
       opacity: 0.95,
       wireframe: true,
+      toneMapped: false,
     });
     const shockMesh = new THREE.Mesh(shockwaveGeo, shockwaveMat);
     shockMesh.position.copy(pos);
     rootGroup.add(shockMesh);
 
+    const debrisParticles = [];
+    for (let d = 0; d < 8; d++) {
+      const dMat = new THREE.MeshBasicMaterial({
+        color: d % 2 === 0 ? 0xffbe0b : 0xff2a2a,
+        transparent: true,
+        opacity: 1.0,
+        toneMapped: false,
+      });
+      const dMesh = new THREE.Mesh(debrisGeo, dMat);
+      dMesh.position.copy(pos);
+      rootGroup.add(dMesh);
+      const angle = (d / 8) * Math.PI * 2 + Math.random() * 0.4;
+      const spd = 0.035 + Math.random() * 0.045;
+      debrisParticles.push({
+        mesh: dMesh,
+        vel: new THREE.Vector3(
+          Math.cos(angle) * spd,
+          0.035 + Math.random() * 0.04,
+          Math.sin(angle) * spd
+        ),
+      });
+    }
+
     explosionSparks.push({
       mesh: shockMesh,
+      debris: debrisParticles,
       scale: 1.0,
-      timer: 0.35,
+      timer: 0.45,
+      maxTimer: 0.45,
     });
   }
 
   /**
-   * Drops an oil slick behind the given track position so the dropper never hits it
+   * Spawns a 3D jagged electric lightning bolt between two 3D world positions
+   */
+  function spawnLightningBolt(startPos, endPos) {
+    const segments = 8;
+    const points = [];
+    const diff = new THREE.Vector3().subVectors(endPos, startPos);
+    for (let i = 0; i <= segments; i++) {
+      const t = i / segments;
+      const pt = new THREE.Vector3().copy(startPos).addScaledVector(diff, t);
+      if (i > 0 && i < segments) {
+        pt.x += (Math.random() - 0.5) * 0.0065;
+        pt.y += (Math.random() - 0.5) * 0.0065 + 0.0025;
+        pt.z += (Math.random() - 0.5) * 0.0065;
+      }
+      points.push(pt);
+    }
+    const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+    const lineMat = new THREE.LineBasicMaterial({
+      color: 0x00f0ff,
+      transparent: true,
+      opacity: 1.0,
+      toneMapped: false,
+    });
+    const lineMesh = new THREE.Line(lineGeo, lineMat);
+    rootGroup.add(lineMesh);
+
+    activeLightningBolts.push({
+      mesh: lineMesh,
+      timer: 0.38,
+    });
+  }
+
+  /**
+   * Drops a glowing oil/toxic hazard trap behind the given track position
    */
   function spawnOilSlick(sVal, latOffset, ownerId) {
     const behindS = ((sVal - 0.018) % totalLength + totalLength) % totalLength;
@@ -376,8 +597,10 @@ export function createPowerupManager(splineData, scene) {
     const oilGroup = new THREE.Group();
     const oilMesh = new THREE.Mesh(oilGeo, oilMat);
     const ringMesh = new THREE.Mesh(oilRingGeo, oilRingMat);
-    ringMesh.position.y = 0.0001;
-    oilGroup.add(oilMesh, ringMesh);
+    const coreRing = new THREE.Mesh(oilCoreRingGeo, oilCoreRingMat);
+    ringMesh.position.y = 0.00012;
+    coreRing.position.y = 0.00018;
+    oilGroup.add(oilMesh, ringMesh, coreRing);
 
     oilGroup.position
       .copy(frame.pos)
@@ -397,15 +620,15 @@ export function createPowerupManager(splineData, scene) {
   }
 
   /**
-   * Fires a homing rocket along the spline toward the next target ahead
+   * Fires a finned homing fireball missile along the spline toward the locked target ahead
    */
-  function fireRocket(startS, startLat, targetRacer, ownerId, audioSynth) {
+  function fireRocket(startS, startLat, targetRacer, ownerId, ownerName, audioSynth) {
     if (audioSynth && audioSynth.playRocketLaunch) {
       audioSynth.playRocketLaunch();
     }
     const spawnS = (startS + 0.015) % totalLength;
     const frame = samplePoint(spawnS);
-    const rocketMesh = new THREE.Mesh(rocketGeo, rocketMat);
+    const rocketMesh = createRocketMesh();
     rocketMesh.position
       .copy(frame.pos)
       .addScaledVector(frame.right, startLat)
@@ -417,15 +640,17 @@ export function createPowerupManager(splineData, scene) {
       s: spawnS,
       latOffset: startLat,
       ownerId,
+      ownerName: ownerName || 'RIVAL',
       mesh: rocketMesh,
       targetRacer,
-      speed: 0.44,
+      speed: 0.46,
       lifeTimer: 4.2,
+      trailAccum: 0.0,
     });
   }
 
   /**
-   * Triggers an expanding EMP shockwave
+   * Triggers an expanding EMP shockwave ring
    */
   function triggerEmp(startPos, sourceId, audioSynth) {
     if (audioSynth && audioSynth.playEmpBlast) {
@@ -434,9 +659,10 @@ export function createPowerupManager(splineData, scene) {
     const empMat = new THREE.MeshBasicMaterial({
       color: 0x00f0ff,
       transparent: true,
-      opacity: 0.9,
+      opacity: 0.95,
       side: THREE.DoubleSide,
       depthWrite: false,
+      toneMapped: false,
     });
     const empMesh = new THREE.Mesh(empGeo, empMat);
     empMesh.position.copy(startPos);
@@ -446,8 +672,25 @@ export function createPowerupManager(splineData, scene) {
       mesh: empMesh,
       sourceId,
       radius: 0.004,
-      timer: 0.55,
+      timer: 0.58,
     });
+  }
+
+  /**
+   * Finds the nearest rival ahead of the player for weapon lock-on
+   */
+  function findNearestRivalAhead(playerState, rivalsList, maxAheadM = 0.95) {
+    let nearestTarget = null;
+    let minAheadDist = Infinity;
+    for (let i = 0; i < rivalsList.length; i++) {
+      const r = rivalsList[i];
+      const aheadDist = ((r.s - playerState.s) % totalLength + totalLength) % totalLength;
+      if (aheadDist > 0.006 && aheadDist < maxAheadM && aheadDist < minAheadDist) {
+        minAheadDist = aheadDist;
+        nearestTarget = r;
+      }
+    }
+    return { target: nearestTarget, distM: nearestTarget ? minAheadDist : null };
   }
 
   /**
@@ -456,6 +699,12 @@ export function createPowerupManager(splineData, scene) {
   function triggerRivalPowerup(rival, playerState, rivalsList, audioSynth) {
     if (!rival || !rival.heldItem || rival.spinoutTimer > 0) return false;
     const item = rival.heldItem;
+
+    // Opening 8.0s grace period on Lap 1: AI only uses speed boosts, never offensive spinout weapons
+    if ((playerState.totalRaceTime || 0) < 8.0 && item !== 'HYPER_NITRO') {
+      return false;
+    }
+
     rival.heldItem = null;
 
     if (item === 'HYPER_NITRO') {
@@ -470,15 +719,17 @@ export function createPowerupManager(splineData, scene) {
     }
 
     if (item === 'ROCKET') {
-      // Find nearest target ahead (either player or another AI rival)
       let nearestTarget = null;
       let minAheadDist = Infinity;
 
       const playerAheadDist = ((playerState.s - rival.s) % totalLength + totalLength) % totalLength;
-      if (playerAheadDist > 0.012 && playerAheadDist < 0.85) {
+      if (playerAheadDist > 0.018 && playerAheadDist < 0.68) {
         minAheadDist = playerAheadDist;
         nearestTarget = {
           isPlayer: true,
+          get s() {
+            return playerState.s;
+          },
           get lateralOffset() {
             return playerState.lateralOffset;
           },
@@ -495,16 +746,44 @@ export function createPowerupManager(splineData, scene) {
         }
       }
 
-      fireRocket(rival.s, rival.lateralOffset, nearestTarget, rival.id, audioSynth);
+      const dToPlayer = rival.position.distanceTo(playerState.position);
+      fireRocket(
+        rival.s,
+        rival.lateralOffset,
+        nearestTarget,
+        rival.id,
+        rival.name,
+        dToPlayer < 0.28 ? audioSynth : null
+      );
       return true;
     }
 
     if (item === 'EMP') {
-      triggerEmp(rival.position, rival.id, audioSynth);
       const dPlayer = rival.position.distanceTo(playerState.position);
-      if (dPlayer < 0.09 && playerShieldTimer <= 0) {
-        playerSpinoutTimer = 0.75;
-        playerState.speed *= 0.55;
+      const dSpline = Math.abs(
+        ((rival.s - playerState.s + totalLength * 0.5) % totalLength) - totalLength * 0.5
+      );
+      triggerEmp(rival.position, rival.id, dPlayer < 0.26 ? audioSynth : null);
+      if (dPlayer < 0.045 && dSpline < 0.048) {
+        spawnLightningBolt(rival.position, playerState.position);
+        if (playerShieldTimer > 0) {
+          playerShieldTimer = 0.0;
+          playerShieldGroup.visible = false;
+          triggerExplosion(playerState.position, audioSynth, 0x00f0ff);
+          if (audioSynth && audioSynth.playShieldDeflect) {
+            audioSynth.playShieldDeflect();
+          }
+          setCombatFeed('🛡️ SHIELD BLOCKED EMP SHOCKWAVE!');
+        } else {
+          playerSpinoutTimer = 0.78;
+          playerSpinoutReason = `⚡ ZAPPED BY ${rival.name}'S EMP!`;
+          playerState.spinoutTimer = 0.78;
+          playerState.spinoutDir = Math.random() < 0.5 ? 1 : -1;
+          playerState.speed *= 0.48;
+          playerState.boostActive = 0.0;
+          playerState.hopVel = 0.036;
+          playerState.cameraShake = 0.28;
+        }
       }
       return true;
     }
@@ -513,34 +792,47 @@ export function createPowerupManager(splineData, scene) {
   }
 
   /**
-   * Player triggers held powerup (Strictly single-use: empties slot immediately upon firing)
+   * Player triggers held powerup (or fast-locks roulette if tapped during spin!)
    */
   function triggerPlayerPowerup(playerState, rivalsList, audioSynth) {
-    if (!playerHeldPowerup || playerSpinoutTimer > 0) return false;
+    if (playerSpinoutTimer > 0) return false;
+
+    // If roulette is still spinning and player taps fire, immediately lock in the weapon!
+    if (rouletteTimer > 0 && pendingPowerup) {
+      playerHeldPowerup = pendingPowerup;
+      pendingPowerup = null;
+      rouletteTimer = 0.0;
+      roulettePreview = null;
+    }
+
+    if (!playerHeldPowerup) return false;
 
     const currentItem = playerHeldPowerup;
     playerHeldPowerup = null;
-    playerPickupCooldown = Math.max(playerPickupCooldown, 0.65);
+    playerPickupCooldown = Math.max(playerPickupCooldown, 0.55);
 
     if (currentItem === 'SHIELD') {
-      playerShieldTimer = 7.0;
-      playerShieldMesh.visible = true;
+      playerShieldTimer = 7.5;
+      playerShieldGroup.visible = true;
       if (audioSynth && audioSynth.playShieldActivate) {
         audioSynth.playShieldActivate();
       }
+      setCombatFeed('🛡️ BUBBLE SHIELD ACTIVATED!');
       return true;
     }
 
     if (currentItem === 'HYPER_NITRO') {
-      playerState.boostActive = Math.max(playerState.boostActive || 0, 2.1);
+      playerState.boostActive = Math.max(playerState.boostActive || 0, 2.25);
       playerState.boostCharge = 1.0;
       playerState.speed = Math.max(
         playerState.speed,
-        0.295 * (playerState.topSpeedMultiplier || 1.0)
+        0.305 * (playerState.topSpeedMultiplier || 1.0)
       );
+      playerState.cameraShake = Math.max(playerState.cameraShake || 0, 0.14);
       if (audioSynth && audioSynth.playNitroBoost) {
         audioSynth.playNitroBoost();
       }
+      setCombatFeed('⚡ HYPER NITRO UNLEASHED!');
       return true;
     }
 
@@ -549,43 +841,51 @@ export function createPowerupManager(splineData, scene) {
       if (audioSynth && audioSynth.playOilSpinout) {
         audioSynth.playOilSpinout();
       }
+      setCombatFeed('🛢️ OIL HAZARD TRAP DEPLOYED!');
       return true;
     }
 
     if (currentItem === 'ROCKET') {
-      let nearestTarget = null;
-      let minAheadDist = Infinity;
-      for (let i = 0; i < rivalsList.length; i++) {
-        const r = rivalsList[i];
-        const aheadDist = ((r.s - playerState.s) % totalLength + totalLength) % totalLength;
-        if (aheadDist > 0.008 && aheadDist < minAheadDist) {
-          minAheadDist = aheadDist;
-          nearestTarget = r;
-        }
-      }
+      const { target: nearestTarget } = findNearestRivalAhead(playerState, rivalsList, 1.25);
       fireRocket(
         playerState.s,
         playerState.lateralOffset,
         nearestTarget,
         'player',
+        'YOU',
         audioSynth
       );
+      if (nearestTarget) {
+        setCombatFeed(`🚀 HOMING MISSILE LOCKED ON ${nearestTarget.name}!`);
+      } else {
+        setCombatFeed('🚀 FIREBALL MISSILE LAUNCHED!');
+      }
       return true;
     }
 
     if (currentItem === 'EMP') {
       triggerEmp(playerState.position, 'player', audioSynth);
+      const zappedNames = [];
       for (let i = 0; i < rivalsList.length; i++) {
         const r = rivalsList[i];
         const d3d = playerState.position.distanceTo(r.position);
         const dSpline = Math.abs(
           ((r.s - playerState.s + totalLength * 0.5) % totalLength) - totalLength * 0.5
         );
-        if (d3d < 0.12 || dSpline < 0.18) {
-          r.speed *= 0.32;
-          r.spinoutTimer = 1.1;
-          r.hopVel = 0.025;
+        if (d3d < 0.16 || dSpline < 0.24) {
+          spawnLightningBolt(playerState.position, r.position);
+          triggerExplosion(r.position, null, 0x00f0ff);
+          r.speed *= 0.22;
+          r.spinoutTimer = 1.45;
+          r.hopVel = 0.058;
+          zappedNames.push(r.name);
         }
+      }
+      playerState.cameraShake = Math.max(playerState.cameraShake || 0, 0.30);
+      if (zappedNames.length > 0) {
+        setCombatFeed(`⚡ CHAIN LIGHTNING ZAPPED ${zappedNames.join(' & ')}!`);
+      } else {
+        setCombatFeed('⚡ EMP SHOCKWAVE DISCHARGED!');
       }
       return true;
     }
@@ -594,12 +894,43 @@ export function createPowerupManager(splineData, scene) {
   }
 
   /**
-   * Main 60FPS update step for Mystery Boxes, Boost Pads, Jump Ramps, Rockets, Oil, Shields & EMPs
+   * Main 60FPS update step for Mystery Pods, Roulette, Target Lock, Boost Pads, Jump Ramps, Rockets, Oil, Shields & EMPs
    */
   function update(dt, playerState, rivalsList, audioSynth, currentRank = 1) {
     const tSec = performance.now() * 0.001;
     if (playerPickupCooldown > 0) {
       playerPickupCooldown = Math.max(0.0, playerPickupCooldown - dt);
+    }
+    if (combatFeedTimer > 0) {
+      combatFeedTimer = Math.max(0.0, combatFeedTimer - dt);
+      if (combatFeedTimer <= 0) {
+        combatFeedMessage = null;
+      }
+    }
+
+    // 0. Update Beach Buggy Slot-Machine Powerup Roulette Roll
+    if (rouletteTimer > 0) {
+      const prevTickBucket = Math.floor(rouletteTimer * 14.0);
+      rouletteTimer = Math.max(0.0, rouletteTimer - dt);
+      const nextTickBucket = Math.floor(rouletteTimer * 14.0);
+
+      if (prevTickBucket !== nextTickBucket) {
+        rouletteCycleIdx = (rouletteCycleIdx + 1) % POWERUP_POOL.length;
+        roulettePreview = POWERUP_POOL[rouletteCycleIdx];
+        if (audioSynth && audioSynth.playRouletteTick) {
+          const progress = 1.0 - rouletteTimer / 0.82;
+          audioSynth.playRouletteTick(0.85 + progress * 0.55);
+        }
+      }
+
+      if (rouletteTimer <= 0 && pendingPowerup) {
+        playerHeldPowerup = pendingPowerup;
+        pendingPowerup = null;
+        roulettePreview = null;
+        if (audioSynth && audioSynth.playRouletteLock) {
+          audioSynth.playRouletteLock();
+        }
+      }
     }
 
     // 0A. Update 6 Neon Chevron Track Boost Pads
@@ -609,14 +940,12 @@ export function createPowerupManager(splineData, scene) {
         pad.playerCooldown = Math.max(0.0, pad.playerCooldown - dt);
       }
 
-      // Sequential chevron chase pulse
       const activeWave = Math.floor((tSec * 9.0 + pIdx) % 3);
       for (let c = 0; c < pad.chevronMats.length; c++) {
         const mat = pad.chevronMats[c];
         mat.color.copy(pad.baseColor).multiplyScalar(c === activeWave ? 1.5 : 0.65);
       }
 
-      // Player hits Boost Pad
       if (pad.playerCooldown <= 0 && !playerState.countdownLocked && playerState.speed > 0.02) {
         const dS = Math.abs(
           ((playerState.s - pad.s + totalLength * 0.5) % totalLength) - totalLength * 0.5
@@ -636,7 +965,6 @@ export function createPowerupManager(splineData, scene) {
         }
       }
 
-      // AI Rivals hit Boost Pad
       for (let rIdx = 0; rIdx < rivalsList.length; rIdx++) {
         const rival = rivalsList[rIdx];
         const dS = Math.abs(
@@ -650,42 +978,67 @@ export function createPowerupManager(splineData, scene) {
       }
     }
 
-    // 0B. Update 3 Arcade Jump Ramps
+    // 0B. Update 3 Sculpted 3D Wedge Arcade Jump Ramps
+    playerState.onRampSurface = false;
+    playerState.rampSurfaceHeight = 0.0;
+
     for (let jIdx = 0; jIdx < jumpRamps.length; jIdx++) {
       const ramp = jumpRamps[jIdx];
       if (ramp.playerCooldown > 0) {
         ramp.playerCooldown = Math.max(0.0, ramp.playerCooldown - dt);
       }
 
-      if (ramp.playerCooldown <= 0 && !playerState.countdownLocked && playerState.speed > 0.05) {
-        const dS = Math.abs(
-          ((playerState.s - ramp.s + totalLength * 0.5) % totalLength) - totalLength * 0.5
-        );
+      if (!playerState.countdownLocked) {
+        const signedDS =
+          ((playerState.s - ramp.s + totalLength * 0.5) % totalLength) - totalLength * 0.5;
         const dLat = Math.abs(playerState.lateralOffset - ramp.latOffset);
-        if (dS < 0.012 && dLat < 0.0048 && (playerState.hopHeight || 0) < 0.001) {
-          ramp.playerCooldown = 1.5;
-          playerState.hopVel = 0.042;
-          playerState.boostActive = Math.max(playerState.boostActive || 0, 1.05);
-          if (audioSynth && audioSynth.playNitroBoost) {
-            audioSynth.playNitroBoost();
+
+        if (signedDS >= -0.0105 && signedDS <= 0.0110 && dLat < 0.0068) {
+          const u = THREE.MathUtils.clamp((signedDS + 0.0095) / 0.019, 0.0, 1.0);
+          const wedgeH = 0.0003 + u * 0.0034;
+          playerState.onRampSurface = true;
+          playerState.rampSurfaceHeight = Math.max(playerState.rampSurfaceHeight || 0.0, wedgeH);
+          playerState.hopHeight = Math.max(playerState.hopHeight || 0.0, wedgeH);
+          playerState.rampPitch = -0.16 * u;
+
+          if (u >= 0.55 && ramp.playerCooldown <= 0 && playerState.speed > 0.02) {
+            ramp.playerCooldown = 1.15;
+            playerState.hopVel = Math.max(
+              playerState.hopVel || 0.0,
+              Math.min(0.048, 0.034 + Math.abs(playerState.speed) * 0.045)
+            );
+            playerState.rampPitch = -0.16;
+            playerState.boostActive = Math.max(playerState.boostActive || 0, 1.55);
+            playerState.boostCharge = Math.min(1.0, (playerState.boostCharge || 0) + 0.35);
+            playerState.speed = Math.max(
+              playerState.speed,
+              0.285 * (playerState.topSpeedMultiplier || 1.0)
+            );
+            if (audioSynth && audioSynth.playNitroBoost) {
+              audioSynth.playNitroBoost();
+            }
           }
         }
       }
 
       for (let rIdx = 0; rIdx < rivalsList.length; rIdx++) {
         const rival = rivalsList[rIdx];
-        const dS = Math.abs(
-          ((rival.s - ramp.s + totalLength * 0.5) % totalLength) - totalLength * 0.5
-        );
+        const signedRivalDS =
+          ((rival.s - ramp.s + totalLength * 0.5) % totalLength) - totalLength * 0.5;
         const dLat = Math.abs(rival.lateralOffset - ramp.latOffset);
-        if (dS < 0.012 && dLat < 0.0046 && (rival.hopHeight || 0) < 0.001) {
-          rival.hopVel = 0.038;
-          rival.boostTimer = 1.0;
+        if (signedRivalDS >= -0.0105 && signedRivalDS <= 0.0110 && dLat < 0.0060) {
+          const u = THREE.MathUtils.clamp((signedRivalDS + 0.0095) / 0.019, 0.0, 1.0);
+          const wedgeH = 0.0003 + u * 0.0036;
+          rival.hopHeight = Math.max(rival.hopHeight || 0.0, wedgeH);
+          if (u >= 0.35 && (rival.hopVel || 0) < 0.02) {
+            rival.hopVel = 0.062;
+            rival.boostTimer = 1.25;
+          }
         }
       }
     }
 
-    // 1. Update Mystery Item Boxes
+    // 1. Update Floating 3D Mystery Energy Pods
     for (let bIdx = 0; bIdx < mysteryBoxes.length; bIdx++) {
       const box = mysteryBoxes[bIdx];
       if (!box.active) {
@@ -697,20 +1050,20 @@ export function createPowerupManager(splineData, scene) {
         continue;
       }
 
-      const bob = Math.sin(tSec * 4.2 + box.s * 10) * 0.0006;
+      const bob = Math.sin(tSec * 4.5 + box.s * 12) * 0.00065;
       box.mesh.position.copy(box.basePos).addScaledVector(box.normal, bob);
-      box.mesh.rotation.y += dt * 2.4;
-      box.coreMesh.rotation.x += dt * 3.2;
-      box.coreMesh.rotation.z += dt * 2.1;
+      box.mesh.rotation.y += dt * 2.6;
+      box.coreMesh.rotation.x += dt * 3.8;
+      box.coreMesh.rotation.z += dt * 2.4;
+      box.ringMesh.rotation.z -= dt * 4.2;
 
-      // Check Player Pickup (Generous magnetic hitbox when slot is empty)
       const playerDistS = Math.abs(
         ((playerState.s - box.s + totalLength * 0.5) % totalLength) - totalLength * 0.5
       );
       const playerDistLat = Math.abs(playerState.lateralOffset - box.latOffset);
 
-      if (!playerHeldPowerup && playerPickupCooldown <= 0) {
-        if (playerDistS < 0.028 && playerDistLat < 0.008) {
+      if (!playerHeldPowerup && !pendingPowerup && playerPickupCooldown <= 0) {
+        if (playerDistS < 0.028 && playerDistLat < 0.0082) {
           playerState.lateralOffset = THREE.MathUtils.lerp(
             playerState.lateralOffset,
             box.latOffset,
@@ -718,9 +1071,17 @@ export function createPowerupManager(splineData, scene) {
           );
           box.active = false;
           box.mesh.visible = false;
-          box.respawnTimer = 5.0;
-          playerHeldPowerup = rollPowerup(currentRank);
-          playerPickupCooldown = 1.25; // Prevents double-pickup from adjacent box in the same row
+          box.respawnTimer = 4.8;
+
+          // Start Beach Buggy Slot-Machine Roulette Roll!
+          pendingPowerup = rollPowerup(currentRank);
+          rouletteTimer = 0.78;
+          rouletteCycleIdx = Math.floor(Math.random() * POWERUP_POOL.length);
+          roulettePreview = POWERUP_POOL[rouletteCycleIdx];
+          playerPickupCooldown = 1.15;
+
+          // Spawn glowing pickup burst at pod position
+          triggerExplosion(box.mesh.position, null, 0x00f0ff);
           if (audioSynth && audioSynth.playPowerupBoxPickup) {
             audioSynth.playPowerupBoxPickup();
           }
@@ -735,42 +1096,82 @@ export function createPowerupManager(splineData, scene) {
           ((rival.s - box.s + totalLength * 0.5) % totalLength) - totalLength * 0.5
         );
         const rivalDistLat = Math.abs(rival.lateralOffset - box.latOffset);
-        if (rivalDistS < 0.015 && rivalDistLat < 0.0042) {
+        if (rivalDistS < 0.015 && rivalDistLat < 0.0044) {
           box.active = false;
           box.mesh.visible = false;
-          box.respawnTimer = 5.0;
+          box.respawnTimer = 4.8;
           if (!rival.heldItem) {
             rival.heldItem = rollPowerup(rival.rank || 2);
+            rival.itemCooldown = Math.max(rival.itemCooldown || 0, 2.4);
           }
           break;
         }
       }
     }
 
-    // 2. Update Active Player Shield
-    if (playerShieldTimer > 0) {
-      playerShieldTimer -= dt;
-      playerShieldMesh.visible = true;
-      playerShieldMesh.position
-        .copy(playerState.position)
-        .addScaledVector(playerState.normal, 0.0028);
-      playerShieldMesh.rotation.y += dt * 4.0;
-      shieldMat.opacity = 0.34 + Math.sin(tSec * 16.0) * 0.1;
-      if (playerShieldTimer <= 0) {
-        playerShieldMesh.visible = false;
+    // 1C. Update 3D Target Lock-On Crosshair Reticle when player holds ROCKET or EMP
+    const activeOffensiveWeapon =
+      playerHeldPowerup === 'ROCKET' ||
+      playerHeldPowerup === 'EMP' ||
+      (rouletteTimer > 0 && pendingPowerup === 'ROCKET');
+    if (activeOffensiveWeapon) {
+      const { target, distM } = findNearestRivalAhead(playerState, rivalsList, 1.15);
+      if (target) {
+        targetReticleGroup.visible = true;
+        targetReticleGroup.position.copy(target.position);
+        targetReticleGroup.rotation.y += dt * 5.5;
+        const pulseScale = 0.92 + Math.sin(tSec * 14.0) * 0.14;
+        reticleOuterRing.scale.setScalar(pulseScale);
+        reticleDiamond.rotation.y -= dt * 8.0;
+        lockedTargetInfo.name = target.name;
+        lockedTargetInfo.distM = Math.round(distM * 100);
+      } else {
+        targetReticleGroup.visible = false;
+        lockedTargetInfo.name = null;
+        lockedTargetInfo.distM = null;
       }
     } else {
-      playerShieldMesh.visible = false;
+      targetReticleGroup.visible = false;
+      lockedTargetInfo.name = null;
+      lockedTargetInfo.distM = null;
     }
 
-    // 3. Update Player Spinout Recovery
+    // 2. Update Active Player Geodesic Bubble Shield
+    if (playerShieldTimer > 0) {
+      playerShieldTimer -= dt;
+      playerShieldGroup.visible = true;
+      playerShieldGroup.position
+        .copy(playerState.position)
+        .addScaledVector(playerState.normal, 0.0028);
+      shieldInnerMesh.rotation.y += dt * 3.2;
+      shieldWireMesh.rotation.y -= dt * 4.8;
+      shieldWireMesh.rotation.x += dt * 2.4;
+      shieldSphereMat.opacity = 0.30 + Math.sin(tSec * 14.0) * 0.08;
+      if (playerShieldTimer <= 0) {
+        playerShieldGroup.visible = false;
+      }
+    } else {
+      playerShieldGroup.visible = false;
+    }
+
+    // 3. Synchronize Player Spinout Recovery State with Physics Controller
     if (playerSpinoutTimer > 0) {
-      playerSpinoutTimer -= dt;
-      playerState.headingYaw += dt * 13.0;
-      playerState.speed = Math.max(0.02, playerState.speed * 0.95);
+      playerSpinoutTimer = Math.max(0.0, playerSpinoutTimer - dt);
+      playerState.spinoutTimer = Math.max(playerState.spinoutTimer || 0.0, playerSpinoutTimer);
+      if (playerSpinoutTimer <= 0) {
+        playerSpinoutReason = null;
+      }
+    } else if ((playerState.spinoutTimer || 0) > 0) {
+      playerSpinoutTimer = playerState.spinoutTimer;
+    } else {
+      playerSpinoutReason = null;
     }
 
-    // 4. Update Active Homing Rockets
+    // 4. Update Active Homing Fireball Rockets & Incoming Threat Radar
+    incomingThreatInfo.active = false;
+    incomingThreatInfo.attackerName = null;
+    incomingThreatInfo.urgency = 0.0;
+
     for (let i = activeRockets.length - 1; i >= 0; i--) {
       const rocket = activeRockets[i];
       rocket.lifeTimer -= dt;
@@ -781,7 +1182,7 @@ export function createPowerupManager(splineData, scene) {
         rocket.latOffset = THREE.MathUtils.lerp(
           rocket.latOffset,
           rocket.targetRacer.lateralOffset,
-          Math.min(1.0, dt * 8.5)
+          Math.min(1.0, dt * 9.5)
         );
       }
 
@@ -791,6 +1192,37 @@ export function createPowerupManager(splineData, scene) {
         .addScaledVector(frame.right, rocket.latOffset)
         .addScaledVector(frame.normal, 0.0035);
       rocket.mesh.quaternion.setFromUnitVectors(_upZ, frame.tangent);
+      rocket.mesh.RotateZ ? rocket.mesh.rotateZ(dt * 18.0) : (rocket.mesh.rotation.z += dt * 18.0);
+
+      // Emit 3D Fire & Smoke Trail Puff behind the missile
+      rocket.trailAccum += dt;
+      if (rocket.trailAccum >= 0.028) {
+        rocket.trailAccum = 0.0;
+        const puffMat = trailFireMat.clone();
+        const puffMesh = new THREE.Mesh(trailPuffGeo, puffMat);
+        puffMesh.position.copy(rocket.mesh.position);
+        rootGroup.add(puffMesh);
+        rocketTrailPuffs.push({
+          mesh: puffMesh,
+          timer: 0.24,
+          maxTimer: 0.24,
+        });
+      }
+
+      // Check if this rival rocket is homing in on the player
+      if (rocket.ownerId !== 'player' && rocket.targetRacer && rocket.targetRacer.isPlayer) {
+        const distToPlayer =
+          ((playerState.s - rocket.s) % totalLength + totalLength) % totalLength;
+        if (distToPlayer < 0.75) {
+          incomingThreatInfo.active = true;
+          incomingThreatInfo.attackerName = rocket.ownerName || 'RIVAL';
+          const urg = THREE.MathUtils.clamp(1.0 - distToPlayer / 0.65, 0.15, 1.0);
+          incomingThreatInfo.urgency = Math.max(incomingThreatInfo.urgency, urg);
+          if (audioSynth && audioSynth.playIncomingWarningBeep) {
+            audioSynth.playIncomingWarningBeep(incomingThreatInfo.urgency);
+          }
+        }
+      }
 
       let hit = false;
 
@@ -802,12 +1234,17 @@ export function createPowerupManager(splineData, scene) {
           ((rocket.s - rival.s + totalLength * 0.5) % totalLength) - totalLength * 0.5
         );
         const dLat = Math.abs(rocket.latOffset - rival.lateralOffset);
-        if (dSpline < 0.015 && dLat < 0.0055) {
+        if (dSpline < 0.016 && dLat < 0.0062) {
           hit = true;
-          triggerExplosion(rocket.mesh.position, audioSynth);
-          rival.spinoutTimer = 1.25;
-          rival.speed *= 0.25;
-          rival.hopVel = 0.032;
+          triggerExplosion(rocket.mesh.position, audioSynth, 0xff5500);
+          rival.spinoutTimer = 1.45;
+          rival.speed *= 0.18;
+          rival.hopVel = 0.064;
+          rival.lateralVel = (Math.random() < 0.5 ? -1 : 1) * 0.042;
+          if (rocket.ownerId === 'player') {
+            setCombatFeed(`🎯 DIRECT HIT! ${rival.name} BLASTED!`);
+            playerState.cameraShake = Math.max(playerState.cameraShake || 0, 0.18);
+          }
           break;
         }
       }
@@ -818,16 +1255,27 @@ export function createPowerupManager(splineData, scene) {
           ((rocket.s - playerState.s + totalLength * 0.5) % totalLength) - totalLength * 0.5
         );
         const dLat = Math.abs(rocket.latOffset - playerState.lateralOffset);
-        if (dSpline < 0.015 && dLat < 0.0055) {
+        if (dSpline < 0.016 && dLat < 0.0062) {
           hit = true;
-          triggerExplosion(rocket.mesh.position, audioSynth);
           if (playerShieldTimer > 0) {
             playerShieldTimer = 0.0;
-            playerShieldMesh.visible = false;
+            playerShieldGroup.visible = false;
+            triggerExplosion(rocket.mesh.position, null, 0x00f0ff);
+            if (audioSynth && audioSynth.playShieldDeflect) {
+              audioSynth.playShieldDeflect();
+            }
+            playerState.cameraShake = Math.max(playerState.cameraShake || 0, 0.18);
+            setCombatFeed(`🛡️ SHIELD BLOCKED ${rocket.ownerName}'S MISSILE!`);
           } else {
-            playerSpinoutTimer = 1.1;
-            playerState.speed *= 0.3;
-            playerState.hopVel = 0.03;
+            triggerExplosion(rocket.mesh.position, audioSynth, 0xff3300);
+            playerSpinoutTimer = 0.85;
+            playerSpinoutReason = `🚀 BLASTED BY ${rocket.ownerName}'S MISSILE!`;
+            playerState.spinoutTimer = 0.85;
+            playerState.spinoutDir = Math.random() < 0.5 ? 1 : -1;
+            playerState.speed *= 0.45;
+            playerState.boostActive = 0.0;
+            playerState.hopVel = 0.044;
+            playerState.cameraShake = 0.32;
           }
         }
       }
@@ -838,7 +1286,21 @@ export function createPowerupManager(splineData, scene) {
       }
     }
 
-    // 5. Update Active Oil Slicks
+    // 4B. Update Rocket Trail Puffs
+    for (let i = rocketTrailPuffs.length - 1; i >= 0; i--) {
+      const puff = rocketTrailPuffs[i];
+      puff.timer -= dt;
+      const u = Math.max(0, puff.timer / puff.maxTimer);
+      puff.mesh.scale.setScalar(1.0 + (1.0 - u) * 2.2);
+      puff.mesh.material.opacity = u * 0.75;
+      if (puff.timer <= 0) {
+        rootGroup.remove(puff.mesh);
+        puff.mesh.material.dispose();
+        rocketTrailPuffs.splice(i, 1);
+      }
+    }
+
+    // 5. Update Active Oil Slick Traps
     for (let i = activeOilSlicks.length - 1; i >= 0; i--) {
       const oil = activeOilSlicks[i];
       oil.timer -= dt;
@@ -846,28 +1308,36 @@ export function createPowerupManager(splineData, scene) {
         oil.ownerGraceTimer -= dt;
       }
 
-      // Player contact (skip if player just dropped it)
       if (!(oil.ownerId === 'player' && oil.ownerGraceTimer > 0)) {
         const dPlayer = Math.abs(
           ((playerState.s - oil.s + totalLength * 0.5) % totalLength) - totalLength * 0.5
         );
         const dPlayerLat = Math.abs(playerState.lateralOffset - oil.latOffset);
-        if (dPlayer < 0.009 && dPlayerLat < 0.0046) {
+        if (dPlayer < 0.0090 && dPlayerLat < 0.0048) {
           if (playerShieldTimer > 0) {
             playerShieldTimer = 0.0;
-            playerShieldMesh.visible = false;
+            playerShieldGroup.visible = false;
+            if (audioSynth && audioSynth.playShieldDeflect) {
+              audioSynth.playShieldDeflect();
+            }
+            setCombatFeed('🛡️ SHIELD CLEARED OIL HAZARD!');
           } else if (playerSpinoutTimer <= 0) {
-            playerSpinoutTimer = 0.95;
-            playerState.speed *= 0.45;
+            playerSpinoutTimer = 0.72;
+            playerSpinoutReason = '🛢️ SPUN OUT ON OIL TRAP!';
+            playerState.spinoutTimer = 0.72;
+            playerState.spinoutDir = Math.random() < 0.5 ? 1 : -1;
+            playerState.speed *= 0.52;
+            playerState.boostActive = 0.0;
+            playerState.hopVel = 0.022;
+            playerState.cameraShake = 0.20;
             if (audioSynth && audioSynth.playOilSpinout) {
               audioSynth.playOilSpinout();
             }
           }
-          oil.timer = 0; // Consume oil slick on hit
+          oil.timer = 0;
         }
       }
 
-      // Rival contact
       for (let rIdx = 0; rIdx < rivalsList.length; rIdx++) {
         const rival = rivalsList[rIdx];
         if (oil.ownerId === rival.id && oil.ownerGraceTimer > 0) continue;
@@ -875,9 +1345,13 @@ export function createPowerupManager(splineData, scene) {
           ((rival.s - oil.s + totalLength * 0.5) % totalLength) - totalLength * 0.5
         );
         const dRivalLat = Math.abs(rival.lateralOffset - oil.latOffset);
-        if (dRival < 0.009 && dRivalLat < 0.0046 && rival.spinoutTimer <= 0) {
-          rival.spinoutTimer = 1.05;
-          rival.speed *= 0.4;
+        if (dRival < 0.010 && dRivalLat < 0.0052 && rival.spinoutTimer <= 0) {
+          rival.spinoutTimer = 1.25;
+          rival.speed *= 0.28;
+          rival.hopVel = 0.036;
+          if (oil.ownerId === 'player') {
+            setCombatFeed(`🛢️ ${rival.name} SLIPPED ON YOUR OIL TRAP!`);
+          }
           oil.timer = 0;
           break;
         }
@@ -889,13 +1363,13 @@ export function createPowerupManager(splineData, scene) {
       }
     }
 
-    // 6. Update EMP Shockwaves
+    // 6. Update EMP Shockwaves & 3D Chain Lightning Bolts
     for (let i = activeEmpWaves.length - 1; i >= 0; i--) {
       const emp = activeEmpWaves[i];
       emp.timer -= dt;
-      emp.radius += dt * 0.085;
-      emp.mesh.scale.setScalar(emp.radius / 0.0038);
-      emp.mesh.material.opacity = Math.max(0, emp.timer / 0.55);
+      emp.radius += dt * 0.095;
+      emp.mesh.scale.setScalar(emp.radius / 0.0042);
+      emp.mesh.material.opacity = Math.max(0, emp.timer / 0.58);
 
       if (emp.timer <= 0) {
         rootGroup.remove(emp.mesh);
@@ -904,38 +1378,71 @@ export function createPowerupManager(splineData, scene) {
       }
     }
 
-    // 7. Update Explosion Shockwave Dispersal
+    for (let i = activeLightningBolts.length - 1; i >= 0; i--) {
+      const bolt = activeLightningBolts[i];
+      bolt.timer -= dt;
+      bolt.mesh.material.opacity = Math.max(0, bolt.timer / 0.38);
+      if (bolt.timer <= 0) {
+        rootGroup.remove(bolt.mesh);
+        bolt.mesh.geometry.dispose();
+        bolt.mesh.material.dispose();
+        activeLightningBolts.splice(i, 1);
+      }
+    }
+
+    // 7. Update Explosion Fireballs & Flying Debris Embers
     for (let i = explosionSparks.length - 1; i >= 0; i--) {
       const exp = explosionSparks[i];
       exp.timer -= dt;
-      exp.scale += dt * 14.0;
+      exp.scale += dt * 15.0;
       exp.mesh.scale.setScalar(exp.scale);
-      exp.mesh.material.opacity = Math.max(0, exp.timer / 0.35);
+      exp.mesh.rotation.y += dt * 8.0;
+      const alpha = Math.max(0, exp.timer / exp.maxTimer);
+      exp.mesh.material.opacity = alpha;
+
+      for (let d = 0; d < exp.debris.length; d++) {
+        const deb = exp.debris[d];
+        deb.mesh.position.addScaledVector(deb.vel, dt);
+        deb.vel.y -= 0.12 * dt;
+        deb.mesh.rotation.x += dt * 14.0;
+        deb.mesh.rotation.z += dt * 11.0;
+        deb.mesh.material.opacity = alpha;
+      }
 
       if (exp.timer <= 0) {
         rootGroup.remove(exp.mesh);
         exp.mesh.material.dispose();
+        for (let d = 0; d < exp.debris.length; d++) {
+          rootGroup.remove(exp.debris[d].mesh);
+          exp.debris[d].mesh.material.dispose();
+        }
         explosionSparks.splice(i, 1);
       }
     }
   }
 
   function isIncomingAttack() {
-    for (let i = 0; i < activeRockets.length; i++) {
-      const r = activeRockets[i];
-      if (r.ownerId !== 'player' && r.targetRacer && r.targetRacer.isPlayer) {
-        return true;
-      }
-    }
-    return false;
+    return incomingThreatInfo.active;
   }
 
   function reset() {
     playerHeldPowerup = null;
+    pendingPowerup = null;
+    rouletteTimer = 0.0;
+    roulettePreview = null;
     playerPickupCooldown = 0.0;
     playerShieldTimer = 0.0;
     playerSpinoutTimer = 0.0;
-    playerShieldMesh.visible = false;
+    playerSpinoutReason = null;
+    combatFeedMessage = null;
+    combatFeedTimer = 0.0;
+    lockedTargetInfo.name = null;
+    lockedTargetInfo.distM = null;
+    incomingThreatInfo.active = false;
+    incomingThreatInfo.attackerName = null;
+    incomingThreatInfo.urgency = 0.0;
+    playerShieldGroup.visible = false;
+    targetReticleGroup.visible = false;
 
     for (let i = 0; i < boostPads.length; i++) {
       boostPads[i].playerCooldown = 0.0;
@@ -949,6 +1456,12 @@ export function createPowerupManager(splineData, scene) {
     }
     activeRockets.length = 0;
 
+    for (let i = 0; i < rocketTrailPuffs.length; i++) {
+      rootGroup.remove(rocketTrailPuffs[i].mesh);
+      rocketTrailPuffs[i].mesh.material.dispose();
+    }
+    rocketTrailPuffs.length = 0;
+
     for (let i = 0; i < activeOilSlicks.length; i++) {
       rootGroup.remove(activeOilSlicks[i].mesh);
     }
@@ -960,9 +1473,20 @@ export function createPowerupManager(splineData, scene) {
     }
     activeEmpWaves.length = 0;
 
+    for (let i = 0; i < activeLightningBolts.length; i++) {
+      rootGroup.remove(activeLightningBolts[i].mesh);
+      activeLightningBolts[i].mesh.geometry.dispose();
+      activeLightningBolts[i].mesh.material.dispose();
+    }
+    activeLightningBolts.length = 0;
+
     for (let i = 0; i < explosionSparks.length; i++) {
       rootGroup.remove(explosionSparks[i].mesh);
       explosionSparks[i].mesh.material.dispose();
+      for (let d = 0; d < explosionSparks[i].debris.length; d++) {
+        rootGroup.remove(explosionSparks[i].debris[d].mesh);
+        explosionSparks[i].debris[d].mesh.material.dispose();
+      }
     }
     explosionSparks.length = 0;
 
@@ -979,8 +1503,14 @@ export function createPowerupManager(splineData, scene) {
     triggerPlayerPowerup,
     triggerRivalPowerup,
     getHeldPowerup: () => playerHeldPowerup,
+    isRouletteActive: () => rouletteTimer > 0,
+    getRoulettePreview: () => roulettePreview,
+    getLockedTargetInfo: () => lockedTargetInfo,
+    getIncomingThreatInfo: () => incomingThreatInfo,
+    getCombatFeedMessage: () => combatFeedMessage,
     isShieldActive: () => playerShieldTimer > 0,
     isSpinoutActive: () => playerSpinoutTimer > 0,
+    getSpinoutReason: () => playerSpinoutReason,
     isIncomingAttack,
     reset,
   };

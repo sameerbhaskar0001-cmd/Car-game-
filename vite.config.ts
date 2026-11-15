@@ -60,8 +60,82 @@ const gstaticModelsProxy = {
   },
 };
 
+function oxionApiPlugin(): Plugin {
+  return {
+    name: 'oxion-api-middleware',
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        if (!req.url) return next();
+
+        if (req.url === '/api/oxion/health' && req.method === 'GET') {
+          const key = process.env.OXION_API_KEY || '';
+          res.setHeader('Content-Type', 'application/json');
+          res.end(
+            JSON.stringify({
+              status: 'ok',
+              configured: Boolean(key),
+              keyPreview: key ? `${key.slice(0, 5)}... (len ${key.length})` : 'none',
+              model: 'claude-opus-5.5',
+              baseURL: process.env.OXION_BASE_URL || 'https://www.oxionai.com/v1',
+            })
+          );
+          return;
+        }
+
+        if (req.url === '/api/oxion/chat' && req.method === 'POST') {
+          try {
+            let body = '';
+            for await (const chunk of req) {
+              body += chunk;
+            }
+            const data = body ? JSON.parse(body) : {};
+            const messages = data.messages || [
+              ...(data.system ? [{ role: 'system', content: data.system }] : []),
+              { role: 'user', content: data.prompt || 'Hello' },
+            ];
+            const targetModel = data.model || 'claude-opus-5.5';
+
+            const { OpenAI } = await import('openai');
+            const apiKey = process.env.OXION_API_KEY || '';
+            const baseURL = process.env.OXION_BASE_URL || 'https://www.oxionai.com/v1';
+
+            const client = new OpenAI({ apiKey, baseURL });
+            const completion = await client.chat.completions.create({
+              model: targetModel,
+              messages,
+              temperature: data.temperature ?? 0.7,
+            });
+
+            res.setHeader('Content-Type', 'application/json');
+            res.end(
+              JSON.stringify({
+                success: true,
+                content: completion.choices[0]?.message?.content || '',
+                model: targetModel,
+                id: completion.id,
+              })
+            );
+          } catch (err: any) {
+            res.statusCode = 500;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(
+              JSON.stringify({
+                success: false,
+                error: err?.message || 'Oxion API request failed',
+              })
+            );
+          }
+          return;
+        }
+
+        next();
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [tailwindcss(), fetchGstaticModelsOnBuild()],
+  plugins: [tailwindcss(), fetchGstaticModelsOnBuild(), oxionApiPlugin()],
   server: {
     port: 3000,
     host: '0.0.0.0',

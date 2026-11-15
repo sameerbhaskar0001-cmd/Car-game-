@@ -10,6 +10,7 @@ import {
   RimId,
   SpoilerId,
   TheRaceEngineBridge,
+  normalizeCarId,
 } from './types/game';
 import { SplashScreen } from './components/SplashScreen';
 import { MainMenu } from './components/MainMenu';
@@ -22,6 +23,7 @@ const STORAGE_COINS_KEY = 'the_race_3d_coins_v1';
 const STORAGE_KIT_KEY = 'the_race_3d_equipped_kit_v1';
 const STORAGE_RIM_KEY = 'the_race_3d_equipped_rim_v1';
 const STORAGE_SPOILER_KEY = 'the_race_3d_equipped_spoiler_v1';
+const STORAGE_PAINT_KEY = 'the_race_3d_equipped_paint_v1';
 const STORAGE_UNLOCKED_KEY = 'the_race_3d_unlocked_kits_v1';
 
 const DEFAULT_COINS = 500;
@@ -52,26 +54,26 @@ export default function App() {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed as BodyKitId[];
+          const mapped = parsed.map((id) => normalizeCarId(id));
+          if (!mapped.includes('coupe')) mapped.unshift('coupe');
+          return Array.from(new Set(mapped));
         }
       }
     } catch {
       // ignore
     }
-    return ['kit1'];
+    return ['coupe', 's64'];
   });
 
   // Persistent Equipped Body Kit
   const [equippedKitId, setEquippedKitId] = useState<BodyKitId>(() => {
     try {
       const saved = window.localStorage.getItem(STORAGE_KIT_KEY) as BodyKitId | null;
-      if (saved && BODY_KITS.some((k) => k.id === saved)) {
-        return saved;
-      }
+      return normalizeCarId(saved);
     } catch {
       // ignore
     }
-    return 'kit1';
+    return 'coupe';
   });
 
   const equippedKit: BodyKitSpec =
@@ -96,6 +98,16 @@ export default function App() {
       // ignore
     }
     return equippedKit.defaultSpoilerId;
+  });
+
+  const [equippedPaintHex, setEquippedPaintHex] = useState<string | null>(() => {
+    try {
+      const saved = window.localStorage.getItem(STORAGE_PAINT_KEY);
+      if (saved && saved.startsWith('#')) return saved;
+    } catch {
+      // ignore
+    }
+    return null;
   });
 
   // Live Race Telemetry State
@@ -146,22 +158,27 @@ export default function App() {
     }
   }, [unlockedKits]);
 
-  // Persist equipped kit, rim, and spoiler
+  // Persist equipped kit, rim, spoiler, and paint
   useEffect(() => {
     try {
       window.localStorage.setItem(STORAGE_KIT_KEY, equippedKitId);
       window.localStorage.setItem(STORAGE_RIM_KEY, equippedRimId);
       window.localStorage.setItem(STORAGE_SPOILER_KEY, equippedSpoilerId);
+      if (equippedPaintHex) {
+        window.localStorage.setItem(STORAGE_PAINT_KEY, equippedPaintHex);
+      } else {
+        window.localStorage.removeItem(STORAGE_PAINT_KEY);
+      }
     } catch {
       // ignore
     }
-  }, [equippedKitId, equippedRimId, equippedSpoilerId]);
+  }, [equippedKitId, equippedRimId, equippedSpoilerId, equippedPaintHex]);
 
   const getEngine = useCallback((): TheRaceEngineBridge | undefined => {
     return window.__theRaceEngine;
   }, []);
 
-  // Synchronize GameState and Equipped Body Kit + Rims + Spoiler with the 3D Engine
+  // Synchronize GameState and Equipped Body Kit + Rims + Spoiler + Paint with the 3D Engine
   useEffect(() => {
     const syncWithEngine = () => {
       const engine = getEngine();
@@ -170,6 +187,7 @@ export default function App() {
       engine.setBodyKit(equippedKit.id, equippedKit.physics, {
         rimId: equippedRimId,
         spoilerId: equippedSpoilerId,
+        paintHex: equippedPaintHex,
       });
       setAudioEnabled(engine.isAudioEnabled());
       return true;
@@ -183,7 +201,7 @@ export default function App() {
       }, 100);
       return () => window.clearInterval(interval);
     }
-  }, [gameState, equippedKit, equippedRimId, equippedSpoilerId, getEngine]);
+  }, [gameState, equippedKit, equippedRimId, equippedSpoilerId, equippedPaintHex, getEngine]);
 
   // Subscribe to 3D Engine Telemetry & Race Finish Events
   useEffect(() => {
@@ -255,6 +273,7 @@ export default function App() {
           engine.setBodyKit(equippedKit.id, equippedKit.physics, {
             rimId: equippedRimId,
             spoilerId: equippedSpoilerId,
+            paintHex: equippedPaintHex,
           });
         }
         setGameState('MENU');
@@ -282,7 +301,7 @@ export default function App() {
         listenerPromise.then((handle) => handle.remove()).catch(() => {});
       }
     };
-  }, [settingsOpen, gameState, equippedKit, equippedRimId, equippedSpoilerId, getEngine]);
+  }, [settingsOpen, gameState, equippedKit, equippedRimId, equippedSpoilerId, equippedPaintHex, getEngine]);
 
   // Prevent browser pull-to-refresh or gesture scrolling during gameplay
   useEffect(() => {
@@ -309,28 +328,43 @@ export default function App() {
       engine.setBodyKit(equippedKit.id, equippedKit.physics, {
         rimId: equippedRimId,
         spoilerId: equippedSpoilerId,
+        paintHex: equippedPaintHex,
       });
       engine.startRace();
     }
-  }, [equippedKit, equippedRimId, equippedSpoilerId, getEngine]);
+  }, [equippedKit, equippedRimId, equippedSpoilerId, equippedPaintHex, getEngine]);
 
   const handleOpenGarage = useCallback(() => {
     setGameState('GARAGE');
   }, []);
 
   const handlePreviewKit = useCallback(
-    (kit: BodyKitSpec, rimId: RimId, spoilerId: SpoilerId) => {
+    (
+      kit: BodyKitSpec,
+      rimId: RimId,
+      spoilerId: SpoilerId,
+      paintHex?: string | null
+    ) => {
       const engine = getEngine();
       if (engine) {
         engine.playUiClick('click');
-        engine.setBodyKit(kit.id, kit.physics, { rimId, spoilerId });
+        engine.setBodyKit(kit.id, kit.physics, {
+          rimId,
+          spoilerId,
+          paintHex: paintHex !== undefined ? paintHex : null,
+        });
       }
     },
     [getEngine]
   );
 
   const handleSelectKit = useCallback(
-    (kit: BodyKitSpec, rimId: RimId, spoilerId: SpoilerId) => {
+    (
+      kit: BodyKitSpec,
+      rimId: RimId,
+      spoilerId: SpoilerId,
+      paintHex?: string | null
+    ) => {
       const engine = getEngine();
       if (!unlockedKits.includes(kit.id)) {
         if (coins < kit.unlockCost) {
@@ -339,12 +373,18 @@ export default function App() {
         setCoins((prev) => prev - kit.unlockCost);
         setUnlockedKits((prev) => [...prev, kit.id]);
       }
+      const nextPaint = paintHex !== undefined ? paintHex : null;
       setEquippedKitId(kit.id);
       setEquippedRimId(rimId);
       setEquippedSpoilerId(spoilerId);
+      setEquippedPaintHex(nextPaint);
       if (engine) {
         engine.playUiClick('equip');
-        engine.setBodyKit(kit.id, kit.physics, { rimId, spoilerId });
+        engine.setBodyKit(kit.id, kit.physics, {
+          rimId,
+          spoilerId,
+          paintHex: nextPaint,
+        });
       }
     },
     [coins, unlockedKits, getEngine]
@@ -392,6 +432,7 @@ export default function App() {
           equippedKitId={equippedKitId}
           equippedRimId={equippedRimId}
           equippedSpoilerId={equippedSpoilerId}
+          equippedPaintHex={equippedPaintHex}
           unlockedKits={unlockedKits}
           onSelectKit={handleSelectKit}
           onPreviewKit={handlePreviewKit}
@@ -401,6 +442,7 @@ export default function App() {
               engine.setBodyKit(equippedKit.id, equippedKit.physics, {
                 rimId: equippedRimId,
                 spoilerId: equippedSpoilerId,
+                paintHex: equippedPaintHex,
               });
             }
             setGameState('MENU');
@@ -446,6 +488,7 @@ export default function App() {
               engine.setBodyKit(equippedKit.id, equippedKit.physics, {
                 rimId: equippedRimId,
                 spoilerId: equippedSpoilerId,
+                paintHex: equippedPaintHex,
               });
             }
             setGameState('MENU');

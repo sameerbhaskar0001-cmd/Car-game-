@@ -407,9 +407,36 @@ export function createDeskRacerHybridAudio(options = {}) {
         masterGain.gain.setTargetAtTime(masterVolume, ctx.currentTime, 0.05);
       }
     } else if (masterGain && ctx) {
-      masterGain.gain.setTargetAtTime(0.0001, ctx.currentTime, 0.05);
+      stopEngine();
+      masterGain.gain.setTargetAtTime(0.0001, ctx.currentTime, 0.03);
     }
     return enabled;
+  }
+
+  /**
+   * Immediately silences all continuous engine loops (idle, cruise, drift, curb, sub-bass rumble)
+   * when exiting a race to Menu, Garage, or GameOver so engine noise never lingers.
+   */
+  function stopEngine() {
+    smoothNormSpeed = 0.0;
+    smoothAccelRate = 0.0;
+    smoothBoostBlend = 0.0;
+    smoothHillAndCurlLoad = 0.0;
+    prevSpeed = 0.0;
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    nextSputterTime = now + 99999;
+    for (const key of ['idle', 'cruise', 'drift', 'curb']) {
+      const node = loopNodes[key];
+      if (node && node.gain && node.gain.gain) {
+        node.gain.gain.cancelScheduledValues(now);
+        node.gain.gain.setValueAtTime(0.0001, now);
+      }
+    }
+    if (rumbleOutGain && rumbleOutGain.gain) {
+      rumbleOutGain.gain.cancelScheduledValues(now);
+      rumbleOutGain.gain.setValueAtTime(0.0001, now);
+    }
   }
 
   function toggle() {
@@ -727,31 +754,37 @@ export function createDeskRacerHybridAudio(options = {}) {
     oscHarm.stop(now + dur + 0.02);
   }
 
+  let lastRailImpactMs = 0;
+  let lastUiClickMs = 0;
+  let lastRocketLaunchMs = 0;
+
   /**
-   * Plays a physical, tactile miniature coaster guardrail impact / metallic
-   * barrier scrape when the kart hits the side rails.
+   * Plays a physical, low-frequency bumper/chassis thud when the car bumps a barrier or rival.
+   * Free of high-pitched sine partials so it never makes a "tui tui" sound.
    * @param {number=} intensity
    */
   function playRailImpact(intensity = 1.0) {
     if (!enabled || !ctx || ctx.state !== 'running') return;
-    const now = ctx.currentTime;
-    const strength = Math.max(0.2, Math.min(1.35, Number(intensity) || 1.0));
-    const pitchJitter = 0.96 + 0.08 * Math.random();
+    const nowMs = performance.now();
+    if (nowMs - lastRailImpactMs < 520) return;
+    lastRailImpactMs = nowMs;
 
-    // Brief engine duck so the barrier impact feels visceral and unmistakable
+    const now = ctx.currentTime;
+    const strength = Math.max(0.2, Math.min(1.2, Number(intensity) || 1.0));
+    const pitchJitter = 0.94 + 0.10 * Math.random();
+
     if (misfireDuckGain) {
       misfireDuckGain.gain.cancelScheduledValues(now);
       misfireDuckGain.gain.setValueAtTime(1.0, now);
       misfireDuckGain.gain.linearRampToValueAtTime(
-          Math.max(0.38, 1.0 - 0.45 * strength), now + 0.010);
-      misfireDuckGain.gain.linearRampToValueAtTime(1.0, now + 0.085);
+          Math.max(0.48, 1.0 - 0.35 * strength), now + 0.010);
+      misfireDuckGain.gain.linearRampToValueAtTime(1.0, now + 0.080);
     }
 
-    // 1. Punchy low chassis thud (~110 Hz -> 42 Hz sine/triangle pitch drop
-    // over 0.09s)
-    const thudDur = 0.09;
+    // Deep low-frequency bumper thud (92 Hz -> 34 Hz sine pitch drop over 0.085s)
+    const thudDur = 0.085;
     const thudGain = ctx.createGain();
-    const thudPeak = Math.min(0.42, 0.28 * strength);
+    const thudPeak = Math.min(0.34, 0.22 * strength);
     thudGain.gain.setValueAtTime(0.0001, now);
     thudGain.gain.linearRampToValueAtTime(thudPeak, now + 0.004);
     thudGain.gain.exponentialRampToValueAtTime(0.0001, now + thudDur);
@@ -759,65 +792,12 @@ export function createDeskRacerHybridAudio(options = {}) {
 
     const thudSine = ctx.createOscillator();
     thudSine.type = 'sine';
-    thudSine.frequency.setValueAtTime(110.0 * pitchJitter, now);
+    thudSine.frequency.setValueAtTime(92.0 * pitchJitter, now);
     thudSine.frequency.exponentialRampToValueAtTime(
-        42.0 * pitchJitter, now + thudDur);
+        34.0 * pitchJitter, now + thudDur);
     thudSine.connect(thudGain);
-
-    const thudTri = ctx.createOscillator();
-    thudTri.type = 'triangle';
-    thudTri.frequency.setValueAtTime(110.0 * pitchJitter, now);
-    thudTri.frequency.exponentialRampToValueAtTime(
-        42.0 * pitchJitter, now + thudDur);
-    const thudTriGain = ctx.createGain();
-    thudTriGain.gain.value = 0.35;
-    thudTri.connect(thudTriGain);
-    thudTriGain.connect(thudGain);
-
     thudSine.start(now);
-    thudTri.start(now);
     thudSine.stop(now + thudDur + 0.015);
-    thudTri.stop(now + thudDur + 0.015);
-
-    // 2. Crisp bandpass-filtered metallic rail clang/scrape transient
-    // (~980 Hz & ~1640 Hz short damped metallic partials over 0.11s)
-    const clangDur = 0.11;
-    const railBandpass = ctx.createBiquadFilter();
-    railBandpass.type = 'bandpass';
-    railBandpass.frequency.setValueAtTime(1280.0 * pitchJitter, now);
-    railBandpass.Q.setValueAtTime(2.2, now);
-    railBandpass.connect(masterGain);
-
-    const partials = [
-      {
-        freq: 980.0 * pitchJitter,
-        endFreq: 860.0 * pitchJitter,
-        type: 'triangle',
-        gain: 0.16 * strength,
-      },
-      {
-        freq: 1640.0 * pitchJitter,
-        endFreq: 1420.0 * pitchJitter,
-        type: 'sine',
-        gain: 0.11 * strength,
-      },
-    ];
-
-    partials.forEach((p) => {
-      const osc = ctx.createOscillator();
-      const g = ctx.createGain();
-      osc.type = p.type;
-      osc.frequency.setValueAtTime(p.freq, now);
-      osc.frequency.exponentialRampToValueAtTime(p.endFreq, now + clangDur);
-      const peak = Math.min(0.24, p.gain);
-      g.gain.setValueAtTime(0.0001, now);
-      g.gain.linearRampToValueAtTime(peak, now + 0.003);
-      g.gain.exponentialRampToValueAtTime(0.0001, now + clangDur);
-      osc.connect(g);
-      g.connect(railBandpass);
-      osc.start(now);
-      osc.stop(now + clangDur + 0.015);
-    });
   }
 
   /**
@@ -983,9 +963,13 @@ export function createDeskRacerHybridAudio(options = {}) {
   }
 
   /**
-   * Plays a crisp procedural UI sound effect (click, equip, start).
+   * Plays a crisp, subtle procedural UI sound effect (click, equip, start) with debounce.
    */
   function playUiClick(variant = 'click') {
+    const nowMs = performance.now();
+    if (nowMs - lastUiClickMs < 90) return;
+    lastUiClickMs = nowMs;
+
     initAudio();
     if (!ctx) return;
     if (ctx.state === 'suspended') {
@@ -993,37 +977,37 @@ export function createDeskRacerHybridAudio(options = {}) {
     }
     const now = ctx.currentTime;
     const out = ctx.createGain();
-    out.gain.setValueAtTime(0.22, now);
+    out.gain.setValueAtTime(0.16, now);
     out.connect(ctx.destination);
 
     if (variant === 'equip') {
-      const freqs = [587.33, 880, 1174.66];
+      const freqs = [440, 587.33, 880];
       freqs.forEach((f, i) => {
         const osc = ctx.createOscillator();
         const g = ctx.createGain();
         osc.type = 'triangle';
         osc.frequency.setValueAtTime(f, now + i * 0.055);
         g.gain.setValueAtTime(0.001, now + i * 0.055);
-        g.gain.linearRampToValueAtTime(0.28, now + i * 0.055 + 0.01);
-        g.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.055 + 0.22);
+        g.gain.linearRampToValueAtTime(0.22, now + i * 0.055 + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.055 + 0.18);
         osc.connect(g);
         g.connect(out);
         osc.start(now + i * 0.055);
-        osc.stop(now + i * 0.055 + 0.24);
+        osc.stop(now + i * 0.055 + 0.20);
       });
     } else {
       const osc = ctx.createOscillator();
       const g = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(720, now);
-      osc.frequency.exponentialRampToValueAtTime(1080, now + 0.065);
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(340, now);
+      osc.frequency.exponentialRampToValueAtTime(220, now + 0.045);
       g.gain.setValueAtTime(0.001, now);
-      g.gain.linearRampToValueAtTime(0.25, now + 0.008);
-      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+      g.gain.linearRampToValueAtTime(0.20, now + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.05);
       osc.connect(g);
       g.connect(out);
       osc.start(now);
-      osc.stop(now + 0.09);
+      osc.stop(now + 0.055);
     }
   }
 
@@ -1041,75 +1025,83 @@ export function createDeskRacerHybridAudio(options = {}) {
     }
     const now = ctx.currentTime;
     const out = ctx.createGain();
-    out.gain.setValueAtTime(0.32, now);
+    out.gain.setValueAtTime(0.28, now);
     out.connect(ctx.destination);
 
     const osc = ctx.createOscillator();
     const g = ctx.createGain();
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(95, now);
-    osc.frequency.exponentialRampToValueAtTime(340, now + 0.25);
-    osc.frequency.exponentialRampToValueAtTime(140, now + 0.85);
+    osc.frequency.setValueAtTime(85, now);
+    osc.frequency.exponentialRampToValueAtTime(260, now + 0.25);
+    osc.frequency.exponentialRampToValueAtTime(115, now + 0.75);
     g.gain.setValueAtTime(0.001, now);
-    g.gain.linearRampToValueAtTime(0.45, now + 0.05);
-    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.9);
+    g.gain.linearRampToValueAtTime(0.38, now + 0.05);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.8);
     osc.connect(g);
     g.connect(out);
     osc.start(now);
-    osc.stop(now + 0.95);
+    osc.stop(now + 0.85);
   }
 
   /**
    * Plays high-energy chime when collecting a Mystery Powerup Box.
    */
   function playPowerupBoxPickup() {
-    initAudio();
-    if (!ctx) return;
-    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-    const now = ctx.currentTime;
-    const notes = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6 arpeggio
-    notes.forEach((freq, idx) => {
-      const osc = ctx.createOscillator();
-      const g = ctx.createGain();
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(freq, now + idx * 0.045);
-      g.gain.setValueAtTime(0.001, now + idx * 0.045);
-      g.gain.linearRampToValueAtTime(0.24, now + idx * 0.045 + 0.015);
-      g.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.045 + 0.22);
-      osc.connect(g);
-      g.connect(ctx.destination);
-      osc.start(now + idx * 0.045);
-      osc.stop(now + idx * 0.045 + 0.25);
-    });
-  }
-
-  /**
-   * Plays rocket whoosh sound when firing a homing missile.
-   */
-  function playRocketLaunch() {
+    if (!enabled) return;
     initAudio();
     if (!ctx) return;
     if (ctx.state === 'suspended') ctx.resume().catch(() => {});
     const now = ctx.currentTime;
     const osc = ctx.createOscillator();
     const g = ctx.createGain();
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(180, now);
-    osc.frequency.exponentialRampToValueAtTime(720, now + 0.22);
-    osc.frequency.exponentialRampToValueAtTime(1100, now + 0.55);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(587.33, now);
+    osc.frequency.exponentialRampToValueAtTime(880.0, now + 0.07);
     g.gain.setValueAtTime(0.001, now);
-    g.gain.linearRampToValueAtTime(0.28, now + 0.04);
-    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.58);
+    g.gain.linearRampToValueAtTime(0.08, now + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.15);
     osc.connect(g);
     g.connect(ctx.destination);
     osc.start(now);
-    osc.stop(now + 0.6);
+    osc.stop(now + 0.17);
+  }
+
+  /**
+   * Plays low-end rocket thruster whoosh when firing a homing missile (no high-pitched chirp).
+   */
+  function playRocketLaunch() {
+    if (!enabled) return;
+    const nowMs = performance.now();
+    if (nowMs - lastRocketLaunchMs < 650) return;
+    lastRocketLaunchMs = nowMs;
+
+    initAudio();
+    if (!ctx) return;
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(480, now);
+    const g = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(110, now);
+    osc.frequency.exponentialRampToValueAtTime(240, now + 0.32);
+    g.gain.setValueAtTime(0.001, now);
+    g.gain.linearRampToValueAtTime(0.22, now + 0.04);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.36);
+    osc.connect(lp);
+    lp.connect(g);
+    g.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.38);
   }
 
   /**
    * Plays explosive detonation impact sound.
    */
   function playExplosion() {
+    if (!enabled) return;
     initAudio();
     if (!ctx) return;
     if (ctx.state === 'suspended') ctx.resume().catch(() => {});
@@ -1118,31 +1110,31 @@ export function createDeskRacerHybridAudio(options = {}) {
     const subOsc = ctx.createOscillator();
     const subGain = ctx.createGain();
     subOsc.type = 'sine';
-    subOsc.frequency.setValueAtTime(140, now);
-    subOsc.frequency.exponentialRampToValueAtTime(32, now + 0.45);
-    subGain.gain.setValueAtTime(0.55, now);
-    subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.55);
+    subOsc.frequency.setValueAtTime(130, now);
+    subOsc.frequency.exponentialRampToValueAtTime(30, now + 0.42);
+    subGain.gain.setValueAtTime(0.45, now);
+    subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.48);
     subOsc.connect(subGain);
     subGain.connect(ctx.destination);
     subOsc.start(now);
-    subOsc.stop(now + 0.6);
+    subOsc.stop(now + 0.52);
 
     // Filtered noise blast
-    const bufferSize = ctx.sampleRate * 0.45;
+    const bufferSize = Math.floor(ctx.sampleRate * 0.4);
     const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < bufferSize; i++) {
-      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.12));
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.11));
     }
     const noise = ctx.createBufferSource();
     noise.buffer = buffer;
     const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(800, now);
-    filter.frequency.exponentialRampToValueAtTime(120, now + 0.4);
+    filter.frequency.setValueAtTime(680, now);
+    filter.frequency.exponentialRampToValueAtTime(110, now + 0.38);
     const nGain = ctx.createGain();
-    nGain.gain.setValueAtTime(0.42, now);
-    nGain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+    nGain.gain.setValueAtTime(0.35, now);
+    nGain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
     noise.connect(filter);
     filter.connect(nGain);
     nGain.connect(ctx.destination);
@@ -1153,35 +1145,57 @@ export function createDeskRacerHybridAudio(options = {}) {
    * Plays futuristic energy shield activation hum.
    */
   function playShieldActivate() {
+    if (!enabled) return;
     initAudio();
     if (!ctx) return;
     if (ctx.state === 'suspended') ctx.resume().catch(() => {});
     const now = ctx.currentTime;
     const osc1 = ctx.createOscillator();
-    const osc2 = ctx.createOscillator();
     const g = ctx.createGain();
     osc1.type = 'sine';
-    osc2.type = 'sine';
-    osc1.frequency.setValueAtTime(440, now);
-    osc1.frequency.exponentialRampToValueAtTime(880, now + 0.35);
-    osc2.frequency.setValueAtTime(660, now);
-    osc2.frequency.exponentialRampToValueAtTime(1320, now + 0.35);
+    osc1.frequency.setValueAtTime(330, now);
+    osc1.frequency.exponentialRampToValueAtTime(520, now + 0.3);
     g.gain.setValueAtTime(0.001, now);
-    g.gain.linearRampToValueAtTime(0.25, now + 0.05);
-    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.65);
+    g.gain.linearRampToValueAtTime(0.20, now + 0.04);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
     osc1.connect(g);
-    osc2.connect(g);
     g.connect(ctx.destination);
     osc1.start(now);
-    osc2.start(now);
-    osc1.stop(now + 0.7);
-    osc2.stop(now + 0.7);
+    osc1.stop(now + 0.48);
   }
 
   /**
-   * Plays tire spinout screech when hitting oil or spinning.
+   * Plays tire spinout scrub when hitting oil.
    */
   function playOilSpinout() {
+    if (!enabled) return;
+    initAudio();
+    if (!ctx) return;
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(420, now);
+    const g = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(260, now);
+    osc.frequency.linearRampToValueAtTime(140, now + 0.32);
+    g.gain.setValueAtTime(0.001, now);
+    g.gain.linearRampToValueAtTime(0.22, now + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+    osc.connect(lp);
+    lp.connect(g);
+    g.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.38);
+  }
+
+  /**
+   * Plays electric EMP bass discharge shockwave + high-voltage crackle.
+   */
+  function playEmpBlast() {
+    if (!enabled) return;
     initAudio();
     if (!ctx) return;
     if (ctx.state === 'suspended') ctx.resume().catch(() => {});
@@ -1189,43 +1203,136 @@ export function createDeskRacerHybridAudio(options = {}) {
     const osc = ctx.createOscillator();
     const g = ctx.createGain();
     osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(680, now);
-    osc.frequency.linearRampToValueAtTime(320, now + 0.4);
+    osc.frequency.setValueAtTime(420, now);
+    osc.frequency.exponentialRampToValueAtTime(55, now + 0.38);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(1800, now);
+    lp.frequency.exponentialRampToValueAtTime(220, now + 0.36);
     g.gain.setValueAtTime(0.001, now);
-    g.gain.linearRampToValueAtTime(0.26, now + 0.03);
-    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
-    osc.connect(g);
+    g.gain.linearRampToValueAtTime(0.28, now + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.40);
+    osc.connect(lp);
+    lp.connect(g);
     g.connect(ctx.destination);
     osc.start(now);
-    osc.stop(now + 0.48);
+    osc.stop(now + 0.42);
   }
 
+  let lastRouletteTickMs = 0;
   /**
-   * Plays electric EMP discharge shockwave.
+   * Plays a crisp slot-machine roulette tick while cycling powerups.
    */
-  function playEmpBlast() {
+  function playRouletteTick(pitchFactor = 1.0) {
+    if (!enabled) return;
+    const nowMs = performance.now();
+    if (nowMs - lastRouletteTickMs < 55) return;
+    lastRouletteTickMs = nowMs;
+
     initAudio();
     if (!ctx) return;
     if (ctx.state === 'suspended') ctx.resume().catch(() => {});
     const now = ctx.currentTime;
     const osc = ctx.createOscillator();
     const g = ctx.createGain();
-    osc.type = 'square';
-    osc.frequency.setValueAtTime(880, now);
-    osc.frequency.exponentialRampToValueAtTime(110, now + 0.35);
+    osc.type = 'triangle';
+    const baseFreq = 520 * Math.max(0.7, Math.min(1.6, pitchFactor));
+    osc.frequency.setValueAtTime(baseFreq, now);
+    osc.frequency.exponentialRampToValueAtTime(baseFreq * 1.25, now + 0.035);
     g.gain.setValueAtTime(0.001, now);
-    g.gain.linearRampToValueAtTime(0.25, now + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
+    g.gain.linearRampToValueAtTime(0.11, now + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.045);
     osc.connect(g);
     g.connect(ctx.destination);
     osc.start(now);
-    osc.stop(now + 0.45);
+    osc.stop(now + 0.05);
+  }
+
+  /**
+   * Plays a rewarding arcade lock-in chime when the powerup roulette settles on a weapon.
+   */
+  function playRouletteLock() {
+    if (!enabled) return;
+    initAudio();
+    if (!ctx) return;
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    const now = ctx.currentTime;
+    const notes = [659.25, 880.0, 1174.66];
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now + i * 0.045);
+      g.gain.setValueAtTime(0.001, now + i * 0.045);
+      g.gain.linearRampToValueAtTime(0.14, now + i * 0.045 + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.045 + 0.18);
+      osc.connect(g);
+      g.connect(ctx.destination);
+      osc.start(now + i * 0.045);
+      osc.stop(now + i * 0.045 + 0.20);
+    });
+  }
+
+  /**
+   * Plays a metallic energy deflection resonance when Bubble Shield blocks a missile or trap.
+   */
+  function playShieldDeflect() {
+    if (!enabled) return;
+    initAudio();
+    if (!ctx) return;
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    const now = ctx.currentTime;
+    [587.33, 880.0, 1318.5].forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, now);
+      osc.frequency.exponentialRampToValueAtTime(freq * 0.65, now + 0.28);
+      g.gain.setValueAtTime(0.001, now);
+      g.gain.linearRampToValueAtTime(0.18 / (idx + 1), now + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.30);
+      osc.connect(g);
+      g.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.32);
+    });
+  }
+
+  let lastWarningBeepMs = 0;
+  /**
+   * Plays an urgent radar lock-on warning beep when a rival missile is homing in on the player.
+   */
+  function playIncomingWarningBeep(urgency = 0.5) {
+    if (!enabled) return;
+    const nowMs = performance.now();
+    const minInterval = 340 - Math.min(1.0, Math.max(0.0, urgency)) * 190;
+    if (nowMs - lastWarningBeepMs < minInterval) return;
+    lastWarningBeepMs = nowMs;
+
+    initAudio();
+    if (!ctx) return;
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = 'sine';
+    const freq = 920 + Math.min(1.0, urgency) * 260;
+    osc.frequency.setValueAtTime(freq, now);
+    osc.frequency.setValueAtTime(freq * 0.82, now + 0.045);
+    g.gain.setValueAtTime(0.001, now);
+    g.gain.linearRampToValueAtTime(0.14, now + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.095);
+    osc.connect(g);
+    g.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.105);
   }
 
   return {
     preload,
     toggle,
     setEnabled,
+    stopEngine,
     update,
     playLapChime,
     playRaceFinishFanfare,
@@ -1238,8 +1345,12 @@ export function createDeskRacerHybridAudio(options = {}) {
     playRocketLaunch,
     playExplosion,
     playShieldActivate,
+    playShieldDeflect,
     playOilSpinout,
     playEmpBlast,
+    playRouletteTick,
+    playRouletteLock,
+    playIncomingWarningBeep,
     triggerSputterBurst,
     setRumbleAmount: (v) => {
       userRumbleAmount = Math.max(0.0, Math.min(2.5, Number(v)));

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createCosmoCarInstance } from '../scene/CosmoCarLoader.js';
 
 /**
  * 3 AI Rival Racers Controller with Adaptive Rubber-Banding, Lane Overtaking,
@@ -67,51 +68,47 @@ export function createRivalRacersController(splineData, scene) {
   }
 
   // -------------------------------------------------------------------------
-  // BUILD 3 DISTINCT AI OPPONENT CARS (Scaled at 0.56x to match Player S64 Car)
-  // Distinct metallic colors: Crimson Red, Lime Green, Deep Violet
+  // BUILD 3 DISTINCT AI OPPONENT CARS:
+  // 1. Interceptor 911 (Police car with roof beacons)
+  // 2. Kamaro V8 (Raw American Muscle V8)
+  // 3. Ghini Super V12 (Wedge Italian Supercar)
   // -------------------------------------------------------------------------
   const RIVAL_CONFIGS = [
     {
-      id: 'bot_blaze',
-      name: 'Crimson Apex',
-      color: '#e11d48',
-      paintHex: 0xe11d48, // Metallic Crimson Red
-      accentHex: 0xffffff,
-      bodyId: 'kit1',
-      rimId: 'rim1',
-      spoilerId: 'spoiler1',
+      id: 'bot_police',
+      name: 'ENFORCER',
+      color: '#3b82f6',
+      paintHex: null, // Authentic Police Interceptor
+      carId: 'police',
+      bodyId: 'police',
       startGridOffset: -0.018, // Grid position #2
       laneOffset: -0.0058,
       baseSpeed: 0.184,
       personality: 'aggressive',
     },
     {
-      id: 'bot_viper',
-      name: 'Venom GT',
-      color: '#84cc16',
-      paintHex: 0x84cc16, // Metallic Lime Green
-      accentHex: 0x0f172a,
-      bodyId: 'kit2',
-      rimId: 'rim3',
-      spoilerId: 'spoiler1',
+      id: 'bot_kamaro',
+      name: 'DEMON',
+      color: '#f97316',
+      paintHex: 0xf97316,
+      carId: 'kamaro',
+      bodyId: 'kamaro',
       startGridOffset: -0.036, // Grid position #3
       laneOffset: 0.0058,
       baseSpeed: 0.18,
-      personality: 'cornering',
+      personality: 'speed',
     },
     {
-      id: 'bot_phantom',
-      name: 'Violet Specter',
-      color: '#7c3aed',
-      paintHex: 0x7c3aed, // Metallic Deep Violet
-      accentHex: 0xfbbf24,
-      bodyId: 'kit3',
-      rimId: 'rim2',
-      spoilerId: 'spoiler2',
+      id: 'bot_ghini',
+      name: 'VENOM',
+      color: '#eab308',
+      paintHex: 0xeab308,
+      carId: 'ghini',
+      bodyId: 'ghini',
       startGridOffset: -0.054, // Grid position #4
       laneOffset: -0.0024,
       baseSpeed: 0.188,
-      personality: 'speed',
+      personality: 'cornering',
     },
   ];
 
@@ -147,7 +144,7 @@ export function createRivalRacersController(splineData, scene) {
     metalness: 0.15,
   });
 
-  function buildFallbackCarMesh(paintHex) {
+  function buildFallbackCarMesh(cfg) {
     const carRoot = new THREE.Group();
     carRoot.scale.setScalar(0.56);
 
@@ -156,15 +153,36 @@ export function createRivalRacersController(splineData, scene) {
     carRoot.add(fallbackGroup);
 
     const paintMat = new THREE.MeshStandardMaterial({
-      color: paintHex,
-      emissive: new THREE.Color(paintHex).multiplyScalar(0.15),
+      color: cfg.paintHex,
+      emissive: new THREE.Color(cfg.paintHex).multiplyScalar(0.15),
       roughness: 0.18,
       metalness: 0.74,
+    });
+    const darkMat = new THREE.MeshStandardMaterial({
+      color: 0x0f131d,
+      roughness: 0.35,
+      metalness: 0.65,
     });
 
     const bodyMesh = new THREE.Mesh(fallbackChassisGeo, paintMat);
     bodyMesh.position.set(0, 0.0034, 0);
     fallbackGroup.add(bodyMesh);
+
+    if (cfg.bodyId === 'kit2') {
+      // Widebody Muscle V8 Blower & GT Wing
+      const blower = new THREE.Mesh(new THREE.BoxGeometry(0.0028, 0.0016, 0.0036), darkMat);
+      blower.position.set(0, 0.0052, 0.0032);
+      const wing = new THREE.Mesh(new THREE.BoxGeometry(0.0098, 0.0005, 0.0022), darkMat);
+      wing.position.set(0, 0.0066, -0.0072);
+      fallbackGroup.add(blower, wing);
+    } else if (cfg.bodyId === 'kit3') {
+      // Le Mans Hypercar Dorsal Shark-Fin & Dual Wing
+      const fin = new THREE.Mesh(new THREE.BoxGeometry(0.0004, 0.0022, 0.0062), darkMat);
+      fin.position.set(0, 0.0064, -0.0042);
+      const wing = new THREE.Mesh(new THREE.BoxGeometry(0.0106, 0.0006, 0.0026), paintMat);
+      wing.position.set(0, 0.0072, -0.0076);
+      fallbackGroup.add(fin, wing);
+    }
 
     const wheels = [];
     for (const [wx, wz] of [
@@ -191,7 +209,7 @@ export function createRivalRacersController(splineData, scene) {
   const gridStartBase = (startFinishArc - 0.025 + totalLength) % totalLength;
 
   const rivals = RIVAL_CONFIGS.map((cfg, idx) => {
-    const { kart, fallbackGroup, paintMat, wheels } = buildFallbackCarMesh(cfg.paintHex);
+    const { kart, fallbackGroup, paintMat, wheels } = buildFallbackCarMesh(cfg);
     rootGroup.add(kart);
 
     const initS = (gridStartBase + cfg.startGridOffset + totalLength) % totalLength;
@@ -209,6 +227,7 @@ export function createRivalRacersController(splineData, scene) {
       s: initS,
       totalDistanceTraveled: cfg.startGridOffset, // Continuous distance from start grid!
       lateralOffset: cfg.laneOffset,
+      lateralVel: 0.0,
       targetLane: cfg.laneOffset,
       speed: 0.0,
       baseSpeed: cfg.baseSpeed,
@@ -220,7 +239,7 @@ export function createRivalRacersController(splineData, scene) {
       hopVel: 0.0,
       hopHeight: 0.0,
       heldItem: null,
-      itemCooldown: 4.5 + idx * 1.5,
+      itemCooldown: 6.5 + idx * 2.0,
       position: new THREE.Vector3(),
       rank: idx + 2,
     };
@@ -259,11 +278,32 @@ export function createRivalRacersController(splineData, scene) {
     fallbackTireMat.dispose();
   }
 
+  async function attachCosmoRivalModels() {
+    for (let i = 0; i < rivals.length; i++) {
+      const rival = rivals[i];
+      try {
+        const carInst = await createCosmoCarInstance(rival.cfg.carId, rival.cfg.paintHex);
+        if (rival.fallbackGroup) {
+          rival.mesh.remove(rival.fallbackGroup);
+          if (rival.fallbackPaintMat) rival.fallbackPaintMat.dispose();
+          rival.fallbackGroup = null;
+        }
+        rival.mesh.add(carInst.assemblyRoot);
+        rival.cosmoCar = carInst;
+        rival.wheels = carInst.wheelNodes || [];
+      } catch (err) {
+        console.warn(`Failed to attach Cosmo car ${rival.cfg.carId} to rival:`, err);
+      }
+    }
+  }
+
   // Reusable scratch vectors & ranking array
   const _left = new THREE.Vector3();
   const _rotMat = new THREE.Matrix4();
   const _baseQuat = new THREE.Quaternion();
   const _yawQuat = new THREE.Quaternion();
+  const _tumbleEuler = new THREE.Euler();
+  const _tumbleQuat = new THREE.Quaternion();
   const _LANES = [-0.0068, -0.0024, 0.0024, 0.0068];
   const _rankEntries = [
     { isPlayer: true, dist: 0, rival: null },
@@ -351,7 +391,9 @@ export function createRivalRacersController(splineData, scene) {
             targetSpeed *= 1.24;
           }
 
-          rival.speed = THREE.MathUtils.lerp(rival.speed, targetSpeed, dt * 1.8);
+          // Progressive acceleration off the starting grid (~4.5s 0-100 km/h) so AI matches player launch physics
+          const accelRate = rival.speed < rival.baseSpeed * 0.82 ? 0.44 : 1.45;
+          rival.speed = THREE.MathUtils.lerp(rival.speed, targetSpeed, Math.min(1.0, dt * accelRate));
           rival.headingYaw = THREE.MathUtils.lerp(rival.headingYaw, 0.0, dt * 6.0);
         }
 
@@ -371,16 +413,39 @@ export function createRivalRacersController(splineData, scene) {
         } else if (Math.random() < 0.015) {
           rival.targetLane = _LANES[Math.floor(Math.random() * _LANES.length)];
         }
-        rival.lateralOffset = THREE.MathUtils.lerp(
-          rival.lateralOffset,
-          rival.targetLane,
-          dt * 2.4
-        );
+        // Apply knockback lateral velocity decay + lane steering
+        if (Math.abs(rival.lateralVel || 0.0) > 0.0002) {
+          rival.lateralOffset += rival.lateralVel * dt;
+          rival.lateralVel *= Math.exp(-8.5 * dt);
+          rival.lateralOffset = THREE.MathUtils.clamp(rival.lateralOffset, -0.0114, 0.0114);
+        } else {
+          rival.lateralVel = 0.0;
+          rival.lateralOffset = THREE.MathUtils.lerp(
+            rival.lateralOffset,
+            rival.targetLane,
+            dt * 2.4
+          );
+        }
+
+        // Rival-vs-Rival solid separation so AI cars never overlap each other
+        for (let otherIdx = 0; otherIdx < idx; otherIdx++) {
+          const other = rivals[otherIdx];
+          const dS = Math.abs(
+            ((rival.s - other.s + totalLength * 0.5) % totalLength) - totalLength * 0.5
+          );
+          const dLat = rival.lateralOffset - other.lateralOffset;
+          if (dS < 0.012 && Math.abs(dLat) < 0.0052) {
+            const sepSign = dLat >= 0 ? 1 : -1;
+            const sepPush = (0.0052 - Math.abs(dLat)) * 0.55;
+            rival.lateralOffset = THREE.MathUtils.clamp(rival.lateralOffset + sepSign * sepPush, -0.0112, 0.0112);
+            other.lateralOffset = THREE.MathUtils.clamp(other.lateralOffset - sepSign * sepPush, -0.0112, 0.0112);
+          }
+        }
 
         // Active AI Powerup Combat Triggering
         rival.itemCooldown -= dt;
         if (rival.heldItem && rival.itemCooldown <= 0 && rival.spinoutTimer <= 0) {
-          rival.itemCooldown = 4.8 + Math.random() * 3.5;
+          rival.itemCooldown = 5.2 + Math.random() * 3.5;
           if (powerupManager && powerupManager.triggerRivalPowerup) {
             powerupManager.triggerRivalPowerup(rival, playerState, rivals, audioSynth);
           } else {
@@ -395,7 +460,139 @@ export function createRivalRacersController(splineData, scene) {
         rival.speed = 0.0;
       }
 
-      // Update 3D World Transform on the track spline
+      // Continuous Solid-Body Vehicle-to-Vehicle Collision: Player vs Rival (Zero Ghost Pass-Through!)
+      if (isRacing) {
+        const signedDS =
+          ((playerState.s - rival.s + totalLength * 0.5) % totalLength) - totalLength * 0.5;
+        const absDS = Math.abs(signedDS);
+        const latDelta = playerState.lateralOffset - rival.lateralOffset;
+        const absDLat = Math.abs(latDelta);
+        const absDHop = Math.abs((playerState.hopHeight || 0.0) - (rival.hopHeight || 0.0));
+
+        // Solid car bounding box in spline space (~13.8mm length x ~5.8mm width)
+        const minDS = 0.0138;
+        const minDLat = 0.0058;
+
+        if (absDS < minDS && absDLat < minDLat && absDHop < 0.0048) {
+          const pushDir =
+            Math.abs(latDelta) > 0.0004
+              ? Math.sign(latDelta)
+              : Math.abs(rival.lateralOffset) > 0.0045
+                ? -Math.sign(rival.lateralOffset)
+                : idx % 2 === 0
+                  ? 1
+                  : -1;
+
+          // Determine if this is primarily a rear-end/front-bumper ram or side-by-side door slam
+          const isLongitudinalRam = absDLat < 0.0036 && absDS > 0.0046;
+
+          if (isLongitudinalRam) {
+            const overlapS = minDS - absDS + 0.0006;
+            if (signedDS < 0) {
+              // Player rams into the rear bumper of Rival!
+              const pushRivalS = overlapS * 0.72;
+              const pushPlayerBackS = overlapS * 0.28;
+              rival.totalDistanceTraveled += pushRivalS;
+              rival.s = ((gridStartBase + rival.totalDistanceTraveled) % totalLength + totalLength) % totalLength;
+
+              playerState.s = ((playerState.s - pushPlayerBackS) % totalLength + totalLength) % totalLength;
+              playerState.totalDistanceTraveled = Math.max(0.0, (playerState.totalDistanceTraveled || 0.0) - pushPlayerBackS);
+              playerState.lapDistanceTraveled = Math.max(0.0, (playerState.lapDistanceTraveled || 0.0) - pushPlayerBackS);
+
+              // Shove rival sideways with real lateral velocity impulse so player can overtake!
+              rival.lateralVel = -pushDir * 0.038;
+              rival.lateralOffset = THREE.MathUtils.clamp(
+                rival.lateralOffset - pushDir * 0.0028,
+                -0.0114,
+                0.0114
+              );
+              rival.targetLane = THREE.MathUtils.clamp(
+                rival.lateralOffset - pushDir * 0.0035,
+                -0.0072,
+                0.0072
+              );
+              playerState.lateralOffset = THREE.MathUtils.clamp(
+                playerState.lateralOffset + pushDir * 0.0014,
+                -0.0114,
+                0.0114
+              );
+
+              if ((playerState.boostActive || 0) > 0.05) {
+                // Turbo Ram: send the rival spinning and flying out of the way!
+                rival.spinoutTimer = Math.max(rival.spinoutTimer || 0, 0.95);
+                rival.hopVel = Math.max(rival.hopVel || 0, 0.032);
+                rival.speed = Math.max(rival.speed, playerState.speed * 1.10);
+                playerState.speed *= 0.96;
+              } else {
+                const avgSpd = (playerState.speed + rival.speed) * 0.5;
+                rival.speed = Math.max(rival.speed, avgSpd + 0.048);
+                rival.hopVel = Math.max(rival.hopVel || 0, 0.018);
+                playerState.speed = Math.min(playerState.speed, Math.max(0.05, avgSpd * 0.88));
+              }
+            } else {
+              // Rival rear-ends the Player -> Shunt player forward with a speed surge!
+              const pushPlayerS = overlapS * 0.65;
+              const pushRivalBackS = overlapS * 0.35;
+              playerState.s = (playerState.s + pushPlayerS) % totalLength;
+              playerState.totalDistanceTraveled = (playerState.totalDistanceTraveled || 0.0) + pushPlayerS;
+              playerState.lapDistanceTraveled = (playerState.lapDistanceTraveled || 0.0) + pushPlayerS;
+
+              rival.totalDistanceTraveled -= pushRivalBackS;
+              rival.s = ((gridStartBase + rival.totalDistanceTraveled) % totalLength + totalLength) % totalLength;
+              rival.lateralVel = -pushDir * 0.032;
+              rival.targetLane = -pushDir * 0.0068;
+
+              playerState.speed = Math.max(playerState.speed, rival.speed * 1.06);
+              rival.speed *= 0.80;
+            }
+          } else {
+            // Side-by-side door-banging: hard lateral separation + knockback impulse on rival
+            const overlapLat = minDLat - absDLat + 0.0009;
+            playerState.lateralOffset = THREE.MathUtils.clamp(
+              playerState.lateralOffset + pushDir * overlapLat * 0.45,
+              -0.0116,
+              0.0116
+            );
+            rival.lateralOffset = THREE.MathUtils.clamp(
+              rival.lateralOffset - pushDir * overlapLat * 0.65,
+              -0.0116,
+              0.0116
+            );
+            rival.lateralVel = -pushDir * 0.034;
+            rival.targetLane = THREE.MathUtils.clamp(
+              rival.lateralOffset - pushDir * 0.0032,
+              -0.0072,
+              0.0072
+            );
+          }
+
+          // Trigger collision sparks, yaw jolt, subtle camera shake & metallic crunch sound
+          playerState.carImpactTimer = 0.28;
+          if (rival.bumpCooldown <= 0) {
+            rival.bumpCooldown = 0.24;
+            playerState.headingYaw = THREE.MathUtils.clamp(
+              playerState.headingYaw - pushDir * 0.11,
+              -0.36,
+              0.36
+            );
+            rival.headingYaw = THREE.MathUtils.clamp(
+              rival.headingYaw + pushDir * 0.28,
+              -0.65,
+              0.65
+            );
+            playerState.cameraShake = Math.max(playerState.cameraShake || 0.0, 0.15);
+            if (!isLongitudinalRam) {
+              playerState.speed *= 0.95;
+              rival.speed *= 0.88;
+            }
+            if (audioSynth && audioSynth.playRailImpact) {
+              audioSynth.playRailImpact(0.85);
+            }
+          }
+        }
+      }
+
+      // Update 3D World Transform on the track spline (using resolved collision coordinates)
       const frame = samplePoint(rival.s);
       rival.position
         .copy(frame.pos)
@@ -410,44 +607,28 @@ export function createRivalRacersController(splineData, scene) {
       _yawQuat.setFromAxisAngle(frame.normal, rival.headingYaw);
       rival.mesh.quaternion.copy(_yawQuat.multiply(_baseQuat));
 
+      if (rival.spinoutTimer > 0) {
+        const tPhase = performance.now() * 0.022 + idx * 1.7;
+        const amp = Math.min(1.0, rival.spinoutTimer * 1.5);
+        _tumbleEuler.set(
+          Math.cos(tPhase * 1.2) * 0.34 * amp,
+          0,
+          Math.sin(tPhase) * 0.48 * amp
+        );
+        _tumbleQuat.setFromEuler(_tumbleEuler);
+        rival.mesh.quaternion.multiply(_tumbleQuat);
+      }
+
       // Spin wheels & update AI exhaust flames
-      if (rival.s64WheelUpdater) {
+      if (rival.cosmoCar) {
+        rival.cosmoCar.spinWheels(rival.speed * dt);
+        rival.cosmoCar.steerFrontWheels(rival.headingYaw);
+      } else if (rival.s64WheelUpdater) {
         rival.s64WheelUpdater(dt, rival.speed, (rival.boostTimer || 0) > 0);
       } else {
         const spinDelta = (rival.speed / 0.002) * dt;
         for (let wIdx = 0; wIdx < rival.wheels.length; wIdx++) {
           rival.wheels[wIdx].rotation.x += spinDelta;
-        }
-      }
-
-      // Vehicle-to-Vehicle Collision: Player vs Rival (with 0.45s cooldown to prevent audio/speed spam)
-      if (isRacing && rival.bumpCooldown <= 0) {
-        const dSpline = Math.abs(
-          ((playerState.s - rival.s + totalLength * 0.5) % totalLength) - totalLength * 0.5
-        );
-        const dLat = Math.abs(playerState.lateralOffset - rival.lateralOffset);
-        if (dSpline < 0.0095 && dLat < 0.0046) {
-          rival.bumpCooldown = 0.45;
-          const latDelta = playerState.lateralOffset - rival.lateralOffset;
-          const pushDir = Math.sign(latDelta) || (idx % 2 === 0 ? 1 : -1);
-
-          playerState.lateralOffset = THREE.MathUtils.clamp(
-            playerState.lateralOffset + pushDir * 0.0024,
-            -0.0116,
-            0.0116
-          );
-          rival.lateralOffset = THREE.MathUtils.clamp(
-            rival.lateralOffset - pushDir * 0.0024,
-            -0.0116,
-            0.0116
-          );
-
-          playerState.speed *= 0.94;
-          rival.speed *= 0.92;
-
-          if (audioSynth && audioSynth.playRailImpact) {
-            audioSynth.playRailImpact(0.45);
-          }
         }
       }
     }
@@ -462,6 +643,7 @@ export function createRivalRacersController(splineData, scene) {
       rival.totalDistanceTraveled = cfg.startGridOffset;
       rival.s = (gridStartBase + cfg.startGridOffset + totalLength) % totalLength;
       rival.lateralOffset = cfg.laneOffset;
+      rival.lateralVel = 0.0;
       rival.targetLane = cfg.laneOffset;
       rival.speed = 0.0;
       rival.headingYaw = 0.0;
@@ -472,6 +654,7 @@ export function createRivalRacersController(splineData, scene) {
       rival.hopHeight = 0.0;
       rival.hopVel = 0.0;
       rival.heldItem = null;
+      rival.itemCooldown = 6.5 + idx * 2.0;
       rival.rank = idx + 2;
 
       const frame = samplePoint(rival.s);
@@ -493,6 +676,7 @@ export function createRivalRacersController(splineData, scene) {
     update,
     reset,
     attachS64RivalModels,
+    attachCosmoRivalModels,
     getPlayerRank,
     getRivalsData: () =>
       rivals.map((r) => ({

@@ -42,12 +42,46 @@ const WHEEL_SLOTS = [
   { name: 'RR', x: -99.5, y: 24.0, z: 58.0, side: 'R', isFront: false },
 ];
 
-function attachReadabilityRimShader(mat, _cacheKey, _minFloorStrength, _topFillStrength, _rimStrength) {
-  // Keep PBR material lighting natural without artificial emissive self-illumination
-  // Emissive is strictly reserved for Headlights and Taillights!
+const RIM_STYLES = {
+  rim0: {
+    alloyHex: 0xe2e8f0, // Bright Brushed Silver
+    accentHex: 0x94a3b8,
+    caliperHex: 0xef4444,
+    roughness: 0.14,
+    metalness: 0.92,
+  },
+  rim1: {
+    alloyHex: 0x00e5ff, // Electric Cyan 5-Spoke
+    accentHex: 0xf8fafc,
+    caliperHex: 0xfbbf24,
+    roughness: 0.10,
+    metalness: 0.90,
+  },
+  rim2: {
+    alloyHex: 0xffb800, // 24K Deep-Dish Gold Mesh
+    accentHex: 0xffffff,
+    caliperHex: 0xef4444,
+    roughness: 0.12,
+    metalness: 0.95,
+  },
+  rim3: {
+    alloyHex: 0xf8fafc, // Diamond-Cut White & Titanium Turbine
+    accentHex: 0x38bdf8,
+    caliperHex: 0x10b981,
+    roughness: 0.08,
+    metalness: 0.96,
+  },
+};
+
+function attachReadabilityRimShader(_mat, _cacheKey, _minFloorStrength, _topFillStrength, _rimStrength) {
+  // Natural studio & environment PBR lighting
 }
 
-function upgradeBodyMaterials(fbxObj, kitId) {
+function upgradeBodyMaterials(fbxObj, kitId, customPaintHex = null) {
+  const defaultPaintHex =
+    kitId === 'kit2' ? 0x00d4ff : kitId === 'kit3' ? 0xffb800 : 0xee1520;
+  const paintHex = customPaintHex !== null ? customPaintHex : defaultPaintHex;
+
   fbxObj.traverse((child) => {
     if (!child.isMesh) return;
     child.castShadow = true;
@@ -87,10 +121,10 @@ function upgradeBodyMaterials(fbxObj, kitId) {
       if (mName.includes('glass') || mName.includes('window') || mName.includes('windshield')) {
         return new THREE.MeshStandardMaterial({
           name: 'S64_Glass',
-          color: 0x08101e,
-          roughness: 0.05,
-          metalness: 0.92,
-          envMapIntensity: 2.2,
+          color: 0x0a1324,
+          roughness: 0.06,
+          metalness: 0.90,
+          envMapIntensity: 2.4,
         });
       }
 
@@ -106,12 +140,12 @@ function upgradeBodyMaterials(fbxObj, kitId) {
 
       if (mName.includes('det2') || mName.includes('accent') || mName.includes('stripe')) {
         const accentHex =
-          kitId === 'kit2' ? 0x081220 : kitId === 'kit3' ? 0xffb800 : 0xffffff;
+          kitId === 'kit2' ? 0x091326 : kitId === 'kit3' ? 0x111520 : 0xffffff;
         return new THREE.MeshStandardMaterial({
           name: 'S64_Det2',
           color: accentHex,
           roughness: 0.16,
-          metalness: kitId === 'kit3' ? 0.90 : 0.65,
+          metalness: 0.78,
           envMapIntensity: 2.0,
         });
       }
@@ -119,22 +153,19 @@ function upgradeBodyMaterials(fbxObj, kitId) {
       if (mName.includes('det1') || mName.includes('under') || mName.includes('trim') || mName.includes('black')) {
         return new THREE.MeshStandardMaterial({
           name: 'S64_Trim',
-          color: kitId === 'kit3' ? 0x1f232d : 0x12151c,
-          roughness: 0.32,
-          metalness: 0.55,
-          envMapIntensity: 1.4,
+          color: 0x141821,
+          roughness: 0.28,
+          metalness: 0.62,
+          envMapIntensity: 1.5,
         });
       }
 
-      // Primary metallic paint coat per body kit
-      const paintHex =
-        kitId === 'kit2' ? 0x00d4ff : kitId === 'kit3' ? 0xffaa00 : 0xee1520;
       return new THREE.MeshStandardMaterial({
         name: `S64_CarPaint_${kitId}_${matIdx}`,
         color: paintHex,
-        roughness: kitId === 'kit3' ? 0.14 : kitId === 'kit2' ? 0.10 : 0.12,
-        metalness: kitId === 'kit2' ? 0.88 : kitId === 'kit3' ? 0.90 : 0.82,
-        envMapIntensity: 2.5,
+        roughness: kitId === 'kit3' ? 0.12 : kitId === 'kit2' ? 0.10 : 0.12,
+        metalness: kitId === 'kit2' ? 0.85 : kitId === 'kit3' ? 0.88 : 0.80,
+        envMapIntensity: 2.6,
       });
     });
 
@@ -142,7 +173,8 @@ function upgradeBodyMaterials(fbxObj, kitId) {
   });
 }
 
-function upgradeRimMaterials(fbxObj, rimId, kitId) {
+function upgradeRimMaterials(fbxObj, rimId) {
+  const style = RIM_STYLES[rimId] || RIM_STYLES.rim0;
   fbxObj.traverse((child) => {
     if (!child.isMesh) return;
     child.castShadow = true;
@@ -158,37 +190,27 @@ function upgradeRimMaterials(fbxObj, rimId, kitId) {
       if (mName.includes('tire')) {
         return new THREE.MeshStandardMaterial({
           name: 'S64_TireRubber',
-          color: 0x11141a,
-          roughness: 0.82,
-          metalness: 0.05,
-          envMapIntensity: 0.8,
+          color: 0x12151c,
+          roughness: 0.78,
+          metalness: 0.08,
+          envMapIntensity: 0.9,
         });
       }
 
       if (mName.includes('disc')) {
         return new THREE.MeshStandardMaterial({
           name: 'S64_BrakeDisc',
-          color: 0x586274,
-          roughness: 0.28,
+          color: 0x64748b,
+          roughness: 0.24,
           metalness: 0.88,
         });
       }
 
-      // Alloy rim spokes & lip
-      let rimColor = 0xe2eaf5;
-      if (rimId === 'rim1') {
-        rimColor = kitId === 'kit2' ? 0x00d4ff : 0x222834;
-      } else if (rimId === 'rim2') {
-        rimColor = 0xffb800; // Deep dish gold
-      } else if (rimId === 'rim3') {
-        rimColor = kitId === 'kit2' ? 0x38bdf8 : 0xf8fafc;
-      }
-
       return new THREE.MeshStandardMaterial({
         name: 'S64_RimAlloy',
-        color: rimColor,
-        roughness: 0.08,
-        metalness: 0.94,
+        color: style.alloyHex,
+        roughness: style.roughness,
+        metalness: style.metalness,
         envMapIntensity: 2.8,
       });
     });
@@ -197,7 +219,347 @@ function upgradeRimMaterials(fbxObj, rimId, kitId) {
   });
 }
 
-function upgradeSpoilerMaterials(fbxObj, spoilerId, kitId) {
+/**
+ * Builds a coaxial 3D Custom Rim Insert (in the X-Y wheel plane, axle along Z)
+ * so each rim option (rim0..rim3) has a dramatically different 3D spoke pattern,
+ * outer alloy flange, and center lock cap — with ZERO sideways tire clipping!
+ */
+function buildCoaxialCustomRimInsert(rimId, side) {
+  const style = RIM_STYLES[rimId] || RIM_STYLES.rim0;
+  const group = new THREE.Group();
+  group.name = `CustomRimInsert_${rimId}_${side}`;
+
+  // Offset slightly outward along wheel axle (+Z on right, -Z on left) so custom spokes sit flush in the wheel dish
+  const zSign = side === 'L' ? -1 : 1;
+  group.position.z = zSign * 1.4;
+
+  const alloyMat = new THREE.MeshStandardMaterial({
+    color: style.alloyHex,
+    roughness: style.roughness,
+    metalness: style.metalness,
+    envMapIntensity: 2.8,
+  });
+
+  const accentMat = new THREE.MeshStandardMaterial({
+    color: style.accentHex,
+    roughness: 0.12,
+    metalness: 0.92,
+    envMapIntensity: 2.5,
+  });
+
+  const capMat = new THREE.MeshStandardMaterial({
+    color: style.caliperHex,
+    roughness: 0.18,
+    metalness: 0.80,
+  });
+
+  // 1. Coaxial Outer Rim Barrel Flange (lies in X-Y plane, normal along Z axle — never intersects tire tread!)
+  const flangeRing = new THREE.Mesh(
+    new THREE.TorusGeometry(14.6, 1.35, 10, 28),
+    rimId === 'rim2' ? accentMat : alloyMat
+  );
+  flangeRing.position.z = zSign * 1.6;
+  group.add(flangeRing);
+
+  // 2. Center Lock Hub Cap (cylinder aligned with Z axle via rotateX(Math.PI/2))
+  const hubGeo = new THREE.CylinderGeometry(4.2, 4.2, 3.2, 16);
+  hubGeo.rotateX(Math.PI / 2);
+  const hubMesh = new THREE.Mesh(hubGeo, capMat);
+  hubMesh.position.z = zSign * 1.2;
+  group.add(hubMesh);
+
+  // 3. Distinct 3D Spoke Geometry per Rim ID
+  if (rimId === 'rim0') {
+    // Stock Silver 6-Spoke Classic Star
+    const spokeGeo = new THREE.BoxGeometry(2.4, 26.5, 2.0);
+    for (let i = 0; i < 3; i++) {
+      const spoke = new THREE.Mesh(spokeGeo, alloyMat);
+      spoke.rotation.z = (i * Math.PI) / 3;
+      spoke.position.z = zSign * 0.8;
+      group.add(spoke);
+    }
+  } else if (rimId === 'rim1') {
+    // Neon Cyan 5-Spoke Directional Twin Blades
+    const spokeGeo = new THREE.BoxGeometry(2.8, 13.5, 2.4);
+    for (let i = 0; i < 5; i++) {
+      const angle = (i * Math.PI * 2) / 5;
+      const spoke = new THREE.Mesh(spokeGeo, alloyMat);
+      spoke.position.set(Math.cos(angle) * 7.2, Math.sin(angle) * 7.2, zSign * 1.1);
+      spoke.rotation.z = angle - Math.PI / 2 + 0.18;
+      group.add(spoke);
+    }
+  } else if (rimId === 'rim2') {
+    // 24K Gold Deep-Dish Multi-Spoke BBS Mesh + Chrome Step Lip
+    const innerStepRing = new THREE.Mesh(
+      new THREE.TorusGeometry(12.2, 1.1, 8, 24),
+      alloyMat
+    );
+    innerStepRing.position.z = zSign * 0.6;
+    group.add(innerStepRing);
+
+    const meshSpokeGeo = new THREE.BoxGeometry(1.5, 25.0, 1.8);
+    for (let i = 0; i < 4; i++) {
+      const spokeA = new THREE.Mesh(meshSpokeGeo, alloyMat);
+      spokeA.rotation.z = (i * Math.PI) / 4 + 0.12;
+      spokeA.position.z = zSign * 0.5;
+      const spokeB = new THREE.Mesh(meshSpokeGeo, alloyMat);
+      spokeB.rotation.z = (i * Math.PI) / 4 - 0.12;
+      spokeB.position.z = zSign * 0.5;
+      group.add(spokeA, spokeB);
+    }
+  } else if (rimId === 'rim3') {
+    // Titanium GT 10-Blade Aero Turbine + Aero Ring
+    const aeroDiscGeo = new THREE.CylinderGeometry(11.8, 11.8, 1.4, 24);
+    aeroDiscGeo.rotateX(Math.PI / 2);
+    const aeroDisc = new THREE.Mesh(aeroDiscGeo, alloyMat);
+    aeroDisc.position.z = zSign * 0.4;
+    group.add(aeroDisc);
+
+    const bladeGeo = new THREE.BoxGeometry(1.6, 8.5, 2.2);
+    for (let i = 0; i < 8; i++) {
+      const angle = (i * Math.PI * 2) / 8;
+      const blade = new THREE.Mesh(bladeGeo, accentMat);
+      blade.position.set(Math.cos(angle) * 8.8, Math.sin(angle) * 8.8, zSign * 1.2);
+      blade.rotation.z = angle - Math.PI / 2 + 0.38;
+      group.add(blade);
+    }
+  }
+
+  return group;
+}
+
+/**
+ * Builds distinct 3D Sculpted Chassis & Aero Bodywork Attachments in native S64 FBX coordinates
+ * (+X Nose +176, -X Tail -158, +Y Roof +104, ±Z Left/Right ±58) so Kit 1, Kit 2, and Kit 3
+ * have unmistakably different 3D silhouettes (Street Coupe vs Widebody Muscle vs Le Mans Hypercar).
+ */
+function buildBespokeBodyKitAttachments(kitId, customPaintHex = null) {
+  const group = new THREE.Group();
+  group.name = `BespokeBodyKit_${kitId}`;
+
+  const defaultPaintHex =
+    kitId === 'kit2' ? 0x00d4ff : kitId === 'kit3' ? 0xffb800 : 0xee1520;
+  const paintHex = customPaintHex !== null ? customPaintHex : defaultPaintHex;
+
+  const paintMat = new THREE.MeshStandardMaterial({
+    name: `S64_KitPaint_${kitId}`,
+    color: paintHex,
+    roughness: 0.12,
+    metalness: 0.85,
+    envMapIntensity: 2.5,
+  });
+
+  const carbonMat = new THREE.MeshStandardMaterial({
+    name: 'S64_CarbonAero',
+    color: 0x11151f,
+    roughness: 0.26,
+    metalness: 0.65,
+    envMapIntensity: 1.8,
+  });
+
+  const chromeMat = new THREE.MeshStandardMaterial({
+    name: 'S64_ChromeHardware',
+    color: 0xe2e8f0,
+    roughness: 0.10,
+    metalness: 0.96,
+    envMapIntensity: 2.8,
+  });
+
+  const accentGlowMat = new THREE.MeshStandardMaterial({
+    name: 'S64_AeroAccent',
+    color: kitId === 'kit2' ? 0x00f0ff : kitId === 'kit3' ? 0xffc72c : 0xff2b1e,
+    emissive: new THREE.Color(
+      kitId === 'kit2' ? 0x00a8cc : kitId === 'kit3' ? 0x996600 : 0x880808
+    ),
+    emissiveIntensity: 0.45,
+    roughness: 0.18,
+    metalness: 0.78,
+  });
+
+  if (kitId === 'kit1') {
+    // KIT 1: STREET TUNER (JDM Coupe — Carbon Chin Lip, Hood Vents, Angled Titanium Exhaust)
+    const frontLip = new THREE.Mesh(new THREE.BoxGeometry(18, 4.5, 124), carbonMat);
+    frontLip.position.set(172, 11, 0);
+    frontLip.castShadow = true;
+    group.add(frontLip);
+
+    // Front lip accent strip
+    const lipAccent = new THREE.Mesh(new THREE.BoxGeometry(4, 2.2, 126), accentGlowMat);
+    lipAccent.position.set(180, 10.5, 0);
+    group.add(lipAccent);
+
+    // JDM Vented Carbon Hood Slats
+    for (let i = 0; i < 3; i++) {
+      const vent = new THREE.Mesh(new THREE.BoxGeometry(8, 2.5, 56), carbonMat);
+      vent.position.set(95 + i * 16, 68.5 - i * 1.8, 0);
+      vent.rotation.z = -0.10;
+      group.add(vent);
+    }
+
+    // Sleek Carbon Side Skirts
+    for (const zSign of [-1, 1]) {
+      const skirt = new THREE.Mesh(new THREE.BoxGeometry(132, 4.5, 6), carbonMat);
+      skirt.position.set(4, 11.5, zSign * 59.5);
+      group.add(skirt);
+    }
+  } else if (kitId === 'kit2') {
+    // KIT 2: AERO BEAST (Widebody Muscle GT — Flared Overfenders, V8 Supercharger Hood Blower, Rear Louvers)
+    // 1. Massive Bolted Widebody Fender Flares over all 4 wheel wells (+16 units wider!)
+    const archPositions = [
+      { x: 104.2, y: 34, z: -61, isFront: true },
+      { x: 104.2, y: 34, z: 61, isFront: true },
+      { x: -99.5, y: 36, z: -62, isFront: false },
+      { x: -99.5, y: 36, z: 62, isFront: false },
+    ];
+    for (const arch of archPositions) {
+      const flare = new THREE.Mesh(
+        new THREE.BoxGeometry(arch.isFront ? 58 : 64, 22, 14),
+        paintMat
+      );
+      flare.position.set(arch.x, arch.y, arch.z);
+      flare.castShadow = true;
+      group.add(flare);
+
+      const archTrim = new THREE.Mesh(
+        new THREE.BoxGeometry(arch.isFront ? 60 : 66, 6, 15.5),
+        carbonMat
+      );
+      archTrim.position.set(arch.x, arch.y - 8, arch.z);
+      group.add(archTrim);
+    }
+
+    // 2. Towering Chrome V8 Supercharger Hood Blower Scoop
+    const blowerBase = new THREE.Mesh(new THREE.BoxGeometry(52, 12, 36), carbonMat);
+    blowerBase.position.set(102, 72, 0);
+    blowerBase.castShadow = true;
+    group.add(blowerBase);
+
+    const blowerHousing = new THREE.Mesh(new THREE.BoxGeometry(44, 13, 30), chromeMat);
+    blowerHousing.position.set(106, 80, 0);
+    blowerHousing.castShadow = true;
+    group.add(blowerHousing);
+
+    const intakeValve = new THREE.Mesh(new THREE.BoxGeometry(6, 9, 26), accentGlowMat);
+    intakeValve.position.set(127, 80, 0);
+    group.add(intakeValve);
+
+    // 3. Widebody Side-Skirts & Twin Side-Exit Exhaust Pipes
+    for (const zSign of [-1, 1]) {
+      const wideSkirt = new THREE.Mesh(new THREE.BoxGeometry(142, 7, 13), carbonMat);
+      wideSkirt.position.set(2, 12, zSign * 62);
+      wideSkirt.castShadow = true;
+      group.add(wideSkirt);
+
+      const skirtAccent = new THREE.Mesh(new THREE.BoxGeometry(138, 2.4, 14.5), accentGlowMat);
+      skirtAccent.position.set(2, 9.5, zSign * 62);
+      group.add(skirtAccent);
+    }
+
+    // 4. Aggressive Front Time-Attack Splitter & Twin Dive-Plane Canards
+    const beastSplitter = new THREE.Mesh(new THREE.BoxGeometry(28, 5, 138), carbonMat);
+    beastSplitter.position.set(174, 10, 0);
+    beastSplitter.castShadow = true;
+    group.add(beastSplitter);
+
+    for (const zSign of [-1, 1]) {
+      const canard = new THREE.Mesh(new THREE.BoxGeometry(24, 12, 5), accentGlowMat);
+      canard.position.set(172, 20, zSign * 64);
+      canard.rotation.z = 0.25;
+      group.add(canard);
+    }
+
+    // 5. Muscle Fastback Rear Window Slatted Louvers
+    for (let i = 0; i < 4; i++) {
+      const louver = new THREE.Mesh(new THREE.BoxGeometry(10, 2.5, 78), carbonMat);
+      louver.position.set(-72 - i * 14, 96 - i * 4.5, 0);
+      louver.rotation.z = 0.28;
+      group.add(louver);
+    }
+  } else if (kitId === 'kit3') {
+    // KIT 3: CYBER PHANTOM (Exotic Le Mans Hypercar — Extended Aero Nose, Roof Airbox, LMP1 Shark Fin, Rear Diffuser)
+    // 1. Elongated Hypercar Front Aero Nose Cone & Dual-Blade Front Wing
+    const hyperNose = new THREE.Mesh(new THREE.BoxGeometry(32, 14, 112), paintMat);
+    hyperNose.position.set(176, 22, 0);
+    hyperNose.rotation.z = -0.18;
+    hyperNose.castShadow = true;
+    group.add(hyperNose);
+
+    const frontWingBlade = new THREE.Mesh(new THREE.BoxGeometry(34, 4.5, 142), carbonMat);
+    frontWingBlade.position.set(180, 9.5, 0);
+    frontWingBlade.castShadow = true;
+    group.add(frontWingBlade);
+
+    const frontWingEdge = new THREE.Mesh(new THREE.BoxGeometry(8, 3.0, 144), accentGlowMat);
+    frontWingEdge.position.set(194, 9.5, 0);
+    group.add(frontWingEdge);
+
+    // Front wing endplates
+    for (const zSign of [-1, 1]) {
+      const endplate = new THREE.Mesh(new THREE.BoxGeometry(36, 18, 4), paintMat);
+      endplate.position.set(176, 16, zSign * 70);
+      group.add(endplate);
+    }
+
+    // 2. Formula-1 Overhead Roof Snorkel Airbox Scoop
+    const roofScoop = new THREE.Mesh(new THREE.BoxGeometry(58, 14, 22), paintMat);
+    roofScoop.position.set(-8, 108, 0);
+    roofScoop.castShadow = true;
+    group.add(roofScoop);
+
+    const scoopInlet = new THREE.Mesh(new THREE.BoxGeometry(6, 10, 18), accentGlowMat);
+    scoopInlet.position.set(20, 108, 0);
+    group.add(scoopInlet);
+
+    // 3. Iconic LMP1 Dorsal Shark-Fin Aero Spine along the rear deck
+    const sharkFin = new THREE.Mesh(new THREE.BoxGeometry(92, 26, 3.5), carbonMat);
+    sharkFin.position.set(-76, 96, 0);
+    sharkFin.rotation.z = 0.14;
+    sharkFin.castShadow = true;
+    group.add(sharkFin);
+
+    const sharkFinTrim = new THREE.Mesh(new THREE.BoxGeometry(90, 4, 4.5), accentGlowMat);
+    sharkFinTrim.position.set(-76, 108, 0);
+    sharkFinTrim.rotation.z = 0.14;
+    group.add(sharkFinTrim);
+
+    // 4. Sculpted Hypercar Side-Pod Air Tunnels & Bargeboards
+    for (const zSign of [-1, 1]) {
+      const sidePod = new THREE.Mesh(new THREE.BoxGeometry(118, 22, 14), paintMat);
+      sidePod.position.set(-6, 24, zSign * 62);
+      sidePod.castShadow = true;
+      group.add(sidePod);
+
+      const podBlade = new THREE.Mesh(new THREE.BoxGeometry(148, 5, 18), carbonMat);
+      podBlade.position.set(0, 10, zSign * 64);
+      group.add(podBlade);
+    }
+
+    // 5. Rear Ground-Effect Venturi Diffuser with 5 Vertical Aero Strakes
+    const diffuserBase = new THREE.Mesh(new THREE.BoxGeometry(24, 6, 132), carbonMat);
+    diffuserBase.position.set(-160, 12, 0);
+    group.add(diffuserBase);
+
+    for (const zPos of [-52, -26, 0, 26, 52]) {
+      const strake = new THREE.Mesh(new THREE.BoxGeometry(28, 14, 3.2), accentGlowMat);
+      strake.position.set(-162, 14, zPos);
+      group.add(strake);
+    }
+  }
+
+  return group;
+}
+
+function upgradeSpoilerMaterials(fbxObj, spoilerId, kitId, customPaintHex = null) {
+  const defaultWingColor =
+    kitId === 'kit2'
+      ? 0x00d4ff
+      : kitId === 'kit3'
+        ? 0xffb800
+        : spoilerId === 'spoiler2'
+          ? 0x151922
+          : 0xee1520;
+  const wingColor = customPaintHex !== null ? customPaintHex : defaultWingColor;
+
   fbxObj.traverse((child) => {
     if (!child.isMesh) return;
     child.castShadow = true;
@@ -206,28 +568,19 @@ function upgradeSpoilerMaterials(fbxObj, spoilerId, kitId) {
       child.geometry.computeVertexNormals();
     }
 
-    const wingColor =
-      kitId === 'kit2'
-        ? 0x00d4ff
-        : kitId === 'kit3'
-          ? 0xffaa00
-          : spoilerId === 'spoiler2'
-            ? 0x151922
-            : 0xee1520;
-
     child.material = new THREE.MeshStandardMaterial({
       name: 'S64_SpoilerWing',
       color: wingColor,
       roughness: 0.12,
-      metalness: 0.80,
-      envMapIntensity: 2.2,
+      metalness: 0.84,
+      envMapIntensity: 2.4,
     });
   });
 }
 
 /**
  * Loads all 13 FBX files from S64Compact_v1_C (3 Bodies, 4 Left/Right Rim sets, 2 Spoilers)
- * and builds a complete modular 3D vehicle assembly that swaps body kits, wheels, and spoilers in real time.
+ * and builds a complete modular 3D vehicle assembly with distinct 3D bodykits, coaxial custom rims, and spoilers.
  */
 export async function loadS64ModularCar() {
   const loader = new FBXLoader();
@@ -271,43 +624,44 @@ export async function loadS64ModularCar() {
   carAssemblyRoot.name = 'S64CompactModularAssembly';
 
   // Inner group in native S64 FBX coordinates (+X forward, +Y up, +Z right)
-  // Scale 0.0000565 maps 328.4 FBX length units -> 0.01855m (18.55mm), matching the 1:87 track & showroom!
   const fbxSpaceGroup = new THREE.Group();
   fbxSpaceGroup.name = 'S64FbxSpaceRoot';
   const s64Scale = 0.0000565;
   fbxSpaceGroup.scale.setScalar(s64Scale);
-  // Rotate -90 deg around Y so native +X (Headlights) points along +Z (Kart Forward)
   fbxSpaceGroup.rotation.y = -Math.PI / 2;
-  // Center longitudinally so front/rear overhang is balanced on the turntable and spline
   fbxSpaceGroup.position.set(0, 0.0001, -0.00035);
   carAssemblyRoot.add(fbxSpaceGroup);
 
-  // 1. Prepare 3 Body Meshes
+  // 1. Prepare 3 Body Meshes + Bespoke 3D Bodykit Sculptures so each car has a truly distinct 3D silhouette
   const bodies = {
     kit1: body1,
     kit2: body2,
     kit3: body3,
   };
+  const bespokeKitGroups = {};
+
   for (const [kId, bObj] of Object.entries(bodies)) {
     upgradeBodyMaterials(bObj, kId);
     bObj.visible = kId === 'kit1';
     fbxSpaceGroup.add(bObj);
   }
 
-  // 2. Prepare 2 Spoilers mounted on the rear trunk decklid (X = -134, Y = 75.5, Z = 0 in native FBX space)
+  // 2. Prepare 2 Spoilers mounted on the rear trunk decklid + Custom Swan-Neck Pylons for spoiler2
   const spoilers = {
     spoiler1,
     spoiler2,
   };
   spoiler1.position.set(-134.0, 74.5, 0.0);
-  spoiler2.position.set(-136.0, 75.0, 0.0);
+  spoiler2.position.set(-138.0, 78.0, 0.0);
+  spoiler2.scale.set(1.15, 1.22, 1.18);
+
   for (const [sId, sObj] of Object.entries(spoilers)) {
     upgradeSpoilerMaterials(sObj, sId, 'kit1');
     sObj.visible = false;
     fbxSpaceGroup.add(sObj);
   }
 
-  // 3. Prepare 4 Wheel Slots (FL, FR, RL, RR), each holding all 4 Rim Variants (rim0..rim3)
+  // 3. Prepare 4 Wheel Slots (FL, FR, RL, RR), each holding all 4 Rim Variants (rim0..rim3) + Coaxial 3D Custom Rim Inserts
   const rawRims = {
     rim0: { L: rim0L, R: rim0R },
     rim1: { L: rim1L, R: rim1R },
@@ -324,13 +678,6 @@ export async function loadS64ModularCar() {
     rim3: [],
   };
 
-  const playerLipMat = new THREE.MeshBasicMaterial({
-    color: 0xff1e26,
-    toneMapped: false,
-  });
-  const playerLipGeo = new THREE.TorusGeometry(21.5, 1.35, 8, 24);
-  playerLipGeo.rotateY(Math.PI / 2);
-
   for (const slot of WHEEL_SLOTS) {
     const steerPivot = new THREE.Group();
     steerPivot.name = `S64_WheelPivot_${slot.name}`;
@@ -341,17 +688,22 @@ export async function loadS64ModularCar() {
     steerPivot.add(spinGroup);
 
     for (const rId of ['rim0', 'rim1', 'rim2', 'rim3']) {
+      const rimContainer = new THREE.Group();
+      rimContainer.name = `S64_RimVariant_${rId}_${slot.name}`;
+
       const template = rawRims[rId][slot.side];
       const clonedRim = template.clone(true);
-      upgradeRimMaterials(clonedRim, rId, 'kit1');
-      clonedRim.visible = rId === 'rim0';
-      spinGroup.add(clonedRim);
-      slotRimMeshes[rId].push(clonedRim);
-    }
+      upgradeRimMaterials(clonedRim, rId);
+      rimContainer.add(clonedRim);
 
-    const lipRing = new THREE.Mesh(playerLipGeo, playerLipMat);
-    lipRing.position.z = slot.side === 'L' ? -9.5 : 9.5;
-    spinGroup.add(lipRing);
+      // Attach coaxial 3D spoke/flange insert so switching rims is 100% unmistakable
+      const customInsert = buildCoaxialCustomRimInsert(rId, slot.side);
+      rimContainer.add(customInsert);
+
+      rimContainer.visible = rId === 'rim0';
+      spinGroup.add(rimContainer);
+      slotRimMeshes[rId].push(rimContainer);
+    }
 
     fbxSpaceGroup.add(steerPivot);
     wheelSpinGroups.push(spinGroup);
@@ -363,10 +715,12 @@ export async function loadS64ModularCar() {
   let activeBodyId = 'kit1';
   let activeRimId = 'rim0';
   let activeSpoilerId = 'spoiler0';
+  let activePaintHex = null;
 
-  function setConfiguration({ bodyId, rimId, spoilerId } = {}) {
-    if (bodyId && bodies[bodyId]) {
-      activeBodyId = bodyId;
+  function setConfiguration({ bodyId, rimId, spoilerId, paintHex } = {}) {
+    const mappedBody = bodyId === 's64' ? 'kit1' : bodyId;
+    if (mappedBody && bodies[mappedBody]) {
+      activeBodyId = mappedBody;
     }
     if (rimId && slotRimMeshes[rimId]) {
       activeRimId = rimId;
@@ -374,28 +728,43 @@ export async function loadS64ModularCar() {
     if (spoilerId !== undefined) {
       activeSpoilerId = spoilerId;
     }
-
-    // Update Neon Arcade Rim Lip Ring color to match vehicle kit/rim
-    if (activeRimId === 'rim2' || activeBodyId === 'kit3') {
-      playerLipMat.color.setHex(0xffb800);
-    } else if (activeBodyId === 'kit2' || activeRimId === 'rim1') {
-      playerLipMat.color.setHex(0x00f0ff);
-    } else {
-      playerLipMat.color.setHex(0xff1e26);
+    if (paintHex !== undefined) {
+      activePaintHex = paintHex;
     }
 
-    // Toggle active body mesh
+    fbxSpaceGroup.visible = true;
+
+    // Toggle active body mesh & update paint if overridden
     for (const [kId, bObj] of Object.entries(bodies)) {
-      bObj.visible = kId === activeBodyId;
+      const isVis = kId === activeBodyId;
+      bObj.visible = isVis;
+      if (isVis) {
+        bObj.traverse((c) => {
+          c.visible = true;
+        });
+        upgradeBodyMaterials(bObj, kId, activePaintHex);
+        if (bespokeKitGroups[kId]) {
+          bespokeKitGroups[kId].traverse((c) => {
+            c.visible = true;
+            if (c.isMesh && c.material && c.material.name?.startsWith('S64_KitPaint_')) {
+              const defaultHex =
+                kId === 'kit2' ? 0x00d4ff : kId === 'kit3' ? 0xffb800 : 0xee1520;
+              c.material.color.setHex(activePaintHex !== null ? activePaintHex : defaultHex);
+            }
+          });
+        }
+      }
     }
 
-    // Toggle active rim set across all 4 wheels and tint for current kit
-    for (const [rId, clones] of Object.entries(slotRimMeshes)) {
+    // Toggle active rim set across all 4 wheels
+    for (const [rId, containers] of Object.entries(slotRimMeshes)) {
       const isVis = rId === activeRimId;
-      for (const c of clones) {
+      for (const c of containers) {
         c.visible = isVis;
         if (isVis) {
-          upgradeRimMaterials(c, rId, activeBodyId);
+          c.traverse((node) => {
+            node.visible = true;
+          });
         }
       }
     }
@@ -405,7 +774,10 @@ export async function loadS64ModularCar() {
       const isVis = sId === activeSpoilerId;
       sObj.visible = isVis;
       if (isVis) {
-        upgradeSpoilerMaterials(sObj, sId, activeBodyId);
+        sObj.traverse((node) => {
+          node.visible = true;
+        });
+        upgradeSpoilerMaterials(sObj, sId, activeBodyId, activePaintHex);
       }
     }
   }
@@ -442,7 +814,7 @@ export async function loadS64ModularCar() {
     rivalFbxGroup.position.set(0, 0.0001, -0.00035);
     rivalCarRoot.add(rivalFbxGroup);
 
-    // 1. Clone the S64 FBX Body Chassis and apply metallic paint
+    // 1. Clone the S64 FBX Body Chassis + Bespoke Bodykit Sculpture and apply metallic paint
     const srcBody = bodies[bodyId] || bodies.kit1;
     const clonedBody = srcBody.clone(true);
     clonedBody.visible = true;
@@ -454,32 +826,36 @@ export async function loadS64ModularCar() {
       const oldMats = Array.isArray(child.material) ? child.material : [child.material];
       const newMats = oldMats.map((oldMat) => {
         const mName = (oldMat?.name || '').toLowerCase();
-        if (mName.includes('headlight') || mName.includes('rearlight') || mName.includes('glass') || mName.includes('exhaust')) {
+        if (
+          mName.includes('headlight') ||
+          mName.includes('rearlight') ||
+          mName.includes('rear_light') ||
+          mName.includes('glass') ||
+          mName.includes('exhaust') ||
+          mName.includes('chromehardware') ||
+          mName.includes('carbonaero')
+        ) {
           return oldMat;
         }
-        if (mName.includes('det2') || mName.includes('accent') || mName.includes('stripe')) {
-          const accMat = new THREE.MeshStandardMaterial({
+        if (mName.includes('det2') || mName.includes('accent') || mName.includes('stripe') || mName.includes('aeroaccent')) {
+          return new THREE.MeshStandardMaterial({
             name: 'S64_RivalAccent',
             color: accentHex,
-            roughness: 0.22,
-            metalness: 0.68,
-            envMapIntensity: 1.35,
+            roughness: 0.20,
+            metalness: 0.72,
+            envMapIntensity: 1.5,
           });
-          attachReadabilityRimShader(accMat, `s64_rival_acc_${accentHex}`, 0.26, 0.32, 0.26);
-          return accMat;
         }
         if (mName.includes('trim') || mName.includes('det1')) {
           return oldMat;
         }
-        const rivalPaintMat = new THREE.MeshStandardMaterial({
+        return new THREE.MeshStandardMaterial({
           name: 'S64_RivalMetallicPaint',
           color: paintHex,
-          roughness: 0.16,
-          metalness: 0.74,
-          envMapIntensity: 1.6,
+          roughness: 0.14,
+          metalness: 0.78,
+          envMapIntensity: 1.8,
         });
-        attachReadabilityRimShader(rivalPaintMat, `s64_rival_paint_${paintHex}`, 0.34, 0.4, 0.34);
-        return rivalPaintMat;
       });
       child.material = Array.isArray(child.material) ? newMats : newMats[0];
     });
@@ -491,28 +867,20 @@ export async function loadS64ModularCar() {
       clonedSpoiler.visible = true;
       clonedSpoiler.traverse((child) => {
         if (!child.isMesh) return;
-        const wingMat = new THREE.MeshStandardMaterial({
+        child.material = new THREE.MeshStandardMaterial({
           name: 'S64_RivalWing',
           color: paintHex,
-          roughness: 0.18,
-          metalness: 0.72,
-          envMapIntensity: 1.4,
+          roughness: 0.16,
+          metalness: 0.76,
+          envMapIntensity: 1.6,
         });
-        attachReadabilityRimShader(wingMat, `s64_rival_wing_${paintHex}`, 0.28, 0.32, 0.28);
-        child.material = wingMat;
       });
       rivalFbxGroup.add(clonedSpoiler);
     }
 
-      // 3. Clone 4 Wheels + Neon Arcade Rim Lip Ring
+    // 3. Clone 4 Wheels + Coaxial Custom 3D Rim Inserts (zero sideways torus artifact!)
     const rivalWheelSpinGroups = [];
     const chosenRimSet = rawRims[rimId] || rawRims.rim1;
-    const rivalNeonLipMat = new THREE.MeshBasicMaterial({
-      color: paintHex,
-      toneMapped: false,
-    });
-    const rivalLipGeo = new THREE.TorusGeometry(21.5, 1.35, 8, 24);
-    rivalLipGeo.rotateY(Math.PI / 2);
 
     for (const slot of WHEEL_SLOTS) {
       const steerPivot = new THREE.Group();
@@ -523,13 +891,12 @@ export async function loadS64ModularCar() {
 
       const templateRim = chosenRimSet[slot.side];
       const clonedRim = templateRim.clone(true);
-      upgradeRimMaterials(clonedRim, rimId, bodyId);
+      upgradeRimMaterials(clonedRim, rimId);
       clonedRim.visible = true;
       spinGroup.add(clonedRim);
 
-      const lipMesh = new THREE.Mesh(rivalLipGeo, rivalNeonLipMat);
-      lipMesh.position.z = slot.side === 'L' ? -9.5 : 9.5;
-      spinGroup.add(lipMesh);
+      const customInsert = buildCoaxialCustomRimInsert(rimId, slot.side);
+      spinGroup.add(customInsert);
 
       rivalFbxGroup.add(steerPivot);
       rivalWheelSpinGroups.push(spinGroup);
@@ -587,6 +954,7 @@ export async function loadS64ModularCar() {
       bodyId: activeBodyId,
       rimId: activeRimId,
       spoilerId: activeSpoilerId,
+      paintHex: activePaintHex,
     }),
   };
 }

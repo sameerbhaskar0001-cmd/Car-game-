@@ -13,6 +13,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { buildProceduralDeskDiorama } from './scene/DeskDioramaBuilder.js';
 import { buildCoasterTrack } from './scene/CoasterTrackBuilder.js';
 import { buildMicroKart } from './scene/MicroKartBuilder.js';
+import { preloadAllCosmoCars } from './scene/CosmoCarLoader.js';
 import { loadS64ModularCar } from './scene/S64CarLoader.js';
 import { buildGoldenHourAtmosphere } from './scene/GoldenHourAtmosphere.js';
 import { buildRoomEnvironment } from './scene/RoomEnvironmentBuilder.js';
@@ -72,6 +73,7 @@ async function initApp() {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.68 + 0.08 * 1.15;
+  renderer.debug.checkShaderErrors = false;
   container.appendChild(renderer.domElement);
 
   // Subtle 1-time PMREM studio environment so dark metallic/satin surfaces (monitor, BoYata, G915) have crisp reflections
@@ -262,6 +264,9 @@ async function initApp() {
   if (microKart.driftSmokeMesh) {
     scene.add(microKart.driftSmokeMesh);
   }
+  if (microKart.setBodyKit) {
+    microKart.setBodyKit('coupe');
+  }
 
   // -------------------------------------------------------------------------
   // 3A. BEACH BUGGY COMBAT RACING: 3x AI OPPONENT KARTS & MYSTERY BOXES
@@ -293,16 +298,56 @@ async function initApp() {
   showroomPlatform.add(pedestalBase);
 
   const topPlateMat = new THREE.MeshStandardMaterial({
-    color: 0x151c2c,
-    roughness: 0.16,
-    metalness: 0.72,
+    color: 0x1a2336,
+    roughness: 0.22,
+    metalness: 0.62,
   });
   const topPlate = new THREE.Mesh(
     new THREE.CylinderGeometry(0.0138, 0.0142, 0.0005, 64),
     topPlateMat
   );
   topPlate.position.y = 0.0001;
+  topPlate.receiveShadow = true;
+  pedestalBase.receiveShadow = true;
   showroomPlatform.add(topPlate);
+
+  // Studio Overhead Contact-Shadow Disc under the Car on the Turntable Plate
+  const srShadowCanvas = document.createElement('canvas');
+  srShadowCanvas.width = 256;
+  srShadowCanvas.height = 256;
+  const srCtx = srShadowCanvas.getContext('2d');
+  if (srCtx) {
+    srCtx.clearRect(0, 0, 256, 256);
+    srCtx.save();
+    srCtx.translate(128, 128);
+    srCtx.scale(0.72, 1.08);
+    const gOuter = srCtx.createRadialGradient(0, 0, 12, 0, 0, 114);
+    gOuter.addColorStop(0.0, 'rgba(0, 0, 0, 0.96)');
+    gOuter.addColorStop(0.45, 'rgba(1, 3, 8, 0.88)');
+    gOuter.addColorStop(0.75, 'rgba(2, 6, 14, 0.45)');
+    gOuter.addColorStop(1.0, 'rgba(2, 6, 14, 0.0)');
+    srCtx.fillStyle = gOuter;
+    srCtx.beginPath();
+    srCtx.arc(0, 0, 114, 0, Math.PI * 2);
+    srCtx.fill();
+    srCtx.restore();
+  }
+  const srShadowTex = new THREE.CanvasTexture(srShadowCanvas);
+  const showroomCarShadowDisc = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.022, 0.026),
+    new THREE.MeshBasicMaterial({
+      map: srShadowTex,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -6,
+      polygonOffsetUnits: -6,
+    })
+  );
+  showroomCarShadowDisc.rotation.x = -Math.PI / 2;
+  showroomCarShadowDisc.position.set(0, 0.00042, 0);
+  showroomGroup.add(showroomCarShadowDisc);
 
   // Outer Glowing Cyan Neon Ring
   const outerRingMat = new THREE.MeshStandardMaterial({
@@ -354,13 +399,61 @@ async function initApp() {
     showroomPlatform.add(tick);
   }
 
-  // Dedicated Showroom Key Light angled to highlight body contours and alloy rims
-  const showroomKeyLight = new THREE.DirectionalLight(0xfff5ea, 0.65);
-  showroomKeyLight.position.set(0.018, 0.042, 0.028);
+  // Dedicated 3-Point Showroom Studio Lighting Rig + Overhead Spotlight aimed directly at the car
+  const showroomLightTarget = new THREE.Object3D();
+  showroomLightTarget.position.set(0.0, 0.0025, 0.0);
+  showroomGroup.add(showroomLightTarget);
+
+  // 1. Direct Overhead Studio Directional Light + Real Contact Shadow Mapping
+  // Projects crisp shadow of car directly onto the showroom turntable floor
+  const showroomOverheadDirLight = new THREE.DirectionalLight(0xffffff, 4.5);
+  showroomOverheadDirLight.position.set(0.0, 0.095, 0.002);
+  showroomOverheadDirLight.target = showroomLightTarget;
+  showroomOverheadDirLight.castShadow = true;
+  showroomOverheadDirLight.shadow.mapSize.set(1024, 1024);
+  showroomOverheadDirLight.shadow.camera.near = 0.005;
+  showroomOverheadDirLight.shadow.camera.far = 0.18;
+  showroomOverheadDirLight.shadow.camera.left = -0.024;
+  showroomOverheadDirLight.shadow.camera.right = 0.024;
+  showroomOverheadDirLight.shadow.camera.top = 0.024;
+  showroomOverheadDirLight.shadow.camera.bottom = -0.024;
+  showroomOverheadDirLight.shadow.bias = -0.0001;
+  showroomGroup.add(showroomOverheadDirLight);
+
+  const showroomOverheadSpot = new THREE.SpotLight(
+    0xffffff,
+    4.8,
+    0.16,
+    Math.PI * 0.38,
+    0.65,
+    0.0
+  );
+  showroomOverheadSpot.position.set(0.0, 0.048, 0.006);
+  showroomOverheadSpot.target = showroomLightTarget;
+  showroomOverheadSpot.castShadow = true;
+  showroomGroup.add(showroomOverheadSpot);
+
+  // 2. Front-Right Warm Key Light (sculpts body lines & custom 3D wheel spokes)
+  const showroomKeyLight = new THREE.DirectionalLight(0xfff7ed, 2.35);
+  showroomKeyLight.position.set(0.024, 0.036, 0.032);
+  showroomKeyLight.target = showroomLightTarget;
   showroomGroup.add(showroomKeyLight);
+
+  // 3. Front-Left Cool Cyan Fill Light (illuminates left flank & tire sidewalls)
+  const showroomFillLight = new THREE.DirectionalLight(0xbae6fd, 1.45);
+  showroomFillLight.position.set(-0.026, 0.024, 0.026);
+  showroomFillLight.target = showroomLightTarget;
+  showroomGroup.add(showroomFillLight);
+
+  // 4. Rear-Top Golden Rim Backlight (accents rear spoiler & roof silhouette)
+  const showroomRimLight = new THREE.DirectionalLight(0xfde68a, 1.55);
+  showroomRimLight.position.set(0.0, 0.032, -0.030);
+  showroomRimLight.target = showroomLightTarget;
+  showroomGroup.add(showroomRimLight);
 
   let currentAppScreen = 'SPLASH';
   let turntableAngle = 0.45;
+  let manualTurntableCooldown = 0.0;
   const telemetryListeners = new Set();
   const raceFinishListeners = new Set();
 
@@ -906,14 +999,26 @@ async function initApp() {
     // Ignore shader precompile warnings
   }
 
-  // Load the S64Compact_v1_C 13-part FBX modular car (3 Body Kits, 4 Rim Sets, 2 Spoilers)
+  // Preload all 12 Cosmo Low-Poly 3D Cars in parallel so switching in Garage & starting races is instant
+  preloadAllCosmoCars()
+    .then(() => {
+      loadedGlbStatus.kart = true;
+      settledGlbStatus.kart = true;
+      glbDownloadProgress.kart = 1.0;
+      syncKartScaleForCamera(activeCameraMode);
+      updateGlbBadge();
+    })
+    .catch((e) => console.warn('CosmoCar preload notice:', e));
+
+  if (rivalsController && rivalsController.attachCosmoRivalModels) {
+    rivalsController.attachCosmoRivalModels();
+  }
+
+  // S64 Compact GT Modular FBX Car loader
   loadS64ModularCar()
     .then((s64Car) => {
       if (microKart.attachS64ModularCar) {
         microKart.attachS64ModularCar(s64Car);
-      }
-      if (rivalsController && rivalsController.attachS64RivalModels) {
-        rivalsController.attachS64RivalModels(s64Car);
       }
       loadedGlbStatus.kart = true;
       settledGlbStatus.kart = true;
@@ -1054,6 +1159,7 @@ async function initApp() {
   const _camDesiredPos = new THREE.Vector3();
   const _camDesiredLook = new THREE.Vector3();
   const _camBlendedUp = new THREE.Vector3();
+  const _camRoadAnchor = new THREE.Vector3();
 
   // Initialize 1P room & curtain visibility for default Mode 1
   sync1PRoomAndCurtainVisibility(activeCameraMode);
@@ -1305,13 +1411,17 @@ async function initApp() {
       return;
     }
 
-    // Compute kart-anchored forward unit vector from C2-smoothed st.tangent + 75% of st.headingYaw
-    // so when the player steers left/right, the camera pivots closely behind the car's bumper!
+    // Compute kart-anchored forward unit vector from C2-smoothed st.tangent + 65% of st.headingYaw
+    // and smoothly damp camForward so steering and collisions never snap the camera!
     _camTargetForward
       .copy(st.tangent)
-      .applyAxisAngle(st.normal, (st.headingYaw || 0.0) * 0.75)
+      .applyAxisAngle(st.normal, (st.headingYaw || 0.0) * 0.65)
       .normalize();
-    camForward.copy(_camTargetForward);
+    if (isScreenshotMode) {
+      camForward.copy(_camTargetForward);
+    } else {
+      camForward.lerp(_camTargetForward, 1.0 - Math.exp(-dt * 14.0)).normalize();
+    }
 
     const carViewMode = urlParams.get('carview');
     if (carViewMode) {
@@ -1363,18 +1473,21 @@ async function initApp() {
     }
 
     if (activeCameraMode === 1) {
-      // Elevated Arcade Chase Cam:
-      // Mounted higher (-11.2mm behind, +6.8mm above road normal) and looking 16.5mm ahead along the
-      // smoothed spline so the car body never blocks upcoming turns, ramps, or rival racers!
-      const boostPullback = st.boostActive > 0 ? -0.0016 : 0.0;
+      // Rock-Steady Arcade Chase Cam:
+      // Anchor vertical tracking to the road surface (_camRoadAnchor) so jump ramps lift the car
+      // gracefully inside the frame without double-lifting or pitching the camera into the track!
+      const hopH = Math.max(0.0, st.hopHeight || 0.0);
+      _camRoadAnchor.copy(st.position).addScaledVector(st.normal, -hopH);
+
+      const boostPullback = st.boostActive > 0 ? -0.0014 : 0.0;
       _camDesiredPos
-        .copy(st.position)
-        .addScaledVector(camForward, -0.0112 + boostPullback)
-        .addScaledVector(st.normal, 0.0068 + st.hopHeight * 0.42);
+        .copy(_camRoadAnchor)
+        .addScaledVector(camForward, -0.0114 + boostPullback)
+        .addScaledVector(st.normal, 0.0066 + hopH * 0.30);
       if (shakeRight !== 0.0 || shakeUp !== 0.0) {
         _camDesiredPos
-          .addScaledVector(st.right, shakeRight)
-          .addScaledVector(st.normal, shakeUp);
+          .addScaledVector(st.right, shakeRight * 0.5)
+          .addScaledVector(st.normal, shakeUp * 0.35);
       }
 
       // Sample 16.5mm ahead on the track spline for smooth corner anticipation
@@ -1384,61 +1497,34 @@ async function initApp() {
       if (aheadSample && aheadSample.position) {
         _camSplineAhead.copy(aheadSample.position);
         _camDesiredLook
-          .copy(st.position)
+          .copy(_camRoadAnchor)
           .addScaledVector(camForward, 0.0165)
           .lerp(_camSplineAhead, 0.42)
-          .addScaledVector(st.normal, 0.0018 + st.hopHeight * 0.22);
+          .addScaledVector(st.normal, 0.0022 + hopH * 0.50);
       } else {
         _camDesiredLook
-          .copy(st.position)
+          .copy(_camRoadAnchor)
           .addScaledVector(camForward, 0.0165)
-          .addScaledVector(st.normal, 0.0018 + st.hopHeight * 0.22);
+          .addScaledVector(st.normal, 0.0022 + hopH * 0.50);
       }
 
-      // Camera Obstacle Clearance: Pull camera forward if an upper/lower track tier passes between camera lens and car
-      if (splineData && splineData.samples) {
-        const samplesList = splineData.samples;
-        const rayDir = _camDesiredPos.clone().sub(st.position);
-        const rayLen = rayDir.length();
-        if (rayLen > 1e-5) {
-          rayDir.normalize();
-          let maxPull = 1.0;
-          for (let k = 0; k < samplesList.length; k += 10) {
-            const sp = samplesList[k].position;
-            const dx = sp[0] - st.position.x;
-            const dy = sp[1] - st.position.y;
-            const dz = sp[2] - st.position.z;
-            const proj = dx * rayDir.x + dy * rayDir.y + dz * rayDir.z;
-            if (proj > 0.002 && proj < rayLen - 0.001) {
-              const perpSq = (dx - proj * rayDir.x) ** 2 + (dy - proj * rayDir.y) ** 2 + (dz - proj * rayDir.z) ** 2;
-              if (perpSq < 0.00018) { // within ~13mm radius
-                maxPull = Math.min(maxPull, Math.max(0.52, proj / rayLen));
-              }
-            }
-          }
-          if (maxPull < 1.0) {
-            _camDesiredPos.copy(st.position).addScaledVector(rayDir, rayLen * maxPull);
-          }
-        }
-      }
-
-      // Dynamic FOV speed punch during acceleration & Turbo Boost (58° base -> 70° boost)
-      const targetArcadeFov = st.boostActive > 0 ? 70.0 : 58.0 + Math.min(9.0, Math.abs(st.speed) * 32.0);
+      // Dynamic FOV speed punch during acceleration & Turbo Boost (58° base -> 68° boost)
+      const targetArcadeFov = st.boostActive > 0 ? 68.0 : 58.0 + Math.min(8.0, Math.abs(st.speed) * 28.0);
       if (Math.abs(camera.fov - targetArcadeFov) > 0.15) {
-        camera.fov = THREE.MathUtils.lerp(camera.fov, targetArcadeFov, 1.0 - Math.exp(-dt * 12.0));
+        camera.fov = THREE.MathUtils.lerp(camera.fov, targetArcadeFov, 1.0 - Math.exp(-dt * 10.0));
         camera.updateProjectionMatrix();
       }
 
-      const smoothUp = isScreenshotMode ? 1.0 : 1.0 - Math.exp(-dt * 20.0);
+      const smoothUp = isScreenshotMode ? 1.0 : 1.0 - Math.exp(-dt * 14.0);
       _camBlendedUp
-        .set(0, 0.58, 0)
-        .addScaledVector(st.normal, 0.42)
-        .addScaledVector(st.right, -(st.steerSmooth || 0) * 0.06)
+        .set(0, 0.72, 0)
+        .addScaledVector(st.normal, 0.28)
+        .addScaledVector(st.right, -(st.steerSmooth || 0) * 0.04)
         .normalize();
       camCurrentUp.lerp(_camBlendedUp, smoothUp).normalize();
 
-      const smoothPos = isScreenshotMode ? 1.0 : 1.0 - Math.exp(-dt * 28.0);
-      const smoothLook = isScreenshotMode ? 1.0 : 1.0 - Math.exp(-dt * 32.0);
+      const smoothPos = isScreenshotMode ? 1.0 : 1.0 - Math.exp(-dt * 18.0);
+      const smoothLook = isScreenshotMode ? 1.0 : 1.0 - Math.exp(-dt * 22.0);
       camCurrentPos.lerp(_camDesiredPos, smoothPos);
       camCurrentLookAt.lerp(_camDesiredLook, smoothLook);
 
@@ -2165,12 +2251,17 @@ async function initApp() {
 
   physics.onLapComplete((lapTime, bestLap, completedLapNum, totalTime, isFinish) => {
     if (isFinish) {
+      if (audioSynth.stopEngine) {
+        audioSynth.stopEngine();
+      }
       const finalTotal =
         totalTime ?? physics.state.finishTotalTime ?? physics.state.totalRaceTime ?? lapTime;
       const rank = rivalsController.getPlayerRank
         ? rivalsController.getPlayerRank(physics.state)
         : 1;
-      showFinishOverlay(finalTotal, bestLap ?? lapTime, true);
+      if (raceFinishListeners.size === 0 || isScreenshotMode) {
+        showFinishOverlay(finalTotal, bestLap ?? lapTime, true);
+      }
       for (const cb of raceFinishListeners) {
         cb({
           totalTime: finalTotal,
@@ -2890,12 +2981,20 @@ async function initApp() {
         showroomGroup.visible = false;
         syncKartScaleForCamera(activeCameraMode);
         dismissWelcomeAndStartRace();
-      } else if (screen === 'MENU' || screen === 'GARAGE' || screen === 'SPLASH') {
+      } else if (screen !== 'RACE') {
+        if (audioSynth.stopEngine) {
+          audioSynth.stopEngine();
+        }
         cancelF1StartCountdown();
         physics.setAutopilot(false);
         physics.clearTouchKeys();
         physics.state.speed = 0;
-        showroomGroup.visible = true;
+        physics.state.boostActive = 0;
+        physics.state.isDrifting = false;
+        physics.state.curbRumble = 0;
+        if (screen === 'MENU' || screen === 'GARAGE' || screen === 'SPLASH') {
+          showroomGroup.visible = true;
+        }
       }
     },
     getScreen() {
@@ -2922,6 +3021,12 @@ async function initApp() {
         microKart.setCustomParts(parts);
       }
       showroomPreviewBounce = 1.0;
+    },
+    rotateShowroom(deltaRad) {
+      if (typeof deltaRad === 'number' && !Number.isNaN(deltaRad)) {
+        turntableAngle += deltaRad;
+        manualTurntableCooldown = 2.5;
+      }
     },
     setTouchControl(dir, isDown) {
       if (physics.setTouchKey) {
@@ -3022,6 +3127,9 @@ async function initApp() {
     },
     completeRaceDemo() {
       // Completes 3 laps immediately for testing or quick finish
+      if (audioSynth.stopEngine) {
+        audioSynth.stopEngine();
+      }
       const l1 = 18.42;
       const l2 = 17.85;
       const l3 = 17.34;
@@ -3077,8 +3185,13 @@ async function initApp() {
       if (powerupManager && powerupManager.rootGroup) powerupManager.rootGroup.visible = false;
       if (rivalsController && rivalsController.rootGroup) rivalsController.rootGroup.visible = false;
 
-      turntableAngle += dt * 0.62;
+      if (manualTurntableCooldown > 0) {
+        manualTurntableCooldown = Math.max(0.0, manualTurntableCooldown - dt);
+      } else {
+        turntableAngle += dt * 0.58;
+      }
       showroomPlatform.rotation.y = turntableAngle;
+      showroomCarShadowDisc.rotation.z = -(turntableAngle + Math.PI * 0.22);
 
       if (showroomPreviewBounce > 0) {
         showroomPreviewBounce = Math.max(0.0, showroomPreviewBounce - dt * 4.5);
@@ -3087,7 +3200,7 @@ async function initApp() {
 
       // Place car on the circular glowing turntable slowly rotating 360 degrees in the center of the screen
       microKart.setCockpitRoadOnly(false);
-      microKart.kartRoot.scale.setScalar(currentAppScreen === 'GARAGE' ? 0.94 : 0.88);
+      microKart.kartRoot.scale.setScalar(currentAppScreen === 'GARAGE' ? 0.96 : 0.88);
       microKart.kartRoot.position.set(0.0, 0.0884 + bounceOffset, 0.22);
       microKart.kartRoot.rotation.set(0, turntableAngle + Math.PI * 0.22, 0);
       microKart.chassisGroup.rotation.set(0, 0, 0);
@@ -3100,15 +3213,15 @@ async function initApp() {
         microKart.driftSmokeMesh.visible = false;
       }
 
-      // Frame the rotating car & turntable cleanly in the center of the viewport
+      // Frame the rotating car & turntable cleanly in the upper-center of the viewport above the bottom dock
       orbitControls.enabled = false;
-      if (Math.abs(camera.fov - 46.0) > 0.2) {
-        camera.fov = 46.0;
+      if (Math.abs(camera.fov - 44.0) > 0.2) {
+        camera.fov = 44.0;
         camera.updateProjectionMatrix();
       }
       if (currentAppScreen === 'GARAGE') {
-        _showroomCamTarget.set(0.0, 0.0968, 0.246);
-        _showroomLookTarget.set(0.0, 0.0906, 0.220);
+        _showroomCamTarget.set(0.0, 0.0972, 0.244);
+        _showroomLookTarget.set(0.0, 0.0894, 0.220);
       } else {
         _showroomCamTarget.set(0.0065, 0.0985, 0.250);
         _showroomLookTarget.set(0.0032, 0.0912, 0.220);
@@ -3159,6 +3272,19 @@ async function initApp() {
       // 1B. Step 3 AI rivals and Mystery Box Combat System
       const currentRank = rivalsController.update(dt, st, powerupManager, audioSynth);
       powerupManager.update(dt, st, rivalsController.rivals, audioSynth, currentRank);
+
+      // Re-sync 3D world pose & quaternion after rival collisions, jump ramps, and weapon spinouts
+      if (physics.syncPoseFromSpline) {
+        physics.syncPoseFromSpline();
+      }
+      if ((st.cameraShake || 0) > 0) {
+        camShakeTimer = Math.max(camShakeTimer, 0.24);
+        camShakeIntensity = Math.max(
+          camShakeIntensity,
+          THREE.MathUtils.clamp(st.cameraShake, 0.25, 1.0)
+        );
+        st.cameraShake = 0.0;
+      }
 
       // 2. Sync Micro-Kart Transform, Wheels, Helmeted Driver & Drift Sparks
       microKart.kartRoot.position.copy(st.position);
@@ -3223,23 +3349,34 @@ async function initApp() {
         }
       }
 
-      // 5. Update WebAudio Synth & HUD
-      audioSynth.update(st);
+      // 5. Update WebAudio Synth & HUD (Strictly silence engine when not in RACE)
+      if (currentAppScreen === 'RACE') {
+        audioSynth.update(st);
+      } else if (audioSynth.stopEngine) {
+        audioSynth.stopEngine();
+      }
       updateHUD(st);
 
-      // Emit telemetry to React HUD at ~13Hz (every 75ms) or immediately when discrete state changes
+      // Emit telemetry to React HUD at ~15Hz (every 65ms) or immediately when discrete combat/roulette state changes
       if (telemetryListeners.size > 0) {
         const nowMs = performance.now();
         const countdownStep = f1CountdownState.active
           ? Math.max(1, 6 - (Math.floor(f1CountdownState.elapsed / f1CountdownState.stepDuration) + 1))
           : 0;
         const heldPowerup = powerupManager.getHeldPowerup();
+        const rouletteActive = powerupManager.isRouletteActive
+          ? powerupManager.isRouletteActive()
+          : false;
+        const roulettePreview = powerupManager.getRoulettePreview
+          ? powerupManager.getRoulettePreview()
+          : null;
         const lapNow = Math.min(3, Math.max(1, st.lapCount || 1));
 
         if (
-          nowMs - lastTelemetryEmitMs >= 75 ||
+          nowMs - lastTelemetryEmitMs >= 65 ||
           countdownStep !== lastEmittedCountdownStep ||
           heldPowerup !== lastEmittedPowerup ||
+          rouletteActive ||
           lapNow !== lastEmittedLap
         ) {
           lastTelemetryEmitMs = nowMs;
@@ -3249,6 +3386,13 @@ async function initApp() {
 
           const absSpeed = Math.abs(st.speed);
           const speedKmh = Math.round(absSpeed * 102.35 * 3.6);
+          const lockedInfo = powerupManager.getLockedTargetInfo
+            ? powerupManager.getLockedTargetInfo()
+            : { name: null, distM: null };
+          const threatInfo = powerupManager.getIncomingThreatInfo
+            ? powerupManager.getIncomingThreatInfo()
+            : { active: false, attackerName: null, urgency: 0.0 };
+
           const payload = {
             speedKmh,
             lapCount: lapNow,
@@ -3266,11 +3410,21 @@ async function initApp() {
             positionRank: currentRank,
             rivals: rivalsController.getRivalsData(),
             heldPowerup,
+            rouletteActive,
+            roulettePreview,
+            lockedTargetName: lockedInfo.name,
+            lockedTargetDistM: lockedInfo.distM,
             shieldActive: powerupManager.isShieldActive(),
             spinoutActive: powerupManager.isSpinoutActive(),
-            incomingAttack: powerupManager.isIncomingAttack
-              ? powerupManager.isIncomingAttack()
-              : false,
+            spinoutReason: powerupManager.getSpinoutReason
+              ? powerupManager.getSpinoutReason()
+              : null,
+            incomingAttack: threatInfo.active,
+            incomingAttacker: threatInfo.attackerName,
+            incomingUrgency: threatInfo.urgency,
+            combatFeedMessage: powerupManager.getCombatFeedMessage
+              ? powerupManager.getCombatFeedMessage()
+              : null,
           };
           for (const cb of telemetryListeners) {
             cb(payload);

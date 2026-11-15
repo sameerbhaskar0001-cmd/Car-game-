@@ -14,38 +14,38 @@ const POWERUP_DETAILS: Record<
   { name: string; icon: string; color: string; bg: string; border: string }
 > = {
   ROCKET: {
-    name: 'MISSILE',
+    name: 'FIREBALL',
     icon: '🚀',
     color: '#ff3b30',
-    bg: 'bg-rose-500/35',
+    bg: 'bg-rose-500/45',
     border: 'border-rose-400',
   },
   SHIELD: {
-    name: 'SHIELD',
+    name: 'BUBBLE SHIELD',
     icon: '🛡️',
     color: '#00e5ff',
-    bg: 'bg-cyan-500/35',
+    bg: 'bg-cyan-500/45',
     border: 'border-cyan-300',
   },
   OIL_SLICK: {
     name: 'OIL TRAP',
     icon: '🛢️',
     color: '#f59e0b',
-    bg: 'bg-amber-500/35',
+    bg: 'bg-amber-500/45',
     border: 'border-amber-400',
   },
   HYPER_NITRO: {
-    name: 'SUPER TURBO',
+    name: 'NITRO SURGE',
     icon: '⚡',
     color: '#38bdf8',
-    bg: 'bg-sky-500/35',
+    bg: 'bg-sky-500/45',
     border: 'border-sky-300',
   },
   EMP: {
-    name: 'EMP BLAST',
-    icon: '💣',
+    name: 'CHAIN ZAP',
+    icon: '🌩️',
     color: '#a855f7',
-    bg: 'bg-purple-500/35',
+    bg: 'bg-purple-500/45',
     border: 'border-purple-400',
   },
 };
@@ -82,7 +82,7 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
   // Reset optimistic consumed flag whenever telemetry powerup updates
   useEffect(() => {
     setJustFired(false);
-  }, [telemetry.heldPowerup]);
+  }, [telemetry.heldPowerup, telemetry.rouletteActive]);
 
   const setDirectionState = useCallback(
     (dir: 'left' | 'right' | 'forward' | 'backward', isDown: boolean) => {
@@ -115,6 +115,11 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
   const driftReady = driftCharge >= 0.38;
   const nitroPercent = Math.round(Math.min(1, Math.max(0, telemetry.boostCharge)) * 100);
   const rank = telemetry.positionRank || 1;
+  const isRoulette = Boolean(telemetry.rouletteActive && !justFired);
+  const rouletteDetail =
+    isRoulette && telemetry.roulettePreview
+      ? POWERUP_DETAILS[telemetry.roulettePreview]
+      : null;
   const held =
     telemetry.heldPowerup && !justFired
       ? POWERUP_DETAILS[telemetry.heldPowerup]
@@ -171,27 +176,67 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
       {/* SHIELD ACTIVE ENERGY HUD BORDER */}
       {telemetry.shieldActive && (
         <div
-          className="fixed inset-0 pointer-events-none z-10 animate-pulse border-4 border-cyan-400/50 shadow-[inset_0_0_40px_rgba(0,229,255,0.4)]"
+          className="fixed inset-0 pointer-events-none z-10 animate-pulse border-4 border-cyan-400/60 shadow-[inset_0_0_48px_rgba(0,229,255,0.45)]"
           style={{ boxSizing: 'border-box' }}
         />
       )}
 
-      {/* INCOMING AI RIVAL MISSILE LOCK WARNING */}
-      {telemetry.incomingAttack && !telemetry.spinoutActive && (
-        <div className="fixed top-14 inset-x-0 pointer-events-none z-20 flex justify-center">
-          <div className="px-4 py-1 rounded-full bg-rose-950/90 border border-rose-400 text-rose-200 font-['Orbitron'] italic font-black text-xs tracking-widest uppercase animate-pulse shadow-[0_0_20px_rgba(244,63,94,0.85)]">
-            🚀 INCOMING MISSILE!
+      {/* TOP-CENTER COMBAT HUD STACK: TARGET LOCK-ON, INCOMING MISSILE RADAR, SPINOUT & HIT FEED */}
+      <div className="fixed top-12 inset-x-0 pointer-events-none z-20 flex flex-col items-center gap-1.5">
+        {/* TARGET LOCK-ON CROSSHAIR BADGE (When holding Fireball Missile or Chain Zap) */}
+        {telemetry.lockedTargetName && !telemetry.spinoutActive && (
+          <div className="flex items-center gap-2 px-3.5 py-1 rounded-full bg-slate-950/85 border border-amber-400/90 text-amber-200 font-['Orbitron'] italic font-black text-[11px] tracking-widest uppercase shadow-[0_0_18px_rgba(251,191,36,0.65)]">
+            <span className="inline-block w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+            <span>🎯 LOCKED: {telemetry.lockedTargetName}</span>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* SPINOUT WARNING OVERLAY */}
-      {telemetry.spinoutActive && (
-        <div className="fixed inset-0 pointer-events-none z-20 flex items-center justify-center">
-          <div className="px-5 py-2 rounded-2xl bg-rose-950/90 border-2 border-rose-500 text-white font-['Orbitron'] italic font-black text-base sm:text-xl tracking-widest animate-bounce shadow-2xl">
-            ⚠️ SPINOUT!
+        {/* INCOMING AI RIVAL MISSILE LOCK WARNING WITH URGENCY METER */}
+        {telemetry.incomingAttack && !telemetry.spinoutActive && (
+          <div className="flex flex-col items-center">
+            <div className="px-4 py-1 rounded-full bg-rose-950/95 border-2 border-rose-400 text-rose-100 font-['Orbitron'] italic font-black text-xs tracking-widest uppercase animate-bounce shadow-[0_0_24px_rgba(244,63,94,0.95)] flex items-center gap-2">
+              <span>⚠️ INCOMING MISSILE</span>
+              {telemetry.incomingAttacker && (
+                <span className="text-amber-300">({telemetry.incomingAttacker})</span>
+              )}
+              <span>!</span>
+            </div>
+            <div className="w-36 h-1.5 rounded-full bg-slate-950/90 border border-rose-400/50 overflow-hidden mt-1">
+              <div
+                className="h-full bg-gradient-to-r from-amber-400 via-rose-500 to-red-600 transition-all duration-75"
+                style={{
+                  width: `${Math.min(100, Math.max(20, Math.round((telemetry.incomingUrgency || 0.5) * 100)))}%`,
+                }}
+              />
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* LIVE COMBAT FEED TOAST (Direct Hits, Shield Blocks, Nitro Surges) */}
+        {telemetry.combatFeedMessage && !telemetry.spinoutActive && (
+          <div className="px-4 py-1 rounded-xl bg-slate-950/90 border border-cyan-400/80 text-cyan-100 font-['Orbitron'] italic font-black text-xs tracking-wider uppercase shadow-[0_0_20px_rgba(0,240,255,0.65)]">
+            {telemetry.combatFeedMessage}
+          </div>
+        )}
+      </div>
+
+      {/* SPINOUT / WEAPON HIT IMPACT OVERLAY */}
+      {telemetry.spinoutActive && (
+        <>
+          <div
+            className="fixed inset-0 pointer-events-none z-10 border-4 border-rose-500/75 shadow-[inset_0_0_60px_rgba(244,63,94,0.5)]"
+            style={{
+              boxSizing: 'border-box',
+              background:
+                'radial-gradient(circle at 50% 50%, transparent 58%, rgba(225, 29, 72, 0.28) 100%)',
+            }}
+          />
+          <div className="fixed inset-x-0 top-14 pointer-events-none z-20 flex justify-center">
+            <div className="px-4 py-1.5 rounded-xl bg-rose-950/95 border-2 border-rose-400 text-white font-['Orbitron'] italic font-black text-xs sm:text-sm tracking-wider shadow-[0_0_28px_rgba(244,63,94,0.9)] animate-bounce">
+              {telemetry.spinoutReason || '💥 WEAPON HIT! RECOVERING...'}
+            </div>
+          </div>
+        </>
       )}
 
       {/* TOP BAR: Position Rank Badge (Left) | Streamlined Speedometer & Lap Counter (Right) */}
@@ -436,7 +481,7 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
         >
           {/* LEFT COLUMN: NITRO BOOST + BRAKE/REVERSE */}
           <div className="flex flex-col items-end gap-2">
-            {/* NITRO BOOST BUTTON */}
+            {/* NITRO BOOST BUTTON — PURE ICON ONLY (NO TEXT/PERCENTAGE) */}
             <button
               type="button"
               onTouchStart={(e) => {
@@ -461,19 +506,18 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
               onMouseUp={() => handleNitroTrigger(false)}
               onMouseLeave={() => handleNitroTrigger(false)}
               aria-label="Nitro Boost"
-              className={`relative overflow-hidden w-20 h-11 sm:w-24 sm:h-12 rounded-2xl font-['Orbitron'] italic font-black text-[11px] sm:text-xs tracking-wider uppercase flex items-center justify-center gap-1 border-2 transition-transform select-none touch-none cursor-pointer ${
+              className={`relative overflow-hidden w-20 h-11 sm:w-24 sm:h-12 rounded-2xl flex items-center justify-center border-2 transition-transform select-none touch-none cursor-pointer ${
                 activeControls.nitro || isBoosting
-                  ? 'bg-amber-400/80 border-white text-slate-950 scale-95 shadow-[0_0_20px_rgba(251,191,36,0.95)]'
-                  : 'bg-slate-950/60 border-amber-400/70 text-amber-300 shadow-lg'
+                  ? 'bg-amber-400/85 border-white text-slate-950 scale-95 shadow-[0_0_24px_rgba(251,191,36,0.95)]'
+                  : 'bg-slate-950/65 border-amber-400/70 text-amber-300 shadow-lg'
               }`}
             >
               <div
-                className="absolute inset-y-0 left-0 bg-amber-400/25 pointer-events-none transition-all duration-150"
+                className="absolute inset-y-0 left-0 bg-amber-400/35 pointer-events-none transition-all duration-150"
                 style={{ width: `${nitroPercent}%` }}
               />
-              <span className="relative z-10 text-sm leading-none">⚡</span>
-              <span className="relative z-10 font-mono text-[10px]">
-                {nitroPercent}%
+              <span className="relative z-10 text-xl sm:text-2xl leading-none select-none drop-shadow-[0_0_8px_rgba(251,191,36,0.8)]">
+                ⚡
               </span>
             </button>
 
@@ -515,34 +559,68 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
             </button>
           </div>
 
-          {/* RIGHT COLUMN: NEAT ROUND FIRE BADGE DOCKED DIRECTLY ABOVE THROTTLE PEDAL */}
-          <div className="flex flex-col items-center gap-2">
-            {/* SINGLE-USE ROUND FIRE BADGE (Appears ONLY when an item is in inventory) */}
-            {held && (
-              <button
-                type="button"
-                onTouchStart={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  handlePowerupTrigger();
-                }}
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  handlePowerupTrigger();
-                }}
-                aria-label={`Fire ${held.name}`}
-                className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full flex flex-col items-center justify-center border-2 transition-all select-none touch-none cursor-pointer active:scale-90 animate-pulse shadow-2xl ${held.bg} ${held.border} text-white`}
-                style={{
-                  boxShadow: `0 0 22px ${held.color}88`,
-                }}
-              >
-                <span className="text-xl sm:text-2xl leading-none">{held.icon}</span>
-                <span className="font-['Orbitron'] italic font-black text-[8px] tracking-widest uppercase mt-0.5">
-                  FIRE
-                </span>
-              </button>
-            )}
+          {/* RIGHT COLUMN: SINGLE-USE POWERUP SLOT DOCKED DIRECTLY ABOVE THROTTLE PEDAL */}
+          <div className="flex flex-col items-center gap-1.5">
+            {/* SINGLE-USE POWERUP SLOT WITH BEACH BUGGY ROULETTE ROLL */}
+            <div className="w-16 h-16 sm:w-18 sm:h-18 flex flex-col items-center justify-center relative">
+              {held ? (
+                <button
+                  type="button"
+                  onTouchStart={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handlePowerupTrigger();
+                  }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handlePowerupTrigger();
+                  }}
+                  aria-label={`Fire ${held.name}`}
+                  className={`w-15 h-15 sm:w-17 sm:h-17 rounded-full flex flex-col items-center justify-center border-2 transition-all select-none touch-none cursor-pointer active:scale-90 animate-pulse shadow-2xl ${held.bg} ${held.border} text-white`}
+                  style={{
+                    boxShadow: `0 0 26px ${held.color}`,
+                  }}
+                >
+                  <span className="text-2xl sm:text-3xl leading-none select-none drop-shadow-[0_0_10px_rgba(255,255,255,0.85)]">
+                    {held.icon}
+                  </span>
+                  <span className="font-['Orbitron'] font-black text-[7px] sm:text-[8px] tracking-wider uppercase text-white/95 mt-0.5 leading-none">
+                    {held.name}
+                  </span>
+                </button>
+              ) : rouletteDetail ? (
+                <button
+                  type="button"
+                  onTouchStart={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handlePowerupTrigger();
+                  }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handlePowerupTrigger();
+                  }}
+                  aria-label="Rolling Powerup"
+                  className="w-15 h-15 sm:w-17 sm:h-17 rounded-full flex flex-col items-center justify-center border-2 border-amber-300 bg-gradient-to-br from-amber-500/45 via-fuchsia-500/45 to-cyan-500/45 text-white shadow-[0_0_24px_rgba(251,191,36,0.9)] cursor-pointer select-none touch-none scale-105 transition-transform"
+                >
+                  <span className="text-2xl sm:text-3xl leading-none select-none animate-bounce">
+                    {rouletteDetail.icon}
+                  </span>
+                  <span className="font-['Orbitron'] font-black text-[7px] tracking-widest uppercase text-amber-200 mt-0.5 leading-none">
+                    ROLL...
+                  </span>
+                </button>
+              ) : (
+                <div
+                  className="w-13 h-13 sm:w-15 sm:h-15 rounded-full border border-dashed border-white/25 bg-slate-950/45 flex items-center justify-center select-none pointer-events-none opacity-45 shadow-inner"
+                  aria-hidden="true"
+                >
+                  <span className="text-lg text-slate-400">❓</span>
+                </div>
+              )}
+            </div>
 
             {/* LARGE PRIMARY ACCELERATE (THROTTLE) PEDAL */}
             <button

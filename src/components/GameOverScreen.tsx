@@ -20,10 +20,10 @@ export const GameOverScreen: React.FC<GameOverScreenProps> = ({
 }) => {
   const rank = result.finishRank || 1;
   const rankMeta = [
-    { title: '1ST PLACE · GOLD CHAMPION', badge: '🥇 1ST', color: 'from-amber-400 to-yellow-300', text: 'text-amber-300', border: 'border-amber-400', glow: 'rgba(251, 191, 36, 0.4)' },
-    { title: '2ND PLACE · SILVER PODIUM', badge: '🥈 2ND', color: 'from-slate-200 to-cyan-300', text: 'text-cyan-200', border: 'border-cyan-400', glow: 'rgba(56, 189, 248, 0.3)' },
-    { title: '3RD PLACE · BRONZE PODIUM', badge: '🥉 3RD', color: 'from-amber-600 to-orange-400', text: 'text-orange-300', border: 'border-amber-600', glow: 'rgba(217, 119, 6, 0.3)' },
-    { title: '4TH PLACE · RACER FINISHER', badge: '🏁 4TH', color: 'from-slate-400 to-slate-200', text: 'text-slate-300', border: 'border-slate-500', glow: 'rgba(148, 163, 184, 0.2)' },
+    { title: '1ST PLACE · GOLD CHAMPION', badge: '🥇', color: 'from-amber-400 to-yellow-300', text: 'text-amber-300', border: 'border-amber-400', glow: 'rgba(251, 191, 36, 0.4)' },
+    { title: '2ND PLACE · SILVER PODIUM', badge: '🥈', color: 'from-slate-200 to-cyan-300', text: 'text-cyan-200', border: 'border-cyan-400', glow: 'rgba(56, 189, 248, 0.3)' },
+    { title: '3RD PLACE · BRONZE PODIUM', badge: '🥉', color: 'from-amber-600 to-orange-400', text: 'text-orange-300', border: 'border-amber-600', glow: 'rgba(217, 119, 6, 0.3)' },
+    { title: '4TH PLACE · RACER FINISHER', badge: '🏁', color: 'from-slate-400 to-slate-200', text: 'text-slate-300', border: 'border-slate-500', glow: 'rgba(148, 163, 184, 0.2)' },
   ][Math.min(3, Math.max(0, rank - 1))];
 
   return (
@@ -50,9 +50,8 @@ export const GameOverScreen: React.FC<GameOverScreenProps> = ({
 
         {/* Podium Finish Badge */}
         <div className="flex items-center justify-center gap-2 mb-1">
-          <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900 border ${rankMeta.border} font-['Orbitron'] font-black text-xs sm:text-sm tracking-wider uppercase ${rankMeta.text}`}>
+          <div className={`inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-slate-900 border ${rankMeta.border} font-['Orbitron'] font-black text-xs sm:text-sm tracking-wider uppercase ${rankMeta.text}`}>
             <span>{rankMeta.badge}</span>
-            <span className="text-white/60">|</span>
             <span>{rankMeta.title}</span>
           </div>
         </div>
@@ -92,8 +91,13 @@ export const GameOverScreen: React.FC<GameOverScreenProps> = ({
         {/* Individual Lap Splits & Coins Rewarded */}
         <div className="grid grid-cols-2 gap-3 mb-5 text-left">
           <div className="bg-slate-900/80 border border-white/10 rounded-xl p-3">
-            <div className="text-[10px] font-['Orbitron'] tracking-[0.14em] text-slate-400 uppercase mb-1.5 truncate">
-              LAP SPLITS · {equippedKit.name}
+            <div className="flex items-center justify-between gap-1.5 mb-1.5">
+              <span className="text-[10px] font-['Orbitron'] tracking-[0.12em] text-slate-400 uppercase shrink-0">
+                LAP SPLITS
+              </span>
+              <span className="text-[10px] font-['Orbitron'] font-bold text-cyan-300 uppercase text-right leading-tight">
+                {equippedKit.name}
+              </span>
             </div>
             <div className="flex flex-col gap-1 text-xs font-mono tabular-nums">
               {[0, 1, 2].map((idx) => {
