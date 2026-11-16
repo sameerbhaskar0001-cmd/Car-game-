@@ -85,7 +85,7 @@ function upgradeBodyMaterials(fbxObj, kitId, customPaintHex = null) {
   fbxObj.traverse((child) => {
     if (!child.isMesh) return;
     child.castShadow = true;
-    child.receiveShadow = true;
+    child.receiveShadow = false;
     if (child.geometry && !child.geometry.attributes.normal) {
       child.geometry.computeVertexNormals();
     }
@@ -119,22 +119,24 @@ function upgradeBodyMaterials(fbxObj, kitId, customPaintHex = null) {
       }
 
       if (mName.includes('glass') || mName.includes('window') || mName.includes('windshield')) {
-        return new THREE.MeshStandardMaterial({
+        return new THREE.MeshPhysicalMaterial({
           name: 'S64_Glass',
-          color: 0x0a1324,
-          roughness: 0.06,
-          metalness: 0.90,
-          envMapIntensity: 2.4,
+          color: 0x040812,
+          roughness: 0.04,
+          metalness: 0.10,
+          clearcoat: 1.0,
+          clearcoatRoughness: 0.02,
+          envMapIntensity: 1.0,
         });
       }
 
       if (mName.includes('exhaust') || mName.includes('muffler') || mName.includes('chrome')) {
         return new THREE.MeshStandardMaterial({
           name: 'S64_Exhaust',
-          color: 0xe2e8f0,
-          roughness: 0.12,
-          metalness: 0.96,
-          envMapIntensity: 2.5,
+          color: 0xcbd5e1,
+          roughness: 0.16,
+          metalness: 0.92,
+          envMapIntensity: 1.15,
         });
       }
 
@@ -144,28 +146,31 @@ function upgradeBodyMaterials(fbxObj, kitId, customPaintHex = null) {
         return new THREE.MeshStandardMaterial({
           name: 'S64_Det2',
           color: accentHex,
-          roughness: 0.16,
-          metalness: 0.78,
-          envMapIntensity: 2.0,
+          roughness: 0.28,
+          metalness: 0.30,
+          envMapIntensity: 0.85,
         });
       }
 
       if (mName.includes('det1') || mName.includes('under') || mName.includes('trim') || mName.includes('black')) {
         return new THREE.MeshStandardMaterial({
           name: 'S64_Trim',
-          color: 0x141821,
-          roughness: 0.28,
-          metalness: 0.62,
-          envMapIntensity: 1.5,
+          color: 0x10141c,
+          roughness: 0.68,
+          metalness: 0.08,
+          envMapIntensity: 0.35,
         });
       }
 
-      return new THREE.MeshStandardMaterial({
+      return new THREE.MeshPhysicalMaterial({
         name: `S64_CarPaint_${kitId}_${matIdx}`,
         color: paintHex,
-        roughness: kitId === 'kit3' ? 0.12 : kitId === 'kit2' ? 0.10 : 0.12,
-        metalness: kitId === 'kit2' ? 0.85 : kitId === 'kit3' ? 0.88 : 0.80,
-        envMapIntensity: 2.6,
+        roughness: 0.28,
+        metalness: 0.22,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.03,
+        reflectivity: 0.90,
+        envMapIntensity: 0.95,
       });
     });
 
@@ -178,7 +183,7 @@ function upgradeRimMaterials(fbxObj, rimId) {
   fbxObj.traverse((child) => {
     if (!child.isMesh) return;
     child.castShadow = true;
-    child.receiveShadow = true;
+    child.receiveShadow = false;
     if (child.geometry && !child.geometry.attributes.normal) {
       child.geometry.computeVertexNormals();
     }
@@ -191,9 +196,9 @@ function upgradeRimMaterials(fbxObj, rimId) {
         return new THREE.MeshStandardMaterial({
           name: 'S64_TireRubber',
           color: 0x12151c,
-          roughness: 0.78,
-          metalness: 0.08,
-          envMapIntensity: 0.9,
+          roughness: 0.82,
+          metalness: 0.04,
+          envMapIntensity: 0.30,
         });
       }
 
@@ -209,9 +214,9 @@ function upgradeRimMaterials(fbxObj, rimId) {
       return new THREE.MeshStandardMaterial({
         name: 'S64_RimAlloy',
         color: style.alloyHex,
-        roughness: style.roughness,
+        roughness: Math.max(0.16, style.roughness),
         metalness: style.metalness,
-        envMapIntensity: 2.8,
+        envMapIntensity: 1.25,
       });
     });
 
@@ -563,17 +568,19 @@ function upgradeSpoilerMaterials(fbxObj, spoilerId, kitId, customPaintHex = null
   fbxObj.traverse((child) => {
     if (!child.isMesh) return;
     child.castShadow = true;
-    child.receiveShadow = true;
+    child.receiveShadow = false;
     if (child.geometry && !child.geometry.attributes.normal) {
       child.geometry.computeVertexNormals();
     }
 
-    child.material = new THREE.MeshStandardMaterial({
+    child.material = new THREE.MeshPhysicalMaterial({
       name: 'S64_SpoilerWing',
       color: wingColor,
-      roughness: 0.12,
-      metalness: 0.84,
-      envMapIntensity: 2.4,
+      roughness: 0.28,
+      metalness: 0.22,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.03,
+      envMapIntensity: 0.95,
     });
   });
 }

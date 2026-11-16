@@ -1,5 +1,88 @@
 export type GameState = 'SPLASH' | 'MENU' | 'GARAGE' | 'RACE' | 'GAMEOVER';
 
+export type MapId = 'coast' | 'city' | 'canyon';
+
+export interface MapSpec {
+  id: MapId;
+  name: string;
+  shortName: string;
+  subtitle: string;
+  environmentTag: string;
+  lengthLabel: string;
+  laps: number;
+  accentHex: string;
+  secondaryHex: string;
+  skyTopHex: string;
+  skyHorizonHex: string;
+  fogHex: string;
+  fogDensity: number;
+  description: string;
+}
+
+export const MAP_ORDER: MapId[] = ['coast', 'city', 'canyon'];
+
+export const MAP_SPECS: MapSpec[] = [
+  {
+    id: 'coast',
+    name: 'SUNSET COAST',
+    shortName: 'COAST',
+    subtitle: 'Coastal Beach Highway',
+    environmentTag: 'OCEAN · BRIDGE · PALMS',
+    lengthLabel: '3.8 KM',
+    laps: 3,
+    accentHex: '#fb923c',
+    secondaryHex: '#0ea5e9',
+    skyTopHex: '#1e293b',
+    skyHorizonHex: '#fb923c',
+    fogHex: '#2a2438',
+    fogDensity: 0.32,
+    description: 'Golden-hour oceanfront highway with swaying palms, sandy bay, and suspension bridge.',
+  },
+  {
+    id: 'city',
+    name: 'NEON CITY',
+    shortName: 'CITY',
+    subtitle: 'Midnight City Circuit',
+    environmentTag: 'SKYLINE · TUNNEL · NEON',
+    lengthLabel: '3.6 KM',
+    laps: 3,
+    accentHex: '#00e5ff',
+    secondaryHex: '#ec4899',
+    skyTopHex: '#050814',
+    skyHorizonHex: '#0f172a',
+    fogHex: '#080d1d',
+    fogDensity: 0.36,
+    description: 'High-speed downtown circuit through glowing skyscrapers, wet asphalt, and a highway tunnel.',
+  },
+  {
+    id: 'canyon',
+    name: 'ALPINE PASS',
+    shortName: 'CANYON',
+    subtitle: 'Mountain Canyon Pass',
+    environmentTag: 'CLIFFS · GORGE · PINES',
+    lengthLabel: '4.1 KM',
+    laps: 3,
+    accentHex: '#34d399',
+    secondaryHex: '#fbbf24',
+    skyTopHex: '#0f172a',
+    skyHorizonHex: '#475569',
+    fogHex: '#182436',
+    fogDensity: 0.34,
+    description: 'Sweeping mountain switchbacks, pine ridges, and a steel truss bridge over a misty gorge.',
+  },
+];
+
+export function normalizeMapId(id: string | undefined | null): MapId {
+  if (id === 'coast' || id === 'city' || id === 'canyon') return id;
+  return 'coast';
+}
+
+export function getNextRotatedMapId(currentId: MapId): MapId {
+  const idx = MAP_ORDER.indexOf(currentId);
+  if (idx === -1) return 'coast';
+  return MAP_ORDER[(idx + 1) % MAP_ORDER.length];
+}
+
 export type BodyKitId =
   | 's64'
   | 'coupe'
@@ -92,16 +175,16 @@ export interface BodyKitSpec {
 export const BODY_KITS: BodyKitSpec[] = [
   {
     id: 'coupe',
-    name: 'PHANTOM',
-    subtitle: 'Twin-Turbo Street Apex',
-    fullLabel: 'PHANTOM',
-    tag: 'APEX HUNTER',
+    name: 'SWIFT',
+    subtitle: 'Street Coupe',
+    fullLabel: 'SWIFT',
+    tag: 'STARTER',
     category: 'COUPE',
-    description: 'Twin-turbocharged street legend with carbon aero splitters and razor-sharp cornering grip.',
+    description: 'Balanced twin-turbo street coupe with crisp handling and smooth cornering grip.',
     modelFile: '/models/cosmo/coupe.glb',
-    primaryColor: '#ff2233',
+    primaryColor: '#475569',
     accentColor: '#161922',
-    badgeColor: '#ff3b30',
+    badgeColor: '#38bdf8',
     defaultRimId: 'rim0',
     defaultSpoilerId: 'spoiler0',
     stats: {
@@ -119,12 +202,12 @@ export const BODY_KITS: BodyKitSpec[] = [
   },
   {
     id: 's64',
-    name: 'SHOGUN',
-    subtitle: 'Widebody Neo-Tuner',
-    fullLabel: 'SHOGUN',
-    tag: 'STREET LEGEND',
+    name: 'SPORT',
+    subtitle: 'Red GT Coupe',
+    fullLabel: 'SPORT',
+    tag: 'CLASSIC GT',
     category: 'COUPE',
-    description: 'Custom widebody cyber-tuner with twin titanium exhausts, forged aero, and surgical drift control.',
+    description: 'Custom red GT coupe with twin exhausts and balanced arcade drift control.',
     modelFile: '/models/cosmo/coupe.glb',
     primaryColor: '#ff1e26',
     accentColor: '#161922',
@@ -146,12 +229,12 @@ export const BODY_KITS: BodyKitSpec[] = [
   },
   {
     id: 'kamaro',
-    name: 'DEMON',
-    subtitle: 'Supercharged Muscle Beast',
-    fullLabel: 'DEMON',
-    tag: 'RAW TORQUE',
+    name: 'BLAZE',
+    subtitle: 'Muscle V8',
+    fullLabel: 'BLAZE',
+    tag: 'MUSCLE',
     category: 'MUSCLE',
-    description: 'Supercharged American muscle interceptor packing monstrous V8 torque and tire-shredding power.',
+    description: 'Supercharged V8 muscle car with strong launch acceleration and wide drifts.',
     modelFile: '/models/cosmo/kamaro.glb',
     primaryColor: '#ff8800',
     accentColor: '#0b1528',
@@ -173,12 +256,12 @@ export const BODY_KITS: BodyKitSpec[] = [
   },
   {
     id: 'ghini',
-    name: 'VENOM',
-    subtitle: 'Italian Stealth Hyper-Wedge',
-    fullLabel: 'VENOM',
-    tag: 'V12 FURY',
+    name: 'BOLT',
+    subtitle: 'V12 Supercar',
+    fullLabel: 'BOLT',
+    tag: 'SUPERCAR',
     category: 'SUPERCAR',
-    description: 'Aerodynamic Italian mid-engine stealth supercar with screaming V12 fury and ground-effect downforce.',
+    description: 'Sleek mid-engine supercar with fast straightaway speed and sharp cornering.',
     modelFile: '/models/cosmo/ghini.glb',
     primaryColor: '#eab308',
     accentColor: '#1a1a24',
@@ -200,12 +283,12 @@ export const BODY_KITS: BodyKitSpec[] = [
   },
   {
     id: 'fenyr',
-    name: 'VALKYRIE',
-    subtitle: 'Le Mans Prototype Hypercar',
-    fullLabel: 'VALKYRIE',
-    tag: 'MACH SPEED',
+    name: 'APEX',
+    subtitle: 'Pro Hypercar',
+    fullLabel: 'APEX',
+    tag: 'HYPERCAR',
     category: 'HYPERCAR',
-    description: 'Ultra-exotic Le Mans hypercar engineered with active carbon venturi tunnels and Mach-level velocity.',
+    description: 'Top-tier hypercar built for maximum top speed and razor-sharp track grip.',
     modelFile: '/models/cosmo/fenyr.glb',
     primaryColor: '#06b6d4',
     accentColor: '#0f172a',
@@ -227,12 +310,12 @@ export const BODY_KITS: BodyKitSpec[] = [
   },
   {
     id: 'police',
-    name: 'ENFORCER',
-    subtitle: 'Tactical Pursuit Interceptor',
-    fullLabel: 'ENFORCER',
-    tag: 'HIGHWAY HUNTER',
+    name: 'PATROL',
+    subtitle: 'Police Cruiser',
+    fullLabel: 'PATROL',
+    tag: 'INTERCEPTOR',
     category: 'SPECIAL',
-    description: 'High-speed tactical pursuit interceptor armed with reinforced ramming bars and strobe lightbars.',
+    description: 'High-speed highway patrol cruiser with heavy stability and strong top speed.',
     modelFile: '/models/cosmo/police.glb',
     primaryColor: '#2563eb',
     accentColor: '#ffffff',
@@ -254,12 +337,12 @@ export const BODY_KITS: BodyKitSpec[] = [
   },
   {
     id: 'lamb',
-    name: 'DIABLO',
-    subtitle: 'Synthwave Cyber Supercar',
-    fullLabel: 'DIABLO',
-    tag: 'CYBER ICON',
+    name: 'FLASH',
+    subtitle: 'Cyber GT',
+    fullLabel: 'FLASH',
+    tag: 'SPORT GT',
     category: 'SUPERCAR',
-    description: 'Razor-edged synthwave V12 prototype built for high-speed neon straightaways and aggressive drifts.',
+    description: 'Sharp wedge supercar tuned for fast straightaways and responsive corners.',
     modelFile: '/models/cosmo/lamb.glb',
     primaryColor: '#ec4899',
     accentColor: '#18181b',
@@ -281,12 +364,12 @@ export const BODY_KITS: BodyKitSpec[] = [
   },
   {
     id: 'italia',
-    name: 'SCUDERIA',
-    subtitle: 'Maranello Track Weapon',
-    fullLabel: 'SCUDERIA',
-    tag: 'TRACK WEAPON',
+    name: 'REDLINE',
+    subtitle: 'Track Racer',
+    fullLabel: 'REDLINE',
+    tag: 'TRACK PRO',
     category: 'SUPERCAR',
-    description: 'Track-bred Italian V8 thoroughbred engineered for surgical apex clipping and explosive corner exits.',
+    description: 'Track-tuned V8 sports car made for smooth corner exits and clean lap times.',
     modelFile: '/models/cosmo/italia.glb',
     primaryColor: '#ef4444',
     accentColor: '#1c1917',
@@ -308,12 +391,12 @@ export const BODY_KITS: BodyKitSpec[] = [
   },
   {
     id: 'rally',
-    name: 'THUNDERBOLT',
-    subtitle: 'AWD Turbo Drift Monster',
-    fullLabel: 'THUNDERBOLT',
-    tag: 'DRIFT KING',
+    name: 'DRIFT',
+    subtitle: 'Rally Turbo',
+    fullLabel: 'DRIFT',
+    tag: 'RALLY AWD',
     category: 'RALLY',
-    description: 'All-wheel-drive gymkhana rally weapon with anti-lag turbo boost that slingshots around hairpins.',
+    description: 'All-wheel-drive rally hatchback with quick turbo pickup around tight turns.',
     modelFile: '/models/cosmo/rally.glb',
     primaryColor: '#10b981',
     accentColor: '#0f172a',
@@ -335,12 +418,12 @@ export const BODY_KITS: BodyKitSpec[] = [
   },
   {
     id: 'jeep',
-    name: 'TITAN',
-    subtitle: 'Desert Raid Trophy Brawler',
-    fullLabel: 'TITAN',
-    tag: 'ALL-TERRAIN',
+    name: 'ROVER',
+    subtitle: 'Offroad 4x4',
+    fullLabel: 'ROVER',
+    tag: 'OFFROAD',
     category: 'OFFROAD',
-    description: 'Heavy-duty Baja trophy raid 4x4 with long-travel suspension, roll cage, and unstoppable traction.',
+    description: 'Rugged 4x4 desert truck with high ground clearance and steady traction.',
     modelFile: '/models/cosmo/jeep.glb',
     primaryColor: '#84cc16',
     accentColor: '#1e293b',
@@ -362,12 +445,12 @@ export const BODY_KITS: BodyKitSpec[] = [
   },
   {
     id: 'armor',
-    name: 'JUGGERNAUT',
-    subtitle: 'Heavy Armored Colossus',
-    fullLabel: 'JUGGERNAUT',
-    tag: 'UNSTOPPABLE',
+    name: 'TANK',
+    subtitle: 'Heavy 4x4',
+    fullLabel: 'TANK',
+    tag: 'HEAVY DUTY',
     category: 'SPECIAL',
-    description: 'Ballistic-plated tactical juggernaut that bulldozes rivals out of the racing line with zero flinch.',
+    description: 'Armored heavy truck that holds its racing line firmly in bumper-to-bumper packs.',
     modelFile: '/models/cosmo/armor.glb',
     primaryColor: '#64748b',
     accentColor: '#090d16',
@@ -389,12 +472,12 @@ export const BODY_KITS: BodyKitSpec[] = [
   },
   {
     id: 'mobil',
-    name: 'YAKUZA',
-    subtitle: 'Twin-Turbo VIP Cruiser',
-    fullLabel: 'YAKUZA',
-    tag: 'NIGHT RUNNER',
+    name: 'CRUISER',
+    subtitle: 'City Sedan',
+    fullLabel: 'CRUISER',
+    tag: 'STREET',
     category: 'COUPE',
-    description: 'Slammed midnight VIP executive sedan packing a hidden twin-turbo V8 and silky drift balance.',
+    description: 'Low-slung street sedan with clean balance and reliable cornering speed.',
     modelFile: '/models/cosmo/mobil.glb',
     primaryColor: '#a855f7',
     accentColor: '#18181b',
@@ -416,12 +499,12 @@ export const BODY_KITS: BodyKitSpec[] = [
   },
   {
     id: 'van',
-    name: 'SYNDICATE',
-    subtitle: '1000HP Sleeper Heist Rig',
-    fullLabel: 'SYNDICATE',
-    tag: 'TURBO SLEEPER',
+    name: 'CARGO',
+    subtitle: 'Turbo Van',
+    fullLabel: 'CARGO',
+    tag: 'SLEEPER VAN',
     category: 'SPECIAL',
-    description: 'Deceptively wild mid-engine heist van swapped with a 1000HP twin-turbo supercar powertrain.',
+    description: 'Boxy street van hiding a surprisingly punchy turbo engine under the hood.',
     modelFile: '/models/cosmo/van.glb',
     primaryColor: '#f59e0b',
     accentColor: '#1c1917',
@@ -453,13 +536,6 @@ export function normalizeCarId(id: string | undefined | null): BodyKitId {
   return found ? found.id : 'coupe';
 }
 
-export type PowerupType =
-  | 'ROCKET'
-  | 'SHIELD'
-  | 'OIL_SLICK'
-  | 'HYPER_NITRO'
-  | 'EMP';
-
 export interface RivalRacerData {
   id: string;
   name: string;
@@ -478,25 +554,13 @@ export interface RaceTelemetry {
   boostCharge: number;
   boostActive: number;
   isDrifting: boolean;
+  driftCharge?: number;
   countdownStep: number;
   cameraMode: number;
   autopilot: boolean;
   audioEnabled: boolean;
   positionRank: number; // 1st, 2nd, 3rd, 4th
   rivals: RivalRacerData[];
-  heldPowerup: PowerupType | null;
-  rouletteActive?: boolean;
-  roulettePreview?: PowerupType | null;
-  lockedTargetName?: string | null;
-  lockedTargetDistM?: number | null;
-  shieldActive: boolean;
-  spinoutActive: boolean;
-  spinoutReason?: string | null;
-  driftCharge?: number;
-  incomingAttack?: boolean;
-  incomingAttacker?: string | null;
-  incomingUrgency?: number;
-  combatFeedMessage?: string | null;
 }
 
 export interface RaceFinishResult {
@@ -505,12 +569,15 @@ export interface RaceFinishResult {
   lapTimes: number[];
   coinsEarned: number;
   finishRank: number; // 1, 2, 3, or 4
+  mapId?: MapId;
 }
 
 export interface TheRaceEngineBridge {
   setScreen: (screen: GameState) => void;
   getScreen: () => GameState;
   startRace: () => void;
+  setMap?: (mapId: MapId) => void;
+  getMap?: () => MapId;
   setBodyKit: (
     kitId: BodyKitId,
     stats?: {
@@ -537,7 +604,6 @@ export interface TheRaceEngineBridge {
   ) => void;
   clearTouchControls: () => void;
   triggerNitro: () => boolean;
-  triggerPowerup: () => boolean;
   setCameraMode: (mode: number) => void;
   getCameraMode: () => number;
   setAutopilot: (val: boolean) => void;

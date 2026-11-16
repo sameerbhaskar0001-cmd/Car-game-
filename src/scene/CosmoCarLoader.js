@@ -31,7 +31,6 @@ export function loadCosmoGlb(carId) {
       undefined,
       (err) => {
         console.warn(`Failed to load ${url}, falling back to coupe:`, err);
-        // Fallback to coupe if specific car fails
         if (normId !== 'coupe') {
           loadCosmoGlb('coupe').then(resolve).catch(reject);
         } else {
@@ -46,7 +45,60 @@ export function loadCosmoGlb(carId) {
 }
 
 /**
- * Deep clones an Object3D hierarchy along with unique materials so that
+ * Upgrades a source GLTF material into a clearcoat automotive PBR material
+ * so cars look richly 3D, dimensional, and glossy instead of flat or dark.
+ */
+function upgradeCosmoMaterial(srcMat) {
+  const mName = (srcMat.name || '').toLowerCase();
+
+  if (mName.includes('metallic') || mName.includes('body')) {
+    return new THREE.MeshPhysicalMaterial({
+      name: srcMat.name,
+      color: srcMat.color ? srcMat.color.clone() : new THREE.Color(0xffffff),
+      map: srcMat.map || null,
+      normalMap: srcMat.normalMap || null,
+      roughnessMap: srcMat.roughnessMap || null,
+      metalnessMap: srcMat.metalnessMap || null,
+      side: srcMat.side ?? THREE.FrontSide,
+      metalness: 0.22,
+      roughness: 0.28,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.03,
+      reflectivity: 0.90,
+      envMapIntensity: 0.95,
+    });
+  }
+
+  if (mName.includes('glass')) {
+    return new THREE.MeshPhysicalMaterial({
+      name: srcMat.name,
+      color: new THREE.Color(0x040812),
+      map: srcMat.map || null,
+      side: srcMat.side ?? THREE.FrontSide,
+      metalness: 0.10,
+      roughness: 0.04,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.02,
+      reflectivity: 0.92,
+      envMapIntensity: 1.0,
+    });
+  }
+
+  const cloned = srcMat.clone();
+  if (mName.includes('light')) {
+    cloned.emissiveIntensity = 2.0;
+    cloned.toneMapped = false;
+  } else {
+    // Deep matte rubber & carbon trim contrast against glossy clearcoat bodywork
+    cloned.metalness = 0.04;
+    cloned.roughness = 0.78;
+    cloned.envMapIntensity = 0.35;
+  }
+  return cloned;
+}
+
+/**
+ * Deep clones an Object3D hierarchy with upgraded unique PBR materials so that
  * instances (player and rivals) don't bleed custom colors into each other.
  */
 function cloneCarHierarchy(source) {
@@ -59,12 +111,12 @@ function cloneCarHierarchy(source) {
     if (node.isMesh && node.material) {
       if (Array.isArray(node.material)) {
         node.material = node.material.map((m) => {
-          if (!matMap.has(m)) matMap.set(m, m.clone());
+          if (!matMap.has(m)) matMap.set(m, upgradeCosmoMaterial(m));
           return matMap.get(m);
         });
       } else {
         if (!matMap.has(node.material)) {
-          matMap.set(node.material, node.material.clone());
+          matMap.set(node.material, upgradeCosmoMaterial(node.material));
         }
         node.material = matMap.get(node.material);
       }
@@ -75,8 +127,8 @@ function cloneCarHierarchy(source) {
 }
 
 /**
- * Creates a playable, steerable 3D instance of any of the 12 Cosmo low-poly cars.
- * Scaled to 1:87 HO micro-scale (~20mm length) and normalized so wheel contact sits at Y=0.
+ * Creates a playable, steerable 3D instance of any of the Cosmo 3D cars.
+ * Scaled to 1:87 HO micro-scale (~21mm length) and normalized so wheel contact sits at Y=0.
  */
 export async function createCosmoCarInstance(carId = 'coupe', customPaintHex = null) {
   const normId = normalizeCarId(carId);
@@ -86,7 +138,6 @@ export async function createCosmoCarInstance(carId = 'coupe', customPaintHex = n
   const assemblyRoot = new THREE.Group();
   assemblyRoot.name = `CosmoCar_${normId}_Assembly`;
 
-  // Clone the GLTF scene
   const carScene = cloneCarHierarchy(gltf.scene);
   carScene.name = `CosmoCar_${normId}_Scene`;
 
@@ -97,16 +148,13 @@ export async function createCosmoCarInstance(carId = 'coupe', customPaintHex = n
   rawBox.getSize(rawSize);
   rawBox.getCenter(rawCenter);
 
-  // Standard HO micro-scale target length is 0.021m (21mm)
   const targetLength = 0.021;
   const scaleFactor = targetLength / Math.max(rawSize.z, 4.0);
 
-  // Container to apply scale, centering, and ground offset
   const modelContainer = new THREE.Group();
   modelContainer.name = `CosmoCar_${normId}_Container`;
   modelContainer.scale.setScalar(scaleFactor);
 
-  // Center horizontally & longitudinally, align lowest point (wheel bottom) to Y=0
   modelContainer.position.set(
     -rawCenter.x * scaleFactor,
     -rawBox.min.y * scaleFactor,
@@ -116,7 +164,6 @@ export async function createCosmoCarInstance(carId = 'coupe', customPaintHex = n
   modelContainer.add(carScene);
   assemblyRoot.add(modelContainer);
 
-  // Identify wheels and body meshes
   let bodyMesh = null;
   const wheelNodes = [];
   const frontWheels = [];
@@ -125,29 +172,20 @@ export async function createCosmoCarInstance(carId = 'coupe', customPaintHex = n
 
   carScene.traverse((child) => {
     if (child.isMesh) {
+      // Cast clean contact shadows onto turntable/track, but disable receiveShadow on 2cm sub-meshes
+      // to eliminate shadow-map acne dark blotches on doors, roofs, and hoods.
       child.castShadow = true;
-      child.receiveShadow = true;
+      child.receiveShadow = false;
+
+      if (child.geometry && !child.geometry.attributes.normal) {
+        child.geometry.computeVertexNormals();
+      }
 
       const mats = Array.isArray(child.material) ? child.material : [child.material];
       for (const m of mats) {
         if (!materials.includes(m)) materials.push(m);
-
-        const mName = (m.name || '').toLowerCase();
-        if (mName.includes('metallic') || mName.includes('body')) {
-          m.metalness = 0.55;
-          m.roughness = 0.18;
-          m.envMapIntensity = 2.0;
-        } else if (mName.includes('glass')) {
-          m.metalness = 0.85;
-          m.roughness = 0.04;
-          m.envMapIntensity = 2.5;
-        } else if (mName.includes('light')) {
-          m.emissiveIntensity = 3.0;
-          m.toneMapped = false;
-        }
       }
 
-      // Check if this is a wheel or the car body
       const name = (child.name || '').toLowerCase();
       const parentName = (child.parent?.name || '').toLowerCase();
       const isWheel =
@@ -156,7 +194,6 @@ export async function createCosmoCarInstance(carId = 'coupe', customPaintHex = n
         parentName.includes('wheel');
 
       if (isWheel) {
-        // Find the pivot node for this wheel (either the mesh itself or its parent)
         const wheelPivot = parentName.includes('wheel') ? child.parent : child;
         if (!wheelNodes.includes(wheelPivot)) {
           wheelNodes.push(wheelPivot);
@@ -167,13 +204,8 @@ export async function createCosmoCarInstance(carId = 'coupe', customPaintHex = n
     }
   });
 
-  // Categorize front vs rear wheels based on Z coordinate
-  // In our models, front wheels have positive Z relative to car center
   wheelNodes.forEach((w) => {
     w.rotation.order = 'YXZ';
-    const worldPos = new THREE.Vector3();
-    w.getWorldPosition(worldPos);
-    // Compare relative to car center
     if (w.position.z >= 0) {
       frontWheels.push(w);
     } else {
@@ -181,7 +213,6 @@ export async function createCosmoCarInstance(carId = 'coupe', customPaintHex = n
     }
   });
 
-  // Function to apply paint color
   function setPaint(hex) {
     for (const m of materials) {
       const mName = (m.name || '').toLowerCase();
@@ -189,7 +220,6 @@ export async function createCosmoCarInstance(carId = 'coupe', customPaintHex = n
         if (hex !== null && hex !== undefined) {
           m.color.set(hex);
         } else {
-          // Reset to native palette white tint
           m.color.set(0xffffff);
         }
       }
@@ -200,14 +230,9 @@ export async function createCosmoCarInstance(carId = 'coupe', customPaintHex = n
     setPaint(customPaintHex);
   }
 
-  // Wheel rotation accumulator
   let wheelRotX = 0;
-  // Estimated wheel radius in model units (~0.40m * scaleFactor)
   const wheelRadius = 0.40 * scaleFactor;
 
-  /**
-   * Rolls all wheels forward based on distance traveled in world units.
-   */
   function spinWheels(distDelta) {
     if (wheelNodes.length === 0 || Math.abs(distDelta) < 1e-6) return;
     const angleDelta = distDelta / wheelRadius;
@@ -217,9 +242,6 @@ export async function createCosmoCarInstance(carId = 'coupe', customPaintHex = n
     }
   }
 
-  /**
-   * Steers the front wheels left/right.
-   */
   function steerFrontWheels(angleRad) {
     const clampedAngle = THREE.MathUtils.clamp(angleRad, -0.48, 0.48);
     for (let i = 0; i < frontWheels.length; i++) {
@@ -240,7 +262,6 @@ export async function createCosmoCarInstance(carId = 'coupe', customPaintHex = n
     setPaint,
     scaleFactor,
     dispose() {
-      // Do NOT dispose obj.geometry because BufferGeometries are shared across clones in rawGlbCache!
       assemblyRoot.traverse((obj) => {
         if (obj.isMesh && obj.material) {
           if (Array.isArray(obj.material)) {
@@ -255,14 +276,39 @@ export async function createCosmoCarInstance(carId = 'coupe', customPaintHex = n
 }
 
 /**
- * Preloads all 12 cars in parallel so switching in garage is instant.
+ * Fast startup preload: loads ONLY the player's equipped car and the 3 rival cars
+ * so initial boot is snappy with zero multi-megabyte parse stalls.
  */
-export function preloadAllCosmoCars() {
+export function preloadCoreCosmoCars(equippedCarId = 'coupe') {
+  const coreIds = Array.from(
+    new Set([normalizeCarId(equippedCarId), 'police', 'kamaro', 'ghini'])
+  );
   return Promise.all(
-    BODY_KITS.map((spec) =>
-      loadCosmoGlb(spec.id).catch((err) => {
-        console.warn(`Preload ${spec.id} error:`, err);
+    coreIds.map((id) =>
+      loadCosmoGlb(id).catch((err) => {
+        console.warn(`Preload ${id} error:`, err);
       })
     )
   );
+}
+
+/**
+ * Staggered background preload of remaining Garage cars so scrolling in the Garage
+ * is smooth without blocking app startup.
+ */
+let lazyStarted = false;
+export function preloadAllCosmoCars() {
+  if (lazyStarted) return Promise.resolve();
+  lazyStarted = true;
+
+  const remaining = BODY_KITS.map((k) => normalizeCarId(k.id)).filter(
+    (id, idx, arr) => arr.indexOf(id) === idx && !rawGlbCache.has(id)
+  );
+
+  return (async () => {
+    for (const id of remaining) {
+      await loadCosmoGlb(id).catch(() => {});
+      await new Promise((r) => setTimeout(r, 90));
+    }
+  })();
 }

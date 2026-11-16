@@ -10,115 +10,109 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
   // -------------------------------------------------------------------------
   // PRECOMPUTE PERIODIC SPLINE TABLE & SECTOR START ARC-LENGTHS
   // -------------------------------------------------------------------------
-  const samples = splineData.samples;
-  const N = samples.length;
-  const totalLength = splineData.total_length_m || 3.8371;
+  let samples = [];
+  let N = 0;
+  let totalLength = 3.8371;
+  let smoothPositions = [];
+  let smoothTangents = [];
+  let smoothNormals = [];
+  let smoothRights = [];
+  let smoothBanks = [];
+  let rawCurvatures = new Float32Array(0);
+  let smoothCurvatures = new Float32Array(0);
+  let startFinishIdx = 646;
+  let startFinishArc = 0;
+  let sectorStartArcs = {};
 
-  // C2 Position & Orientation Frame Smoothing:
-  // track_spline.json has 18-sample Catmull-Rom knot boundaries in Sector 2 (Cat Helix) and Sector 4 (Lamp Corkscrew)
-  // where adjacent tangents jump by up to 8.3°–10.1° across a single 3.1mm segment.
-  // A 2-pass [0.2, 0.6, 0.2] position filter + 4-pass circular [1, 2, 3, 2, 1]/9 frame filter removes knot kinks
-  // so position and tangent are 100% C2-consistent.
-  const smoothPositions = samples.map((s) => new THREE.Vector3().fromArray(s.position));
-  for (let pass = 0; pass < 2; pass++) {
-    const nextP = smoothPositions.map((v) => v.clone());
+  function buildSplineTables(nextSplineData) {
+    samples = nextSplineData.samples;
+    N = samples.length;
+    totalLength = nextSplineData.total_length_m || 3.8371;
+
+    smoothPositions = samples.map((s) => new THREE.Vector3().fromArray(s.position));
+    for (let pass = 0; pass < 2; pass++) {
+      const nextP = smoothPositions.map((v) => v.clone());
+      for (let i = 0; i < N; i++) {
+        const pPrev = smoothPositions[(i - 1 + N) % N];
+        const pCurr = smoothPositions[i];
+        const pNext = smoothPositions[(i + 1) % N];
+        nextP[i]
+          .copy(pCurr)
+          .multiplyScalar(0.6)
+          .addScaledVector(pPrev, 0.2)
+          .addScaledVector(pNext, 0.2);
+      }
+      for (let i = 0; i < N; i++) {
+        smoothPositions[i].copy(nextP[i]);
+      }
+    }
+
+    smoothTangents = samples.map((s) => new THREE.Vector3().fromArray(s.tangent).normalize());
+    smoothNormals = samples.map((s) => new THREE.Vector3().fromArray(s.normal).normalize());
+    smoothRights = samples.map((s) => new THREE.Vector3().fromArray(s.right).normalize());
+    smoothBanks = samples.map((s) => s.bank_deg || 0);
+
+    for (let pass = 0; pass < 4; pass++) {
+      const nextT = smoothTangents.map((v) => v.clone());
+      const nextN = smoothNormals.map((v) => v.clone());
+      const nextB = smoothBanks.slice();
+      const weights = [1, 2, 3, 2, 1];
+      for (let i = 0; i < N; i++) {
+        nextT[i].set(0, 0, 0);
+        nextN[i].set(0, 0, 0);
+        let bSum = 0;
+        for (let k = -2; k <= 2; k++) {
+          const idx = (i + k + N) % N;
+          const w = weights[k + 2];
+          nextT[i].addScaledVector(smoothTangents[idx], w);
+          nextN[i].addScaledVector(smoothNormals[idx], w);
+          bSum += smoothBanks[idx] * w;
+        }
+        nextT[i].normalize();
+        nextN[i].normalize();
+        nextB[i] = bSum / 9.0;
+      }
+      for (let i = 0; i < N; i++) {
+        smoothTangents[i].copy(nextT[i]);
+        smoothRights[i].crossVectors(smoothTangents[i], nextN[i]).normalize();
+        smoothNormals[i].crossVectors(smoothRights[i], smoothTangents[i]).normalize();
+        smoothBanks[i] = nextB[i];
+      }
+    }
+
+    rawCurvatures = new Float32Array(N);
+    smoothCurvatures = new Float32Array(N);
+    const _tmpDiff = new THREE.Vector3();
     for (let i = 0; i < N; i++) {
-      const pPrev = smoothPositions[(i - 1 + N) % N];
-      const pCurr = smoothPositions[i];
-      const pNext = smoothPositions[(i + 1) % N];
-      nextP[i]
-        .copy(pCurr)
-        .multiplyScalar(0.6)
-        .addScaledVector(pPrev, 0.2)
-        .addScaledVector(pNext, 0.2);
+      const iPrev = (i - 3 + N) % N;
+      const iNext = (i + 3) % N;
+      _tmpDiff.subVectors(smoothTangents[iNext], smoothTangents[iPrev]);
+      rawCurvatures[i] = _tmpDiff.dot(smoothRights[i]) * 8.0;
     }
     for (let i = 0; i < N; i++) {
-      smoothPositions[i].copy(nextP[i]);
-    }
-  }
-
-  const smoothTangents = samples.map((s) => new THREE.Vector3().fromArray(s.tangent).normalize());
-  const smoothNormals = samples.map((s) => new THREE.Vector3().fromArray(s.normal).normalize());
-  const smoothRights = samples.map((s) => new THREE.Vector3().fromArray(s.right).normalize());
-  const smoothBanks = samples.map((s) => s.bank_deg || 0);
-
-  for (let pass = 0; pass < 4; pass++) {
-    const nextT = smoothTangents.map((v) => v.clone());
-    const nextN = smoothNormals.map((v) => v.clone());
-    const nextB = smoothBanks.slice();
-    const weights = [1, 2, 3, 2, 1];
-    for (let i = 0; i < N; i++) {
-      nextT[i].set(0, 0, 0);
-      nextN[i].set(0, 0, 0);
-      let bSum = 0;
+      let cSum = 0;
+      const weights = [1, 2, 3, 2, 1];
       for (let k = -2; k <= 2; k++) {
-        const idx = (i + k + N) % N;
-        const w = weights[k + 2];
-        nextT[i].addScaledVector(smoothTangents[idx], w);
-        nextN[i].addScaledVector(smoothNormals[idx], w);
-        bSum += smoothBanks[idx] * w;
+        cSum += rawCurvatures[(i + k + N) % N] * weights[k + 2];
       }
-      nextT[i].normalize();
-      nextN[i].normalize();
-      nextB[i] = bSum / 9.0;
+      smoothCurvatures[i] = cSum / 9.0;
     }
+
+    startFinishIdx = Math.min(nextSplineData.startFinishIdx || 646, N - 1);
+    sectorStartArcs = {};
+
     for (let i = 0; i < N; i++) {
-      smoothTangents[i].copy(nextT[i]);
-      // Re-orthonormalize right = tangent x normal, normal = right x tangent
-      smoothRights[i].crossVectors(smoothTangents[i], nextN[i]).normalize();
-      smoothNormals[i].crossVectors(smoothRights[i], smoothTangents[i]).normalize();
-      smoothBanks[i] = nextB[i];
-    }
-  }
-
-  // Precompute continuous per-sample signed horizontal curvature (smoothed across knots so Autopilot never chatters at 45Hz)
-  const rawCurvatures = new Float32Array(N);
-  const smoothCurvatures = new Float32Array(N);
-  const _tmpDiff = new THREE.Vector3();
-  for (let i = 0; i < N; i++) {
-    const iPrev = (i - 3 + N) % N;
-    const iNext = (i + 3) % N;
-    _tmpDiff.subVectors(smoothTangents[iNext], smoothTangents[iPrev]);
-    rawCurvatures[i] = _tmpDiff.dot(smoothRights[i]) * 8.0;
-  }
-  for (let i = 0; i < N; i++) {
-    let cSum = 0;
-    const weights = [1, 2, 3, 2, 1];
-    for (let k = -2; k <= 2; k++) {
-      cSum += rawCurvatures[(i + k + N) % N] * weights[k + 2];
-    }
-    smoothCurvatures[i] = cSum / 9.0;
-  }
-
-  // Anchor the main Start/Finish Line to sample 646 (X = +0.0183m, Z = 0.255m,
-  // where the F1 5-light countdown gantry and 645..646 black-and-white
-  // checkered road stripes are located)
-  let startFinishIdx = Math.min(646, N - 1);
-  let minFinishDist = Infinity;
-  const sectorStartArcs = {};
-
-  for (let i = 0; i < N; i++) {
-    const s = samples[i];
-    if (sectorStartArcs[s.sector] === undefined) {
-      sectorStartArcs[s.sector] = s.arc_length_m;
-    }
-    if (s.sector === 6) {
-      const dx = s.position[0] - 0.0183;
-      const dz = s.position[2] - 0.255;
-      const d2 = dx * dx + dz * dz;
-      if (d2 < minFinishDist) {
-        minFinishDist = d2;
-        startFinishIdx = i;
+      const s = samples[i];
+      if (sectorStartArcs[s.sector] === undefined) {
+        sectorStartArcs[s.sector] = s.arc_length_m;
       }
     }
+
+    startFinishArc = samples[startFinishIdx].arc_length_m;
+    sectorStartArcs[6] = (startFinishArc - 0.022 + totalLength) % totalLength;
   }
 
-  const startFinishArc = samples[startFinishIdx].arc_length_m;
-  // Position the kart on the starting grid right behind the black-and-white
-  // checkered stripes (645..646, entry edge at startFinishArc - 0.0095m) so the
-  // car starts close to the stripes while keeping the overhead F1 5-light
-  // countdown gantry in clear view.
-  sectorStartArcs[6] = (startFinishArc - 0.025 + totalLength) % totalLength;
+  buildSplineTables(splineData);
 
   // Pre-allocated scratch vectors/matrices to avoid GC allocations on every physics step
   const _p1 = new THREE.Vector3();
@@ -556,12 +550,12 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
     state.activeKeysStr = computeActiveKeysStr();
     state.signedCurvature = frame.signedCurvature;
 
-    // Calibrated speeds in real meters/second (1:150 N-scale: ~82 km/h natural top speed, ~115 km/h Nitro top speed)
-    const manualMaxSpeed = 0.222 * state.topSpeedMultiplier;
-    const boostMaxSpeed = 0.312 * state.topSpeedMultiplier;
-    const autopilotCruiseSpeed = 0.205 * state.topSpeedMultiplier;
-    // Snappy arcade acceleration (~1.6s from 0 to top speed with instant launch torque)
-    const manualAccel = 0.145 * (state.accelMultiplier || 1.0);
+    // Calibrated speeds in real meters/second for natural ~20s lap pacing & responsive cornering
+    const manualMaxSpeed = 0.142 * state.topSpeedMultiplier;
+    const boostMaxSpeed = 0.192 * state.topSpeedMultiplier;
+    const autopilotCruiseSpeed = 0.132 * state.topSpeedMultiplier;
+    // Smooth progressive arcade acceleration
+    const manualAccel = 0.105 * (state.accelMultiplier || 1.0);
 
     if (state.railHitCooldown > 0) {
       state.railHitCooldown = Math.max(0.0, state.railHitCooldown - clampedDt);
@@ -853,34 +847,35 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
     );
 
     if (!isAiCruise) {
-      // Responsive Arcade Cornering Drift, Tire Smoke & Drift-Exit Mini-Turbo Surge
+      // Responsive Cornering Drift (Only triggers inside real curves when steering hard at speed,
+      // preventing false "DRIFT CHARGING..." popups during normal straightaway lane changes)
       if (
-        Math.abs(state.steerInput) > 0.25 &&
-        (Math.abs(frame.signedCurvature) > 0.20 || Math.abs(state.steerInput) > 0.58) &&
-        state.speed > 0.085
+        Math.abs(state.steerInput) > 0.65 &&
+        Math.abs(frame.signedCurvature) > 0.34 &&
+        state.speed > manualMaxSpeed * 0.68
       ) {
         state.isDrifting = true;
         state.driftDir = Math.sign(turnRight) || Math.sign(state.steerInput) || 1;
         state.driftAngle = THREE.MathUtils.lerp(
           state.driftAngle,
-          -state.driftDir * 0.18,
+          -state.driftDir * 0.14,
           1.0 - Math.exp(-12.0 * clampedDt)
         );
-        state.driftChargeTimer = Math.min(1.0, (state.driftChargeTimer || 0.0) + clampedDt * 1.25);
-        state.boostCharge = Math.min(1.0, state.boostCharge + clampedDt * 0.52);
+        state.driftChargeTimer = Math.min(1.0, (state.driftChargeTimer || 0.0) + clampedDt * 1.15);
+        state.boostCharge = Math.min(1.0, state.boostCharge + clampedDt * 0.45);
       } else {
-        if (state.isDrifting && (state.driftChargeTimer || 0.0) >= 0.36 && state.speed > 0.08) {
+        if (state.isDrifting && (state.driftChargeTimer || 0.0) >= 0.42 && state.speed > 0.07) {
           // Unleash Drift-Exit Mini-Turbo Surge!
-          state.boostActive = Math.max(state.boostActive, 0.95);
-          state.speed = Math.max(state.speed, manualMaxSpeed * 1.15);
+          state.boostActive = Math.max(state.boostActive, 0.85);
+          state.speed = Math.max(state.speed, manualMaxSpeed * 1.12);
         }
         state.isDrifting = false;
         state.driftDir = 0;
-        state.driftChargeTimer = Math.max(0.0, (state.driftChargeTimer || 0.0) - clampedDt * 2.5);
+        state.driftChargeTimer = Math.max(0.0, (state.driftChargeTimer || 0.0) - clampedDt * 3.0);
         state.driftAngle = THREE.MathUtils.lerp(
           state.driftAngle,
           0.0,
-          1.0 - Math.exp(-12.0 * clampedDt)
+          1.0 - Math.exp(-14.0 * clampedDt)
         );
       }
 
@@ -959,18 +954,18 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
           state.railImpactActive = true;
           state.railHitCooldown = 0.25;
 
-          // Gentle inward nudge away from guardrail while preserving 92% forward speed
-          state.lateralOffset = signLat * 0.0117;
-          state.lateralVel = -signLat * 0.010;
-          state.speed *= 0.92;
-          if (onRailImpactCallback) onRailImpactCallback(0.35);
+          // Gentle inward nudge away from guardrail while preserving 97% forward speed
+          state.lateralOffset = signLat * 0.0116;
+          state.lateralVel = -signLat * 0.008;
+          state.speed *= 0.97;
+          if (onRailImpactCallback) onRailImpactCallback(0.22);
         } else {
-          state.lateralOffset = signLat * 0.0119;
+          state.lateralOffset = signLat * 0.0118;
         }
 
         if (steeringAway) {
           state.railImpactActive = false;
-          state.headingYaw = signLat * 0.12;
+          state.headingYaw = signLat * 0.10;
           state.lateralOffset = signLat * 0.0112;
           state.wallStuckTimer = 0.0;
         } else {
@@ -978,11 +973,11 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
           state.headingYaw = THREE.MathUtils.lerp(
             state.headingYaw,
             0.0,
-            1.0 - Math.exp(-12.0 * clampedDt)
+            1.0 - Math.exp(-14.0 * clampedDt)
           );
         }
       } else {
-        state.lateralOffset = signLat * 0.0120;
+        state.lateralOffset = signLat * 0.0118;
         state.lateralVel = 0.0;
       }
     } else {
@@ -1090,15 +1085,15 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
 
     // Vertical hop suspension & smooth airborne jump-ramp pitch physics
     if (state.hopHeight > 0 || state.hopVel !== 0) {
-      state.hopHeight = Math.min(0.0068, state.hopHeight + state.hopVel * clampedDt);
-      state.hopVel -= 0.26 * clampedDt;
+      state.hopHeight = Math.min(0.0046, state.hopHeight + state.hopVel * clampedDt);
+      state.hopVel -= 0.18 * clampedDt;
       if (state.onRampSurface && state.hopHeight < (state.rampSurfaceHeight || 0)) {
         state.hopHeight = state.rampSurfaceHeight || 0;
       }
-      // Gentle nose-up pitch while climbing off a jump ramp, leveling out smoothly toward landing
+      // Subtle nose-up pitch while climbing off a jump ramp, leveling out smoothly toward landing
       const targetAirPitch = state.onRampSurface
-        ? -0.16
-        : THREE.MathUtils.clamp(-state.hopVel * 2.8, -0.18, 0.08);
+        ? -0.09
+        : THREE.MathUtils.clamp(-state.hopVel * 1.8, -0.10, 0.05);
       state.rampPitch = THREE.MathUtils.lerp(
         state.rampPitch || 0.0,
         targetAirPitch,
@@ -1113,7 +1108,7 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
       state.hopHeight = state.rampSurfaceHeight || 0;
       state.rampPitch = THREE.MathUtils.lerp(
         state.rampPitch || 0.0,
-        -0.16,
+        -0.09,
         Math.min(1, clampedDt * 16)
       );
     } else {
@@ -1130,6 +1125,13 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
     return state;
   }
 
+  function setSplineData(newSplineData) {
+    if (!newSplineData || !Array.isArray(newSplineData.samples)) return;
+    buildSplineTables(newSplineData);
+    clearTouchKeys();
+    resetToStart();
+  }
+
   return {
     world,
     state,
@@ -1139,6 +1141,7 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
     sampleTrackAtArcLength,
     teleportToSector,
     resetToStart,
+    setSplineData,
     setAutopilot,
     setTouchKey,
     clearTouchKeys,

@@ -8,15 +8,15 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
-import { buildProceduralDeskDiorama } from './scene/DeskDioramaBuilder.js';
-import { buildCoasterTrack } from './scene/CoasterTrackBuilder.js';
 import { buildMicroKart } from './scene/MicroKartBuilder.js';
-import { preloadAllCosmoCars } from './scene/CosmoCarLoader.js';
+import { preloadCoreCosmoCars, preloadAllCosmoCars } from './scene/CosmoCarLoader.js';
 import { loadS64ModularCar } from './scene/S64CarLoader.js';
+import { normalizeCarId, normalizeMapId } from './types/game';
 import { buildGoldenHourAtmosphere } from './scene/GoldenHourAtmosphere.js';
-import { buildRoomEnvironment } from './scene/RoomEnvironmentBuilder.js';
+import { getTrackSplineForMap } from './scene/WorldTrackRegistry.js';
+import { buildPitLaneGarage } from './scene/PitLaneGarageBuilder.js';
+import { buildRealWorldMap } from './scene/RealWorldMapBuilder.js';
 import { createKartPhysicsController } from './physics/KartPhysicsController.js';
 import { createWebAudioSynth } from './audio/WebAudioSynth.js';
 import { createPowerupManager } from './combat/PowerupManager.js';
@@ -67,19 +67,68 @@ async function initApp() {
     }
   }
 
-  const pixelRatio = isScreenshotUrl ? 1.0 : Math.min(window.devicePixelRatio, 1.5);
+  const pixelRatio = isScreenshotUrl ? 1.0 : Math.min(window.devicePixelRatio || 1, 1.35);
   renderer.setPixelRatio(pixelRatio);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.68 + 0.08 * 1.15;
+  renderer.toneMappingExposure = 0.78 + 0.08 * 1.15;
   renderer.debug.checkShaderErrors = false;
   container.appendChild(renderer.domElement);
 
-  // Subtle 1-time PMREM studio environment so dark metallic/satin surfaces (monitor, BoYata, G915) have crisp reflections
+  // Dark Asphalt-style Automotive Studio PMREM: 92% deep midnight (#050811) + 3 crisp studio softbox strips
+  // so black/dark cars stay rich obsidian black with razor-sharp edge reflections instead of RoomEnvironment whiteout.
+  function createAutomotiveStudioEnv() {
+    const envScene = new THREE.Scene();
+    envScene.background = new THREE.Color(0x050811);
+
+    const studioAmbient = new THREE.HemisphereLight(0x334155, 0x050811, 0.35);
+    envScene.add(studioAmbient);
+
+    const stripGeo = new THREE.BoxGeometry(1, 1, 1);
+
+    // 1. Overhead slender softbox ribbon (draws crisp highlight down hood, glass & roof)
+    const topStrip = new THREE.Mesh(
+      stripGeo,
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(4.5, 4.5, 4.5) })
+    );
+    topStrip.position.set(0, 12, 0);
+    topStrip.scale.set(2.4, 0.2, 18.0);
+    envScene.add(topStrip);
+
+    // 2. Front-right cool ice-blue accent strip (sculpts fenders & wheel rims)
+    const keyStrip = new THREE.Mesh(
+      stripGeo,
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(2.4, 2.9, 3.3) })
+    );
+    keyStrip.position.set(12, 5.5, 10);
+    keyStrip.lookAt(0, 0, 0);
+    keyStrip.scale.set(4.5, 1.4, 0.2);
+    envScene.add(keyStrip);
+
+    // 3. Rear-left warm golden rim strip (highlights rear haunches & spoiler silhouette)
+    const rimStrip = new THREE.Mesh(
+      stripGeo,
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(2.6, 2.1, 1.4) })
+    );
+    rimStrip.position.set(-12, 6.0, -10);
+    rimStrip.lookAt(0, 0, 0);
+    rimStrip.scale.set(5.0, 1.2, 0.2);
+    envScene.add(rimStrip);
+
+    return envScene;
+  }
+
   const pmremGenerator = new THREE.PMREMGenerator(renderer);
-  scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
-  scene.environmentIntensity = 0.08;
+  const studioEnvScene = createAutomotiveStudioEnv();
+  scene.environment = pmremGenerator.fromScene(studioEnvScene, 0.03).texture;
+  studioEnvScene.traverse((obj) => {
+    if (obj.isMesh) {
+      obj.geometry?.dispose();
+      obj.material?.dispose();
+    }
+  });
+  scene.environmentIntensity = 0.65;
 
   const composer = new EffectComposer(renderer);
   const rtSize = renderer.getDrawingBufferSize(new THREE.Vector2());
@@ -207,24 +256,36 @@ async function initApp() {
   orbitControls.enabled = false;
 
   // -------------------------------------------------------------------------
-  // 2. FETCH MANIFEST & 720-SAMPLE C2 PERIODIC TRACK SPLINE JSON
+  // 2. INITIALIZE REAL-WORLD MAP REGISTRY & SPLINE DATA ('coast' | 'city' | 'canyon')
   // -------------------------------------------------------------------------
-  const [manifestRes, splineRes] = await Promise.all([
-    fetch('/assets/data/desk_manifest.json'),
-    fetch('/assets/data/track_spline.json'),
-  ]);
-  const manifest = await manifestRes.json();
-  const splineData = await splineRes.json();
-  const totalLength = splineData.total_length_m || 3.8371;
-
-  // Sector lookup map
-  const sectorNames = {};
-  for (const sec of splineData.sectors || []) {
-    sectorNames[sec.id] = sec.name;
+  let currentMapId = 'coast';
+  let initialSavedKitId = 'coupe';
+  let initialSavedPaintHex = null;
+  try {
+    const savedMap = window.localStorage.getItem('the_race_3d_selected_map_v1');
+    if (savedMap) currentMapId = normalizeMapId(savedMap);
+    const savedKit = window.localStorage.getItem('the_race_3d_equipped_kit_v1');
+    if (savedKit) initialSavedKitId = normalizeCarId(savedKit);
+    const savedPaint = window.localStorage.getItem('the_race_3d_equipped_paint_v1');
+    if (savedPaint && savedPaint.startsWith('#')) initialSavedPaintHex = savedPaint;
+  } catch (_e) {
+    // ignore storage read error
   }
 
+  let splineData = getTrackSplineForMap(currentMapId);
+  const sectorNames = {};
+  function syncSectorNames(sData) {
+    for (const k of Object.keys(sectorNames)) {
+      delete sectorNames[k];
+    }
+    for (const sec of sData.sectors || []) {
+      sectorNames[sec.id] = sec.name;
+    }
+  }
+  syncSectorNames(splineData);
+
   // -------------------------------------------------------------------------
-  // 3. BUILD WARM NIGHT-TIME ATMOSPHERE, DESK MONUMENTS, COASTER TRACK, 1:87 KART & BEDROOM
+  // 3. BUILD OUTDOOR ATMOSPHERE, PIT-LANE GARAGE SHOWROOM & ACTIVE REAL-WORLD MAP
   // -------------------------------------------------------------------------
   const settings = {
     sunIntensity: 0.0,
@@ -234,29 +295,18 @@ async function initApp() {
     micGlowIntensity: 0.85,
     bloomStrength: 0.04,
     dofStrength: 0.0,
-    toneMappingExposure: 0.68 + 0.08 * 1.15,
+    toneMappingExposure: 0.76,
     showDustMotes: false,
     droneKartScale: false,
     panoKart100: true,
   };
-  scene.environmentIntensity = 0.08 + 0.55 * settings.sunIntensity;
+  scene.environmentIntensity = 0.38;
 
   const atmosphere = buildGoldenHourAtmosphere(scene);
-  const diorama = buildProceduralDeskDiorama(manifest);
-  scene.add(diorama.root);
-  if (diorama.nightGlowGroup) {
-    scene.add(diorama.nightGlowGroup);
-  }
-
-  const roomEnv = buildRoomEnvironment(scene, settings);
-  scene.add(roomEnv.roomRoot);
-
-  const coaster = buildCoasterTrack(splineData);
-  scene.add(coaster.trackGroup);
-  if (coaster.underTrackLedGroup) {
-    scene.add(coaster.underTrackLedGroup);
-  }
-  scene.add(coaster.debugGroup);
+  const pitGarage = buildPitLaneGarage(scene, new THREE.Vector3(0.0, 0.088, 0.22));
+  pitGarage.rootGroup.visible = false; // Shown strictly in GARAGE workshop mode
+  let activeWorldMap = buildRealWorldMap(currentMapId, splineData, scene);
+  activeWorldMap.rootGroup.visible = true; // Shown live on HOME Start-Grid & during RACE
 
   const microKart = buildMicroKart();
   microKart.kartRoot.scale.setScalar(0.56);
@@ -264,12 +314,9 @@ async function initApp() {
   if (microKart.driftSmokeMesh) {
     scene.add(microKart.driftSmokeMesh);
   }
-  if (microKart.setBodyKit) {
-    microKart.setBodyKit('coupe');
-  }
 
   // -------------------------------------------------------------------------
-  // 3A. BEACH BUGGY COMBAT RACING: 3x AI OPPONENT KARTS & MYSTERY BOXES
+  // 3A. 3x AI OPPONENT CARS, BOOST PADS & STRAIGHTAWAY LAUNCH RAMPS
   // -------------------------------------------------------------------------
   const powerupManager = createPowerupManager(splineData, scene);
   const rivalsController = createRivalRacersController(splineData, scene);
@@ -404,9 +451,8 @@ async function initApp() {
   showroomLightTarget.position.set(0.0, 0.0025, 0.0);
   showroomGroup.add(showroomLightTarget);
 
-  // 1. Direct Overhead Studio Directional Light + Real Contact Shadow Mapping
-  // Projects crisp shadow of car directly onto the showroom turntable floor
-  const showroomOverheadDirLight = new THREE.DirectionalLight(0xffffff, 4.5);
+  // 1. Direct Overhead Studio Directional Light + Crisp Contact Shadow Mapping
+  const showroomOverheadDirLight = new THREE.DirectionalLight(0xffffff, 0.32);
   showroomOverheadDirLight.position.set(0.0, 0.095, 0.002);
   showroomOverheadDirLight.target = showroomLightTarget;
   showroomOverheadDirLight.castShadow = true;
@@ -417,39 +463,32 @@ async function initApp() {
   showroomOverheadDirLight.shadow.camera.right = 0.024;
   showroomOverheadDirLight.shadow.camera.top = 0.024;
   showroomOverheadDirLight.shadow.camera.bottom = -0.024;
-  showroomOverheadDirLight.shadow.bias = -0.0001;
+  showroomOverheadDirLight.shadow.bias = -0.0005;
+  showroomOverheadDirLight.shadow.normalBias = 0.0008;
   showroomGroup.add(showroomOverheadDirLight);
 
-  const showroomOverheadSpot = new THREE.SpotLight(
-    0xffffff,
-    4.8,
-    0.16,
-    Math.PI * 0.38,
-    0.65,
-    0.0
-  );
-  showroomOverheadSpot.position.set(0.0, 0.048, 0.006);
-  showroomOverheadSpot.target = showroomLightTarget;
-  showroomOverheadSpot.castShadow = true;
-  showroomGroup.add(showroomOverheadSpot);
-
-  // 2. Front-Right Warm Key Light (sculpts body lines & custom 3D wheel spokes)
-  const showroomKeyLight = new THREE.DirectionalLight(0xfff7ed, 2.35);
+  // 2. Front-Right Warm Key Light (sculpts 3D hood bevels & side character lines)
+  const showroomKeyLight = new THREE.DirectionalLight(0xfff7ed, 0.52);
   showroomKeyLight.position.set(0.024, 0.036, 0.032);
   showroomKeyLight.target = showroomLightTarget;
   showroomGroup.add(showroomKeyLight);
 
-  // 3. Front-Left Cool Cyan Fill Light (illuminates left flank & tire sidewalls)
-  const showroomFillLight = new THREE.DirectionalLight(0xbae6fd, 1.45);
+  // 3. Front-Left Cool Sky Fill Light (shadow side stays deeply 3D)
+  const showroomFillLight = new THREE.DirectionalLight(0x93c5fd, 0.14);
   showroomFillLight.position.set(-0.026, 0.024, 0.026);
   showroomFillLight.target = showroomLightTarget;
   showroomGroup.add(showroomFillLight);
 
-  // 4. Rear-Top Golden Rim Backlight (accents rear spoiler & roof silhouette)
-  const showroomRimLight = new THREE.DirectionalLight(0xfde68a, 1.55);
+  // 4. Rear-Top Golden Rim Backlight (crisp edge silhouette along roofline & rear spoiler)
+  const showroomRimLight = new THREE.DirectionalLight(0xfde68a, 0.32);
   showroomRimLight.position.set(0.0, 0.032, -0.030);
   showroomRimLight.target = showroomLightTarget;
   showroomGroup.add(showroomRimLight);
+
+  // 5. Subtle Cyan Bounce Light from glowing turntable ring
+  const showroomUnderFill = new THREE.PointLight(0x38bdf8, 0.06, 0.055, 1.4);
+  showroomUnderFill.position.set(0.0, 0.0045, 0.018);
+  showroomGroup.add(showroomUnderFill);
 
   let currentAppScreen = 'SPLASH';
   let turntableAngle = 0.45;
@@ -561,15 +600,6 @@ async function initApp() {
 
   function sync1PRoomAndCurtainVisibility(mode) {
     const is1P = mode === 1 || mode === 2;
-    for (const node of highPolyRoomFurnitureNodes) {
-      node.visible = true;
-    }
-    if (roomEnv.roomContactAoGroup) {
-      roomEnv.roomContactAoGroup.visible = true;
-    }
-    if (roomEnv.edisonPointLight) {
-      roomEnv.edisonPointLight.visible = true;
-    }
     if (atmosphere.godRayCurtainGroup) {
       atmosphere.godRayCurtainGroup.visible = !is1P;
     }
@@ -699,8 +729,8 @@ async function initApp() {
       }
       const isCountdownCurrentlyActive =
         typeof f1CountdownState !== 'undefined' && f1CountdownState && f1CountdownState.active;
-      if (coaster.setF1StartLights && !isCountdownCurrentlyActive) {
-        coaster.setF1StartLights(5);
+      if (activeWorldMap && activeWorldMap.setF1StartLights && !isCountdownCurrentlyActive) {
+        activeWorldMap.setF1StartLights(5);
       }
 
       const savedFrustumCulled = new Map();
@@ -781,8 +811,8 @@ async function initApp() {
       if (microKart.sparkPoints) {
         microKart.sparkPoints.visible = prevSparkVis;
       }
-      if (coaster.setF1StartLights && !isCountdownCurrentlyActive) {
-        coaster.setF1StartLights(0);
+      if (activeWorldMap && activeWorldMap.setF1StartLights && !isCountdownCurrentlyActive) {
+        activeWorldMap.setF1StartLights(0);
       }
       sync1PRoomAndCurtainVisibility(activeCameraMode);
 
@@ -912,75 +942,6 @@ async function initApp() {
   }
 
   function checkAndLoadGlbModels() {
-    tryLoadGlbAsset('desk_props.glb', 'desk', (glbScene) => {
-      if (diorama.calibrateDeskPropsGlb) {
-        diorama.calibrateDeskPropsGlb(glbScene);
-      }
-      if (diorama.updateLightingMaterials) {
-        diorama.updateLightingMaterials(settings.sunIntensity ?? 0.0, settings.lampIntensity ?? 1.15);
-      }
-      diorama.root.visible = false;
-      disposeGroupGeometries(diorama.root);
-      glbContainerGroup.add(glbScene);
-    });
-    tryLoadGlbAsset('track_coaster.glb', 'track', (glbScene) => {
-      if (coaster.calibrateTrackCoasterGlb) {
-        coaster.calibrateTrackCoasterGlb(glbScene);
-      }
-      coaster.trackGroup.visible = false;
-      disposeGroupGeometries(coaster.trackGroup);
-      glbContainerGroup.add(glbScene);
-    });
-    tryLoadGlbAsset('kart_1to87.glb', 'kart', (glbScene) => {
-      microKart.attachGlbKart(glbScene);
-      syncKartScaleForCamera(activeCameraMode);
-    });
-    tryLoadGlbAsset('room_environment.glb', 'room', (glbScene) => {
-      if (roomEnv.calibrateRoomEnvironmentGlb) {
-        roomEnv.calibrateRoomEnvironmentGlb(glbScene);
-      }
-      if (roomEnv.updateRoomLighting) {
-        roomEnv.updateRoomLighting(settings.sunIntensity ?? 0.0, settings.lampIntensity ?? 1.15);
-      }
-      highPolyRoomFurnitureNodes.length = 0;
-      glbScene.traverse((child) => {
-        if (child.isMesh) {
-          child.frustumCulled = true;
-          if (child.geometry) {
-            child.geometry.computeBoundingSphere();
-          }
-        }
-        const n = (child.name || '').toLowerCase();
-        if (
-          n.includes('upholsteredbed') ||
-          n.includes('boucledeskchair') ||
-          n.includes('walnutdresser') ||
-          n.includes('bedroomdoor')
-        ) {
-          highPolyRoomFurnitureNodes.push(child);
-        }
-      });
-      roomEnv.proceduralRoomGroup.visible = false;
-      disposeGroupGeometries(roomEnv.proceduralRoomGroup);
-      glbContainerGroup.add(glbScene);
-      sync1PRoomAndCurtainVisibility(activeCameraMode);
-    });
-  }
-
-  const audioSynth = createWebAudioSynth();
-  if (audioSynth.preload) {
-    audioSynth.preload().finally(() => {
-      audioPreloadProgress = 1.0;
-      notifyWarmupProgress();
-    });
-  }
-
-  // Only load heavy 14.2MB external GLB scene replacements when explicitly requested (?glb=1 or ?screenshot=1).
-  // On mobile/interactive gameplay, the procedural desk, coaster, and bedroom are already built and ready,
-  // avoiding the 5-10s background GLB download + CPU vertex calibration freeze on the Home screen!
-  if (isScreenshotMode || urlParams.get('glb') === '1') {
-    checkAndLoadGlbModels();
-  } else {
     settledGlbStatus.desk = true;
     settledGlbStatus.track = true;
     settledGlbStatus.room = true;
@@ -992,58 +953,90 @@ async function initApp() {
     isCircuitReady = true;
   }
 
-  // Pre-compile standard scene shaders once at startup so neither Home screen nor Race start stutters
+  const audioSynth = createWebAudioSynth();
+  if (audioSynth.preload) {
+    audioSynth.preload().finally(() => {
+      audioPreloadProgress = 1.0;
+      notifyWarmupProgress();
+    });
+  }
+
+  checkAndLoadGlbModels();
+
+  // Lazy S64 FBX Loader (loads 13 FBX files only when user picks 's64' or during idle after boot)
+  let s64CarPromise = null;
+  function ensureS64Loaded() {
+    if (s64CarPromise) return s64CarPromise;
+    s64CarPromise = loadS64ModularCar()
+      .then((s64Car) => {
+        if (microKart.attachS64ModularCar) {
+          microKart.attachS64ModularCar(s64Car);
+        }
+        loadedGlbStatus.kart = true;
+        settledGlbStatus.kart = true;
+        glbDownloadProgress.kart = 1.0;
+        syncKartScaleForCamera(activeCameraMode);
+        updateGlbBadge();
+        return s64Car;
+      })
+      .catch((err) => {
+        console.warn('S64 FBX load fallback:', err);
+      });
+    return s64CarPromise;
+  }
+
+  if (microKart.setS64LazyLoader) {
+    microKart.setS64LazyLoader(ensureS64Loaded);
+  }
+
+  // Fast startup preload: ONLY load the player's equipped car + 3 rival cars cleanly before Menu opens!
+  await Promise.all([
+    preloadCoreCosmoCars(initialSavedKitId),
+    initialSavedKitId === 's64' ? ensureS64Loaded() : Promise.resolve(),
+  ]);
+
+  if (microKart.setBodyKit) {
+    microKart.setBodyKit(initialSavedKitId, { paintHex: initialSavedPaintHex });
+  }
+  await microKart.attachCosmoCar(initialSavedKitId, initialSavedPaintHex);
+  loadedGlbStatus.kart = true;
+  settledGlbStatus.kart = true;
+  glbDownloadProgress.kart = 1.0;
+  syncKartScaleForCamera(activeCameraMode);
+  updateGlbBadge();
+
+  if (rivalsController && rivalsController.attachCosmoRivalModels) {
+    await rivalsController.attachCosmoRivalModels();
+  }
+
+  // Pre-compile BOTH Showroom and Race shaders once during startup so neither Garage open nor Match start stutters!
   try {
+    if (powerupManager && powerupManager.rootGroup) powerupManager.rootGroup.visible = true;
+    if (rivalsController && rivalsController.rootGroup) rivalsController.rootGroup.visible = true;
+    showroomGroup.visible = true;
+    pitGarage.rootGroup.visible = true;
     renderer.compile(scene, camera);
+    showroomGroup.visible = false;
+    pitGarage.rootGroup.visible = false;
+    if (powerupManager && powerupManager.rootGroup) powerupManager.rootGroup.visible = false;
+    if (rivalsController && rivalsController.rootGroup) rivalsController.rootGroup.visible = false;
   } catch (_err) {
     // Ignore shader precompile warnings
   }
 
-  // Preload all 12 Cosmo Low-Poly 3D Cars in parallel so switching in Garage & starting races is instant
-  preloadAllCosmoCars()
-    .then(() => {
-      loadedGlbStatus.kart = true;
-      settledGlbStatus.kart = true;
-      glbDownloadProgress.kart = 1.0;
-      syncKartScaleForCamera(activeCameraMode);
-      updateGlbBadge();
-    })
-    .catch((e) => console.warn('CosmoCar preload notice:', e));
-
-  if (rivalsController && rivalsController.attachCosmoRivalModels) {
-    rivalsController.attachCosmoRivalModels();
-  }
-
-  // S64 Compact GT Modular FBX Car loader
-  loadS64ModularCar()
-    .then((s64Car) => {
-      if (microKart.attachS64ModularCar) {
-        microKart.attachS64ModularCar(s64Car);
-      }
-      loadedGlbStatus.kart = true;
-      settledGlbStatus.kart = true;
-      glbDownloadProgress.kart = 1.0;
-      syncKartScaleForCamera(activeCameraMode);
-      updateGlbBadge();
-      try {
-        renderer.compile(microKart.kartRoot, camera);
-        if (rivalsController && rivalsController.rootGroup) {
-          renderer.compile(rivalsController.rootGroup, camera);
-        }
-      } catch (_e) {
-        // Ignore
-      }
-    })
-    .catch((err) => {
-      console.warn('S64 FBX load fallback:', err);
-    });
+  // Stream remaining Garage car GLBs lazily in background after Menu settles
+  setTimeout(() => {
+    preloadAllCosmoCars().catch(() => {});
+  }, 1800);
 
   // Load the PLUS Modular Roads 3D Traffic Light Signal Gantry GLB at the Starting Line
+  let cachedTrafficLightGlb = null;
   gltfLoader.load(
     '/models/PLUS/gltf/traffic_light_3.glb',
     (gltf) => {
-      if (coaster.attachTrafficLightGlb) {
-        coaster.attachTrafficLightGlb(gltf.scene);
+      cachedTrafficLightGlb = gltf.scene;
+      if (activeWorldMap && activeWorldMap.attachTrafficLightGlb) {
+        activeWorldMap.attachTrafficLightGlb(cachedTrafficLightGlb);
       }
     },
     undefined,
@@ -1053,12 +1046,12 @@ async function initApp() {
   );
 
   // -------------------------------------------------------------------------
-  // 4. INITIALIZE RAPIER3D WORLD & 60FPS BANKED COASTER VEHICLE CONTROLLER
+  // 4. INITIALIZE 60FPS BANKED SPLINE VEHICLE CONTROLLER
   // -------------------------------------------------------------------------
   const physics = await createKartPhysicsController(
     splineData,
-    manifest,
-    coaster.roadGeo
+    null,
+    activeWorldMap.roadGeo
   );
 
   let camShakeTimer = 0.0;
@@ -1171,9 +1164,6 @@ async function initApp() {
     syncKartScaleForCamera(mode);
     if (microKart.setCockpitRoadOnly) {
       microKart.setCockpitRoadOnly(mode === 2);
-    }
-    if (diorama.setMonitorHighScoresVisible) {
-      diorama.setMonitorHighScoresVisible(mode === 8);
     }
     if (hudBrandLogo) {
       const userHidLogo = (chkHideLogoEl && chkHideLogoEl.checked) ||
@@ -1473,58 +1463,55 @@ async function initApp() {
     }
 
     if (activeCameraMode === 1) {
-      // Rock-Steady Arcade Chase Cam:
-      // Anchor vertical tracking to the road surface (_camRoadAnchor) so jump ramps lift the car
-      // gracefully inside the frame without double-lifting or pitching the camera into the track!
-      const hopH = Math.max(0.0, st.hopHeight || 0.0);
-      _camRoadAnchor.copy(st.position).addScaledVector(st.normal, -hopH);
-
-      const boostPullback = st.boostActive > 0 ? -0.0014 : 0.0;
+      // Rock-Steady Zero-Clip Arcade Chase Cam:
+      // Tracks st.position (which already includes hopHeight) directly so when the car
+      // climbs a ramp or jumps, the camera rises 1:1 with the car and NEVER clips into the roof/trunk!
+      const boostPullback = st.boostActive > 0 ? -0.0010 : 0.0;
       _camDesiredPos
-        .copy(_camRoadAnchor)
-        .addScaledVector(camForward, -0.0114 + boostPullback)
-        .addScaledVector(st.normal, 0.0066 + hopH * 0.30);
+        .copy(st.position)
+        .addScaledVector(camForward, -0.0124 + boostPullback)
+        .addScaledVector(st.normal, 0.0068);
       if (shakeRight !== 0.0 || shakeUp !== 0.0) {
         _camDesiredPos
-          .addScaledVector(st.right, shakeRight * 0.5)
-          .addScaledVector(st.normal, shakeUp * 0.35);
+          .addScaledVector(st.right, shakeRight * 0.35)
+          .addScaledVector(st.normal, shakeUp * 0.25);
       }
 
       // Sample 16.5mm ahead on the track spline for smooth corner anticipation
+      const hopH = Math.max(0.0, st.hopHeight || 0.0);
       const aheadSample = physics.sampleTrackAtArcLength
         ? physics.sampleTrackAtArcLength(st.s + 0.0165)
         : null;
       if (aheadSample && aheadSample.position) {
-        _camSplineAhead.copy(aheadSample.position);
+        _camSplineAhead.copy(aheadSample.position).addScaledVector(st.normal, hopH);
         _camDesiredLook
-          .copy(_camRoadAnchor)
+          .copy(st.position)
           .addScaledVector(camForward, 0.0165)
-          .lerp(_camSplineAhead, 0.42)
-          .addScaledVector(st.normal, 0.0022 + hopH * 0.50);
+          .lerp(_camSplineAhead, 0.35)
+          .addScaledVector(st.normal, 0.0024);
       } else {
         _camDesiredLook
-          .copy(_camRoadAnchor)
+          .copy(st.position)
           .addScaledVector(camForward, 0.0165)
-          .addScaledVector(st.normal, 0.0022 + hopH * 0.50);
+          .addScaledVector(st.normal, 0.0024);
       }
 
-      // Dynamic FOV speed punch during acceleration & Turbo Boost (58° base -> 68° boost)
-      const targetArcadeFov = st.boostActive > 0 ? 68.0 : 58.0 + Math.min(8.0, Math.abs(st.speed) * 28.0);
-      if (Math.abs(camera.fov - targetArcadeFov) > 0.15) {
-        camera.fov = THREE.MathUtils.lerp(camera.fov, targetArcadeFov, 1.0 - Math.exp(-dt * 10.0));
+      // Smooth, subtle FOV speed sense (56° base -> 61.5° Nitro boost) without camera pumping
+      const targetArcadeFov = st.boostActive > 0 ? 61.5 : 56.0 + Math.min(4.0, Math.abs(st.speed) * 24.0);
+      if (Math.abs(camera.fov - targetArcadeFov) > 0.1) {
+        camera.fov = THREE.MathUtils.lerp(camera.fov, targetArcadeFov, 1.0 - Math.exp(-dt * 8.0));
         camera.updateProjectionMatrix();
       }
 
-      const smoothUp = isScreenshotMode ? 1.0 : 1.0 - Math.exp(-dt * 14.0);
+      const smoothUp = isScreenshotMode ? 1.0 : 1.0 - Math.exp(-dt * 12.0);
       _camBlendedUp
-        .set(0, 0.72, 0)
-        .addScaledVector(st.normal, 0.28)
-        .addScaledVector(st.right, -(st.steerSmooth || 0) * 0.04)
+        .set(0, 0.88, 0)
+        .addScaledVector(st.normal, 0.12)
         .normalize();
       camCurrentUp.lerp(_camBlendedUp, smoothUp).normalize();
 
-      const smoothPos = isScreenshotMode ? 1.0 : 1.0 - Math.exp(-dt * 18.0);
-      const smoothLook = isScreenshotMode ? 1.0 : 1.0 - Math.exp(-dt * 22.0);
+      const smoothPos = isScreenshotMode ? 1.0 : 1.0 - Math.exp(-dt * 20.0);
+      const smoothLook = isScreenshotMode ? 1.0 : 1.0 - Math.exp(-dt * 24.0);
       camCurrentPos.lerp(_camDesiredPos, smoothPos);
       camCurrentLookAt.lerp(_camDesiredLook, smoothLook);
 
@@ -1706,16 +1693,10 @@ async function initApp() {
       const v = parseFloat(e.target.value);
       settings.sunIntensity = v;
       settings.sunbeamIntensity = v;
-      scene.environmentIntensity = 0.08 + 0.55 * v;
+      scene.environmentIntensity = 0.46 + 0.45 * v;
       settings.toneMappingExposure = 0.68 + 0.08 * settings.lampIntensity + 0.14 * v;
       renderer.toneMappingExposure = settings.toneMappingExposure;
       if (valSun) valSun.textContent = `${v.toFixed(2)}x`;
-      if (diorama.updateLightingMaterials) {
-        diorama.updateLightingMaterials(v, settings.lampIntensity);
-      }
-      if (roomEnv.updateRoomLighting) {
-        roomEnv.updateRoomLighting(v, settings.lampIntensity);
-      }
     });
   }
 
@@ -1728,12 +1709,6 @@ async function initApp() {
       settings.toneMappingExposure = 0.68 + 0.08 * v + 0.14 * settings.sunIntensity;
       renderer.toneMappingExposure = settings.toneMappingExposure;
       if (valLamp) valLamp.textContent = `${v.toFixed(2)}x`;
-      if (diorama.updateLightingMaterials) {
-        diorama.updateLightingMaterials(settings.sunIntensity, v);
-      }
-      if (roomEnv.updateRoomLighting) {
-        roomEnv.updateRoomLighting(settings.sunIntensity, v);
-      }
     });
   }
 
@@ -1744,9 +1719,6 @@ async function initApp() {
       const v = parseFloat(e.target.value);
       settings.trackGlowIntensity = v;
       if (valTrackGlow) valTrackGlow.textContent = `${v.toFixed(2)}x`;
-      if (coaster.updateUnderTrackLed) {
-        coaster.updateUnderTrackLed(clock.getElapsedTime(), v);
-      }
     });
   }
 
@@ -1756,13 +1728,6 @@ async function initApp() {
     sliderMic.addEventListener('input', (e) => {
       settings.micGlowIntensity = parseFloat(e.target.value);
       if (valMic) valMic.textContent = `${settings.micGlowIntensity.toFixed(2)}x`;
-      if (diorama.glbMicLedMaterials) {
-        for (const m of diorama.glbMicLedMaterials) {
-          m.emissiveIntensity = 1.15 * settings.micGlowIntensity;
-        }
-      } else if (diorama.micBlueLedRing) {
-        diorama.micBlueLedRing.material.emissiveIntensity = 1.15 * settings.micGlowIntensity;
-      }
     });
   }
 
@@ -1804,13 +1769,6 @@ async function initApp() {
     sliderSpeed.addEventListener('input', (e) => {
       physics.state.topSpeedMultiplier = parseFloat(e.target.value);
       if (valSpeed) valSpeed.textContent = `${physics.state.topSpeedMultiplier.toFixed(2)}x`;
-    });
-  }
-
-  const chkDebug = document.getElementById('chk-spline-debug');
-  if (chkDebug) {
-    chkDebug.addEventListener('change', (e) => {
-      coaster.debugGroup.visible = e.target.checked;
     });
   }
 
@@ -1988,12 +1946,13 @@ async function initApp() {
   let mapMinimapX = (x, _y, _z) => x;
   let mapMinimapY = (_x, _y, z) => z;
 
-  {
+  function rebuildMinimapForSpline(activeSplineData) {
     const bgCtx = radarBgCanvas.getContext('2d');
     const w = radarBgCanvas.width;
     const h = radarBgCanvas.height;
+    bgCtx.clearRect(0, 0, w, h);
 
-    const pts = splineData.samples;
+    const pts = activeSplineData.samples;
     const nPts = pts.length;
     let minPX = Infinity;
     let maxPX = -Infinity;
@@ -2058,44 +2017,6 @@ async function initApp() {
     bgCtx.stroke();
     bgCtx.restore();
 
-    const elevTiers = [
-      {min: -1.0, max: 0.042, shade: '#cdd8e8', side: '#52637a'},
-      {min: 0.036, max: 0.068, shade: '#d8e2f0', side: '#5c6e87'},
-      {min: 0.062, max: 0.096, shade: '#e3ebf6', side: '#667a94'},
-      {min: 0.090, max: 0.128, shade: '#edf3fa', side: '#7186a1'},
-      {min: 0.122, max: 0.160, shade: '#f6f9fd', side: '#7d92ae'},
-      {min: 0.154, max: 1.0, shade: '#ffffff', side: '#8aa0bd'},
-    ];
-
-    const strokeElevationTier =
-        (minE, maxE, strokeStyle, lineWidth, yOffsetPx = 0.0) => {
-          bgCtx.strokeStyle = strokeStyle;
-          bgCtx.lineWidth = lineWidth;
-          bgCtx.beginPath();
-          let active = false;
-          for (let step = 0; step <= nPts + 2; step++) {
-            const i = step % nPts;
-            const prev = p2d[(i - 1 + nPts) % nPts];
-            const curr = p2d[i];
-            const next = p2d[(i + 1) % nPts];
-            if (curr.elev >= minE && curr.elev <= maxE) {
-              const startMidX = (prev.x + curr.x) * 0.5;
-              const startMidY = (prev.y + curr.y) * 0.5 + yOffsetPx;
-              const endMidX = (curr.x + next.x) * 0.5;
-              const endMidY = (curr.y + next.y) * 0.5 + yOffsetPx;
-              if (!active) {
-                bgCtx.moveTo(startMidX, startMidY);
-                active = true;
-              }
-              bgCtx.quadraticCurveTo(
-                  curr.x, curr.y + yOffsetPx, endMidX, endMidY);
-            } else {
-              active = false;
-            }
-          }
-          bgCtx.stroke();
-        };
-
     bgCtx.strokeStyle = 'rgba(0, 0, 0, 0.82)';
     bgCtx.lineWidth = 19.0;
     traceSmoothClosedPath(bgCtx, p2d, 2.2);
@@ -2110,14 +2031,8 @@ async function initApp() {
     bgCtx.lineWidth = 12.0;
     traceSmoothClosedPath(bgCtx, p2d, 0.0);
     bgCtx.stroke();
-
-    for (let t = 1; t < elevTiers.length; t++) {
-      const tier = elevTiers[t];
-      strokeElevationTier(tier.min, tier.max, 'rgba(0, 0, 0, 0.86)', 19.4, 2.2);
-      strokeElevationTier(tier.min, tier.max, tier.side, 12.2, 4.0);
-      strokeElevationTier(tier.min, tier.max, tier.shade, 12.0, 0.0);
-    }
   }
+  rebuildMinimapForSpline(splineData);
 
   function drawMinimapRadar(st) {
     const radarCanvas = document.getElementById('minimap-canvas');
@@ -2299,8 +2214,8 @@ async function initApp() {
     f1CountdownState.elapsed = 0.0;
     f1CountdownState.lastStepIndex = -1;
     physics.state.countdownLocked = false;
-    if (coaster.setF1StartLights) {
-      coaster.setF1StartLights(0);
+    if (activeWorldMap && activeWorldMap.setF1StartLights) {
+      activeWorldMap.setF1StartLights(0);
     }
     if (elF1Countdown) {
       elF1Countdown.classList.add('hidden');
@@ -2321,8 +2236,8 @@ async function initApp() {
     f1CountdownState.elapsed = 0.0;
     f1CountdownState.lastStepIndex = 1;
 
-    if (coaster.setF1StartLights) {
-      coaster.setF1StartLights(1); // Rightmost light (#1) turns RED immediately
+    if (activeWorldMap && activeWorldMap.setF1StartLights) {
+      activeWorldMap.setF1StartLights(1);
     }
     if (audioSynth.playF1CountdownBeep) {
       audioSynth.playF1CountdownBeep(false);
@@ -2341,34 +2256,31 @@ async function initApp() {
     if (stepIdx <= 5) {
       if (stepIdx !== f1CountdownState.lastStepIndex) {
         f1CountdownState.lastStepIndex = stepIdx;
-        if (coaster.setF1StartLights) {
-          coaster.setF1StartLights(stepIdx); // Lights 1..stepIdx from right to left turn RED
+        if (activeWorldMap && activeWorldMap.setF1StartLights) {
+          activeWorldMap.setF1StartLights(stepIdx);
         }
         if (audioSynth.playF1CountdownBeep) {
-          audioSynth.playF1CountdownBeep(
-              false);  // Same tone for each red lamp (2..5)
+          audioSynth.playF1CountdownBeep(false);
         }
         if (elF1Countdown) {
-          elF1Countdown.textContent = String(6 - stepIdx); // 5, 4, 3, 2, 1
+          elF1Countdown.textContent = String(6 - stepIdx);
           elF1Countdown.classList.remove('hidden');
         }
       }
     } else {
-      // All 5 lights have turned red from right to left -> LIGHTS OUT AND AWAY WE GO!
       f1CountdownState.active = false;
       f1CountdownState.lastStepIndex = -1;
-      if (coaster.setF1StartLights) {
-        coaster.setF1StartLights(0); // All 5 lights turn OFF simultaneously
+      if (activeWorldMap && activeWorldMap.setF1StartLights) {
+        activeWorldMap.setF1StartLights(0);
       }
       if (audioSynth.playF1CountdownBeep) {
-        audioSynth.playF1CountdownBeep(
-            true);  // High beep once all lights are off!
+        audioSynth.playF1CountdownBeep(true);
       }
       if (elF1Countdown) {
         elF1Countdown.classList.add('hidden');
       }
       physics.state.countdownLocked = false;
-      physics.state.raceClockActive = true; // Lap timer immediately starts ticking!
+      physics.state.raceClockActive = true;
       if (physics.notifyLightsOut) {
         physics.notifyLightsOut();
       }
@@ -2631,6 +2543,25 @@ async function initApp() {
     });
   }
 
+  function snapChaseCameraToStartGrid() {
+    const st = physics.state;
+    camShakeTimer = 0.0;
+    camShakeIntensity = 0.0;
+    camForward.copy(st.tangent).normalize();
+    camCurrentUp.set(0, 1, 0);
+    camCurrentPos
+      .copy(st.position)
+      .addScaledVector(st.tangent, -0.0124)
+      .addScaledVector(st.normal, 0.0068);
+    camCurrentLookAt
+      .copy(st.position)
+      .addScaledVector(st.tangent, 0.0165)
+      .addScaledVector(st.normal, 0.0024);
+    camera.up.copy(camCurrentUp);
+    camera.position.copy(camCurrentPos);
+    camera.lookAt(camCurrentLookAt);
+  }
+
   function dismissWelcomeAndStartRace() {
     if (audioSynth.setEnabled && !audioSynth.isEnabled?.()) {
       const on = audioSynth.setEnabled(true);
@@ -2644,18 +2575,8 @@ async function initApp() {
     if (powerupManager) powerupManager.reset();
     if (rivalsController) rivalsController.reset();
     startF1StartCountdown();
-    // Snap camera immediately behind the car on the starting grid so there is zero swoop lag
-    const st = physics.state;
-    camCurrentPos
-      .copy(st.position)
-      .addScaledVector(st.tangent, -0.0095)
-      .addScaledVector(st.normal, 0.0044);
-    camCurrentLookAt
-      .copy(st.position)
-      .addScaledVector(st.tangent, 0.0135)
-      .addScaledVector(st.normal, 0.0022);
-    camera.position.copy(camCurrentPos);
-    camera.lookAt(camCurrentLookAt);
+    // Hard-snap chase camera & damping directly onto the start grid so it never interpolates across empty space
+    snapChaseCameraToStartGrid();
   }
 
   if (btnWelcomeStart) {
@@ -2971,6 +2892,88 @@ async function initApp() {
   const _showroomCamTarget = new THREE.Vector3();
   const _showroomLookTarget = new THREE.Vector3();
   let showroomPreviewBounce = 0.0;
+  let lastStageMode = '';
+
+  function snapHomeStartGridCamera() {
+    const stHome = physics.state;
+    _showroomCamTarget
+      .copy(stHome.position)
+      .addScaledVector(stHome.tangent, -0.0115)
+      .addScaledVector(stHome.right, -0.0074)
+      .addScaledVector(stHome.normal, 0.0046);
+    _showroomLookTarget
+      .copy(stHome.position)
+      .addScaledVector(stHome.tangent, 0.0095)
+      .addScaledVector(stHome.right, 0.0012)
+      .addScaledVector(stHome.normal, 0.0016);
+    camCurrentPos.copy(_showroomCamTarget);
+    camCurrentLookAt.copy(_showroomLookTarget);
+    camera.up.set(0, 1, 0);
+    camera.position.copy(camCurrentPos);
+    camera.lookAt(camCurrentLookAt);
+  }
+
+  function switchActiveWorldMap(nextRawMapId) {
+    const nextMapId = normalizeMapId(nextRawMapId);
+    if (nextMapId === currentMapId && activeWorldMap) {
+      // Even if same map, ensure clean physics/camera hard-snap when requested
+      physics.clearTouchKeys();
+      physics.resetToStart();
+      if (rivalsController) rivalsController.reset();
+      if (powerupManager) powerupManager.reset();
+      if (currentAppScreen === 'MENU' || currentAppScreen === 'SPLASH') {
+        snapHomeStartGridCamera();
+      } else {
+        snapChaseCameraToStartGrid();
+      }
+      return;
+    }
+
+    currentMapId = nextMapId;
+    try {
+      window.localStorage.setItem('the_race_3d_selected_map_v1', currentMapId);
+    } catch (_e) {
+      // ignore storage write error
+    }
+
+    // 1. Dispose outgoing outdoor map geometries, materials & InstancedMesh buffers
+    if (activeWorldMap && activeWorldMap.dispose) {
+      activeWorldMap.dispose();
+    }
+
+    // 2. Build new map spline & 3D outdoor world
+    splineData = getTrackSplineForMap(currentMapId);
+    syncSectorNames(splineData);
+    activeWorldMap = buildRealWorldMap(currentMapId, splineData, scene);
+    if (cachedTrafficLightGlb && activeWorldMap.attachTrafficLightGlb) {
+      activeWorldMap.attachTrafficLightGlb(cachedTrafficLightGlb);
+    }
+
+    const isGarage = currentAppScreen === 'GARAGE';
+    activeWorldMap.rootGroup.visible = !isGarage;
+
+    // 3. Re-bind physics, AI rivals, boost pads/ramps & minimap radar
+    if (physics.setSplineData) {
+      physics.setSplineData(splineData);
+    }
+    if (rivalsController && rivalsController.setSplineData) {
+      rivalsController.setSplineData(splineData);
+    }
+    if (powerupManager && powerupManager.rebuildForSpline) {
+      powerupManager.rebuildForSpline(splineData);
+    }
+    rebuildMinimapForSpline(splineData);
+
+    // 4. Hard-snap camera directly onto the new start grid (Home showcase or Race grid)
+    if (currentAppScreen === 'MENU' || currentAppScreen === 'SPLASH') {
+      snapHomeStartGridCamera();
+    } else if (currentAppScreen === 'RACE') {
+      snapChaseCameraToStartGrid();
+    }
+    if (atmosphere.applyMapAtmospherePreset) {
+      atmosphere.applyMapAtmospherePreset(currentMapId, isGarage, scene, renderer);
+    }
+  }
 
   // Expose clean engine API for React multi-screen UI ("The Race: Car Driving 3D")
   window.__theRaceEngine = {
@@ -2979,6 +2982,8 @@ async function initApp() {
       currentAppScreen = screen;
       if (screen === 'RACE' && prev !== 'RACE') {
         showroomGroup.visible = false;
+        pitGarage.rootGroup.visible = false;
+        if (activeWorldMap) activeWorldMap.rootGroup.visible = true;
         syncKartScaleForCamera(activeCameraMode);
         dismissWelcomeAndStartRace();
       } else if (screen !== 'RACE') {
@@ -2992,17 +2997,41 @@ async function initApp() {
         physics.state.boostActive = 0;
         physics.state.isDrifting = false;
         physics.state.curbRumble = 0;
-        if (screen === 'MENU' || screen === 'GARAGE' || screen === 'SPLASH') {
+        if (screen === 'MENU' || screen === 'SPLASH') {
+          if (prev === 'RACE' || prev === 'GAMEOVER') {
+            physics.resetToStart();
+          }
+          showroomGroup.visible = false;
+          pitGarage.rootGroup.visible = false;
+          if (activeWorldMap) activeWorldMap.rootGroup.visible = true;
+          if (atmosphere.applyMapAtmospherePreset) {
+            atmosphere.applyMapAtmospherePreset(currentMapId, false, scene, renderer);
+          }
+          snapHomeStartGridCamera();
+        } else if (screen === 'GARAGE') {
           showroomGroup.visible = true;
+          pitGarage.rootGroup.visible = true;
+          if (activeWorldMap) activeWorldMap.rootGroup.visible = false;
+          if (atmosphere.applyMapAtmospherePreset) {
+            atmosphere.applyMapAtmospherePreset(currentMapId, true, scene, renderer);
+          }
         }
       }
     },
     getScreen() {
       return currentAppScreen;
     },
+    setMap(mapId) {
+      switchActiveWorldMap(mapId);
+    },
+    getMap() {
+      return currentMapId;
+    },
     startRace() {
       currentAppScreen = 'RACE';
       showroomGroup.visible = false;
+      pitGarage.rootGroup.visible = false;
+      if (activeWorldMap) activeWorldMap.rootGroup.visible = true;
       setCameraMode(1);
       syncKartScaleForCamera(1);
       dismissWelcomeAndStartRace();
@@ -3043,20 +3072,6 @@ async function initApp() {
         const fired = physics.triggerNitroBoost();
         if (fired && audioSynth.playNitroBoost) {
           audioSynth.playNitroBoost();
-        }
-        return fired;
-      }
-      return false;
-    },
-    triggerPowerup() {
-      if (powerupManager && rivalsController) {
-        const fired = powerupManager.triggerPlayerPowerup(
-          physics.state,
-          rivalsController.rivals,
-          audioSynth
-        );
-        if (fired) {
-          lastTelemetryEmitMs = 0;
         }
         return fired;
       }
@@ -3126,7 +3141,6 @@ async function initApp() {
       };
     },
     completeRaceDemo() {
-      // Completes 3 laps immediately for testing or quick finish
       if (audioSynth.stopEngine) {
         audioSynth.stopEngine();
       }
@@ -3165,7 +3179,6 @@ async function initApp() {
 
   let lastTelemetryEmitMs = 0;
   let lastEmittedCountdownStep = -1;
-  let lastEmittedPowerup = null;
   let lastEmittedLap = -1;
 
   function animate() {
@@ -3174,14 +3187,17 @@ async function initApp() {
       (isScreenshotMode ? screenshotFrameCounter / 60 : clock.getElapsedTime()) +
       requestedTimeOffset;
 
-    const isShowroomActive =
+    const isGarageMode = !isScreenshotMode && currentAppScreen === 'GARAGE';
+    const isHomeOutdoorMode =
       !isScreenshotMode &&
-      (currentAppScreen === 'SPLASH' ||
-        currentAppScreen === 'MENU' ||
-        currentAppScreen === 'GARAGE');
+      (currentAppScreen === 'SPLASH' || currentAppScreen === 'MENU');
 
-    if (isShowroomActive) {
+    if (isGarageMode) {
+      // GARAGE BACKGROUND: Indoor Automotive Pit-Lane Workshop Bay & Spinning Turntable
+      scene.environmentIntensity = 0.36;
       showroomGroup.visible = true;
+      pitGarage.rootGroup.visible = true;
+      if (activeWorldMap) activeWorldMap.rootGroup.visible = false;
       if (powerupManager && powerupManager.rootGroup) powerupManager.rootGroup.visible = false;
       if (rivalsController && rivalsController.rootGroup) rivalsController.rootGroup.visible = false;
 
@@ -3198,44 +3214,48 @@ async function initApp() {
       }
       const bounceOffset = Math.sin(showroomPreviewBounce * Math.PI) * 0.0012;
 
-      // Place car on the circular glowing turntable slowly rotating 360 degrees in the center of the screen
       microKart.setCockpitRoadOnly(false);
-      microKart.kartRoot.scale.setScalar(currentAppScreen === 'GARAGE' ? 0.96 : 0.88);
+      microKart.kartRoot.scale.setScalar(0.94);
       microKart.kartRoot.position.set(0.0, 0.0884 + bounceOffset, 0.22);
       microKart.kartRoot.rotation.set(0, turntableAngle + Math.PI * 0.22, 0);
       microKart.chassisGroup.rotation.set(0, 0, 0);
       microKart.chassisGroup.position.y = Math.sin(elapsedTime * 2.5) * 0.00012;
       microKart.updateWheels(dt, 0.032, Math.sin(elapsedTime * 1.1) * 0.22);
-      if (microKart.sparkPoints) {
-        microKart.sparkPoints.visible = false;
-      }
-      if (microKart.driftSmokeMesh) {
-        microKart.driftSmokeMesh.visible = false;
-      }
+      if (microKart.sparkPoints) microKart.sparkPoints.visible = false;
+      if (microKart.driftSmokeMesh) microKart.driftSmokeMesh.visible = false;
 
-      // Frame the rotating car & turntable cleanly in the upper-center of the viewport above the bottom dock
       orbitControls.enabled = false;
-      if (Math.abs(camera.fov - 44.0) > 0.2) {
-        camera.fov = 44.0;
+      const isPortraitScreen = camera.aspect < 0.95;
+      const targetGarageFov = isPortraitScreen ? 48.0 : 44.0;
+      if (Math.abs(camera.fov - targetGarageFov) > 0.2) {
+        camera.fov = targetGarageFov;
         camera.updateProjectionMatrix();
       }
-      if (currentAppScreen === 'GARAGE') {
-        _showroomCamTarget.set(0.0, 0.0972, 0.244);
-        _showroomLookTarget.set(0.0, 0.0894, 0.220);
+      if (isPortraitScreen) {
+        const portraitPull = THREE.MathUtils.clamp((0.95 - camera.aspect) / 0.55, 0.0, 1.0);
+        _showroomCamTarget.set(0.0, 0.0975, 0.260 + portraitPull * 0.024);
+        _showroomLookTarget.set(0.0, 0.0885, 0.220);
       } else {
-        _showroomCamTarget.set(0.0065, 0.0985, 0.250);
-        _showroomLookTarget.set(0.0032, 0.0912, 0.220);
+        _showroomCamTarget.set(0.0, 0.0975, 0.250);
+        _showroomLookTarget.set(0.0, 0.0892, 0.220);
       }
-      const camLerp = 1.0 - Math.exp(-dt * 8.0);
-      camCurrentPos.lerp(_showroomCamTarget, camLerp);
-      camCurrentLookAt.lerp(_showroomLookTarget, camLerp);
+
+      if (lastStageMode !== 'GARAGE') {
+        camCurrentPos.copy(_showroomCamTarget);
+        camCurrentLookAt.copy(_showroomLookTarget);
+        lastStageMode = 'GARAGE';
+      } else {
+        const camLerp = 1.0 - Math.exp(-dt * 8.0);
+        camCurrentPos.lerp(_showroomCamTarget, camLerp);
+        camCurrentLookAt.lerp(_showroomLookTarget, camLerp);
+      }
       camera.up.set(0, 1, 0);
       camera.position.copy(camCurrentPos);
       camera.lookAt(camCurrentLookAt);
 
-      atmosphere.updateAtmosphere(elapsedTime, settings, renderer, bloomPass, scene, diorama);
-      if (coaster.updateUnderTrackLed) {
-        coaster.updateUnderTrackLed(elapsedTime, settings.trackGlowIntensity ?? 1.00);
+      pitGarage.update(elapsedTime);
+      if (atmosphere.applyMapAtmospherePreset) {
+        atmosphere.applyMapAtmospherePreset(currentMapId, true, scene, renderer);
       }
 
       const activeShowroomDof = (settings.dofStrength ?? 0.0) > 0.01;
@@ -3252,28 +3272,103 @@ async function initApp() {
         bokehPass.uniforms['aperture'].value = 0.0035 * (settings.dofStrength ?? 0.0);
         bokehPass.uniforms['maxblur'].value = 0.0028;
       }
-    } else {
+    } else if (isHomeOutdoorMode) {
+      // HOME SCREEN BACKGROUND: Live Outdoor Real-World Circuit Start Grid of Selected Map
+      scene.environmentIntensity = 0.38;
       showroomGroup.visible = false;
+      pitGarage.rootGroup.visible = false;
+      if (activeWorldMap) {
+        activeWorldMap.rootGroup.visible = true;
+        activeWorldMap.update(elapsedTime);
+      }
+      if (powerupManager && powerupManager.rootGroup) powerupManager.rootGroup.visible = true;
+      if (rivalsController && rivalsController.rootGroup) rivalsController.rootGroup.visible = false;
+
+      if (showroomPreviewBounce > 0) {
+        showroomPreviewBounce = Math.max(0.0, showroomPreviewBounce - dt * 4.5);
+      }
+      const bounceOffset = Math.sin(showroomPreviewBounce * Math.PI) * 0.0008;
+
+      const stHome = physics.state;
+      microKart.setCockpitRoadOnly(false);
+      microKart.kartRoot.scale.setScalar(0.56);
+      microKart.kartRoot.position.copy(stHome.position).addScaledVector(stHome.normal, bounceOffset);
+      microKart.kartRoot.quaternion.copy(stHome.quaternion);
+      microKart.chassisGroup.rotation.set(0, 0, 0);
+      microKart.chassisGroup.position.y = Math.sin(elapsedTime * 2.2) * 0.00005;
+      microKart.updateWheels(dt, 0.0, 0.0);
+      if (microKart.sparkPoints) microKart.sparkPoints.visible = false;
+      if (microKart.driftSmokeMesh) microKart.driftSmokeMesh.visible = false;
+
+      orbitControls.enabled = false;
+      const isPortraitScreen = camera.aspect < 0.95;
+      const targetHomeFov = isPortraitScreen ? 48.0 : 44.0;
+      if (Math.abs(camera.fov - targetHomeFov) > 0.2) {
+        camera.fov = targetHomeFov;
+        camera.updateProjectionMatrix();
+      }
+
+      const sway = Math.sin(elapsedTime * 0.35) * 0.0018;
+      const lift = Math.cos(elapsedTime * 0.28) * 0.0004;
+      const distBack = isPortraitScreen ? -0.0135 : -0.0115;
+      const sidePull = isPortraitScreen ? -0.0085 : -0.0074;
+      _showroomCamTarget
+        .copy(stHome.position)
+        .addScaledVector(stHome.tangent, distBack)
+        .addScaledVector(stHome.right, sidePull + sway)
+        .addScaledVector(stHome.normal, 0.0046 + lift);
+      _showroomLookTarget
+        .copy(stHome.position)
+        .addScaledVector(stHome.tangent, 0.0095)
+        .addScaledVector(stHome.right, 0.0012)
+        .addScaledVector(stHome.normal, isPortraitScreen ? 0.0008 : 0.0016);
+
+      if (lastStageMode !== 'HOME') {
+        camCurrentPos.copy(_showroomCamTarget);
+        camCurrentLookAt.copy(_showroomLookTarget);
+        lastStageMode = 'HOME';
+      } else {
+        const camLerp = 1.0 - Math.exp(-dt * 6.0);
+        camCurrentPos.lerp(_showroomCamTarget, camLerp);
+        camCurrentLookAt.lerp(_showroomLookTarget, camLerp);
+      }
+      camera.up.set(0, 1, 0);
+      camera.position.copy(camCurrentPos);
+      camera.lookAt(camCurrentLookAt);
+
+      if (atmosphere.applyMapAtmospherePreset) {
+        atmosphere.applyMapAtmospherePreset(currentMapId, false, scene, renderer);
+      }
+      bokehPass.enabled = false;
+    } else {
+      lastStageMode = 'RACE';
+      scene.environmentIntensity = 0.38;
+      showroomGroup.visible = false;
+      pitGarage.rootGroup.visible = false;
+      if (activeWorldMap) {
+        activeWorldMap.rootGroup.visible = true;
+        activeWorldMap.update(elapsedTime);
+      }
       if (powerupManager && powerupManager.rootGroup) powerupManager.rootGroup.visible = true;
       if (rivalsController && rivalsController.rootGroup) rivalsController.rootGroup.visible = true;
       if (microKart.sparkPoints) {
         microKart.sparkPoints.visible = true;
       }
       if (microKart.driftSmokeMesh) {
-        microKart.driftSmokeMesh.visible = true;
+        microKart.driftSmokeMesh.visible = false;
       }
 
       // 0. Step Formula 1 5-Light Start Countdown if active
       stepF1StartCountdown(isScreenshotMode ? 0.0 : dt);
 
-      // 1. Step 60FPS Banked Coaster Spline Physics
+      // 1. Step 60FPS Banked Spline Physics
       const st = physics.stepPhysics(dt);
 
-      // 1B. Step 3 AI rivals and Mystery Box Combat System
+      // 1B. Step 3 AI rivals and Track Boost Pads / Ramps
       const currentRank = rivalsController.update(dt, st, powerupManager, audioSynth);
       powerupManager.update(dt, st, rivalsController.rivals, audioSynth, currentRank);
 
-      // Re-sync 3D world pose & quaternion after rival collisions, jump ramps, and weapon spinouts
+      // Re-sync 3D world pose & quaternion after rival collisions and jump ramps
       if (physics.syncPoseFromSpline) {
         physics.syncPoseFromSpline();
       }
@@ -3292,10 +3387,9 @@ async function initApp() {
       microKart.updateWheels(dt, st.speed, st.steerAngle);
       microKart.updateKartVisuals(dt, st);
 
-      // 3. Update Warm Night-Time Lamp Key Lighting, Under-Track Orange/Purple/Blue LEDs & #1E6BFF Mic Aura
-      atmosphere.updateAtmosphere(elapsedTime, settings, renderer, bloomPass, scene, diorama);
-      if (coaster.updateUnderTrackLed) {
-        coaster.updateUnderTrackLed(elapsedTime, settings.trackGlowIntensity ?? 1.00);
+      // 3. Apply Active Real-World Map Outdoor Atmosphere & Sky/Fog Preset
+      if (atmosphere.applyMapAtmospherePreset) {
+        atmosphere.applyMapAtmospherePreset(currentMapId, false, scene, renderer);
       }
 
       // 4. Update Camera
@@ -3357,41 +3451,25 @@ async function initApp() {
       }
       updateHUD(st);
 
-      // Emit telemetry to React HUD at ~15Hz (every 65ms) or immediately when discrete combat/roulette state changes
+      // Emit telemetry to React HUD at ~15Hz (every 65ms) or immediately when countdown/lap state changes
       if (telemetryListeners.size > 0) {
         const nowMs = performance.now();
         const countdownStep = f1CountdownState.active
           ? Math.max(1, 6 - (Math.floor(f1CountdownState.elapsed / f1CountdownState.stepDuration) + 1))
           : 0;
-        const heldPowerup = powerupManager.getHeldPowerup();
-        const rouletteActive = powerupManager.isRouletteActive
-          ? powerupManager.isRouletteActive()
-          : false;
-        const roulettePreview = powerupManager.getRoulettePreview
-          ? powerupManager.getRoulettePreview()
-          : null;
         const lapNow = Math.min(3, Math.max(1, st.lapCount || 1));
 
         if (
           nowMs - lastTelemetryEmitMs >= 65 ||
           countdownStep !== lastEmittedCountdownStep ||
-          heldPowerup !== lastEmittedPowerup ||
-          rouletteActive ||
           lapNow !== lastEmittedLap
         ) {
           lastTelemetryEmitMs = nowMs;
           lastEmittedCountdownStep = countdownStep;
-          lastEmittedPowerup = heldPowerup;
           lastEmittedLap = lapNow;
 
           const absSpeed = Math.abs(st.speed);
-          const speedKmh = Math.round(absSpeed * 102.35 * 3.6);
-          const lockedInfo = powerupManager.getLockedTargetInfo
-            ? powerupManager.getLockedTargetInfo()
-            : { name: null, distM: null };
-          const threatInfo = powerupManager.getIncomingThreatInfo
-            ? powerupManager.getIncomingThreatInfo()
-            : { active: false, attackerName: null, urgency: 0.0 };
+          const speedKmh = Math.round(absSpeed * 240.0 * 3.6);
 
           const payload = {
             speedKmh,
@@ -3409,22 +3487,6 @@ async function initApp() {
             audioEnabled: audioSynth.isEnabled ? audioSynth.isEnabled() : false,
             positionRank: currentRank,
             rivals: rivalsController.getRivalsData(),
-            heldPowerup,
-            rouletteActive,
-            roulettePreview,
-            lockedTargetName: lockedInfo.name,
-            lockedTargetDistM: lockedInfo.distM,
-            shieldActive: powerupManager.isShieldActive(),
-            spinoutActive: powerupManager.isSpinoutActive(),
-            spinoutReason: powerupManager.getSpinoutReason
-              ? powerupManager.getSpinoutReason()
-              : null,
-            incomingAttack: threatInfo.active,
-            incomingAttacker: threatInfo.attackerName,
-            incomingUrgency: threatInfo.urgency,
-            combatFeedMessage: powerupManager.getCombatFeedMessage
-              ? powerupManager.getCombatFeedMessage()
-              : null,
           };
           for (const cb of telemetryListeners) {
             cb(payload);

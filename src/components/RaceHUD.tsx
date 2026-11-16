@@ -1,58 +1,19 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { BodyKitSpec, PowerupType, RaceTelemetry, formatRaceTime } from '../types/game';
+import { BodyKitSpec, MapSpec, RaceTelemetry, formatRaceTime } from '../types/game';
 
 interface RaceHUDProps {
   telemetry: RaceTelemetry;
   equippedKit: BodyKitSpec;
+  currentMap?: MapSpec;
   onOpenMenu: () => void;
   onOpenSettings: () => void;
   onTriggerFinishDemo: () => void;
 }
 
-const POWERUP_DETAILS: Record<
-  PowerupType,
-  { name: string; icon: string; color: string; bg: string; border: string }
-> = {
-  ROCKET: {
-    name: 'FIREBALL',
-    icon: '🚀',
-    color: '#ff3b30',
-    bg: 'bg-rose-500/45',
-    border: 'border-rose-400',
-  },
-  SHIELD: {
-    name: 'BUBBLE SHIELD',
-    icon: '🛡️',
-    color: '#00e5ff',
-    bg: 'bg-cyan-500/45',
-    border: 'border-cyan-300',
-  },
-  OIL_SLICK: {
-    name: 'OIL TRAP',
-    icon: '🛢️',
-    color: '#f59e0b',
-    bg: 'bg-amber-500/45',
-    border: 'border-amber-400',
-  },
-  HYPER_NITRO: {
-    name: 'NITRO SURGE',
-    icon: '⚡',
-    color: '#38bdf8',
-    bg: 'bg-sky-500/45',
-    border: 'border-sky-300',
-  },
-  EMP: {
-    name: 'CHAIN ZAP',
-    icon: '🌩️',
-    color: '#a855f7',
-    bg: 'bg-purple-500/45',
-    border: 'border-purple-400',
-  },
-};
-
 export const RaceHUD: React.FC<RaceHUDProps> = ({
   telemetry,
   equippedKit,
+  currentMap,
   onOpenMenu,
   onOpenSettings,
 }) => {
@@ -70,19 +31,12 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
     nitro: false,
   });
 
-  const [justFired, setJustFired] = useState(false);
-
   // Clear all touch controls when unmounting
   useEffect(() => {
     return () => {
       window.__theRaceEngine?.clearTouchControls();
     };
   }, []);
-
-  // Reset optimistic consumed flag whenever telemetry powerup updates
-  useEffect(() => {
-    setJustFired(false);
-  }, [telemetry.heldPowerup, telemetry.rouletteActive]);
 
   const setDirectionState = useCallback(
     (dir: 'left' | 'right' | 'forward' | 'backward', isDown: boolean) => {
@@ -102,28 +56,13 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
     }
   }, []);
 
-  const handlePowerupTrigger = useCallback(() => {
-    const fired = window.__theRaceEngine?.triggerPowerup();
-    if (fired !== false) {
-      setJustFired(true);
-    }
-  }, []);
-
   const isBoosting = telemetry.boostActive > 0.05;
   const isHighSpeed = telemetry.speedKmh >= 85 || isBoosting;
   const driftCharge = telemetry.driftCharge ?? 0;
   const driftReady = driftCharge >= 0.38;
   const nitroPercent = Math.round(Math.min(1, Math.max(0, telemetry.boostCharge)) * 100);
+  const nitroReady = nitroPercent >= 15;
   const rank = telemetry.positionRank || 1;
-  const isRoulette = Boolean(telemetry.rouletteActive && !justFired);
-  const rouletteDetail =
-    isRoulette && telemetry.roulettePreview
-      ? POWERUP_DETAILS[telemetry.roulettePreview]
-      : null;
-  const held =
-    telemetry.heldPowerup && !justFired
-      ? POWERUP_DETAILS[telemetry.heldPowerup]
-      : null;
 
   const rankBadgeColor =
     rank === 1
@@ -173,88 +112,18 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
         </div>
       )}
 
-      {/* SHIELD ACTIVE ENERGY HUD BORDER */}
-      {telemetry.shieldActive && (
-        <div
-          className="fixed inset-0 pointer-events-none z-10 animate-pulse border-4 border-cyan-400/60 shadow-[inset_0_0_48px_rgba(0,229,255,0.45)]"
-          style={{ boxSizing: 'border-box' }}
-        />
-      )}
-
-      {/* TOP-CENTER COMBAT HUD STACK: TARGET LOCK-ON, INCOMING MISSILE RADAR, SPINOUT & HIT FEED */}
-      <div className="fixed top-12 inset-x-0 pointer-events-none z-20 flex flex-col items-center gap-1.5">
-        {/* TARGET LOCK-ON CROSSHAIR BADGE (When holding Fireball Missile or Chain Zap) */}
-        {telemetry.lockedTargetName && !telemetry.spinoutActive && (
-          <div className="flex items-center gap-2 px-3.5 py-1 rounded-full bg-slate-950/85 border border-amber-400/90 text-amber-200 font-['Orbitron'] italic font-black text-[11px] tracking-widest uppercase shadow-[0_0_18px_rgba(251,191,36,0.65)]">
-            <span className="inline-block w-2 h-2 rounded-full bg-rose-500 animate-ping" />
-            <span>🎯 LOCKED: {telemetry.lockedTargetName}</span>
-          </div>
-        )}
-
-        {/* INCOMING AI RIVAL MISSILE LOCK WARNING WITH URGENCY METER */}
-        {telemetry.incomingAttack && !telemetry.spinoutActive && (
-          <div className="flex flex-col items-center">
-            <div className="px-4 py-1 rounded-full bg-rose-950/95 border-2 border-rose-400 text-rose-100 font-['Orbitron'] italic font-black text-xs tracking-widest uppercase animate-bounce shadow-[0_0_24px_rgba(244,63,94,0.95)] flex items-center gap-2">
-              <span>⚠️ INCOMING MISSILE</span>
-              {telemetry.incomingAttacker && (
-                <span className="text-amber-300">({telemetry.incomingAttacker})</span>
-              )}
-              <span>!</span>
-            </div>
-            <div className="w-36 h-1.5 rounded-full bg-slate-950/90 border border-rose-400/50 overflow-hidden mt-1">
-              <div
-                className="h-full bg-gradient-to-r from-amber-400 via-rose-500 to-red-600 transition-all duration-75"
-                style={{
-                  width: `${Math.min(100, Math.max(20, Math.round((telemetry.incomingUrgency || 0.5) * 100)))}%`,
-                }}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* LIVE COMBAT FEED TOAST (Direct Hits, Shield Blocks, Nitro Surges) */}
-        {telemetry.combatFeedMessage && !telemetry.spinoutActive && (
-          <div className="px-4 py-1 rounded-xl bg-slate-950/90 border border-cyan-400/80 text-cyan-100 font-['Orbitron'] italic font-black text-xs tracking-wider uppercase shadow-[0_0_20px_rgba(0,240,255,0.65)]">
-            {telemetry.combatFeedMessage}
-          </div>
-        )}
-      </div>
-
-      {/* SPINOUT / WEAPON HIT IMPACT OVERLAY */}
-      {telemetry.spinoutActive && (
-        <>
-          <div
-            className="fixed inset-0 pointer-events-none z-10 border-4 border-rose-500/75 shadow-[inset_0_0_60px_rgba(244,63,94,0.5)]"
-            style={{
-              boxSizing: 'border-box',
-              background:
-                'radial-gradient(circle at 50% 50%, transparent 58%, rgba(225, 29, 72, 0.28) 100%)',
-            }}
-          />
-          <div className="fixed inset-x-0 top-14 pointer-events-none z-20 flex justify-center">
-            <div className="px-4 py-1.5 rounded-xl bg-rose-950/95 border-2 border-rose-400 text-white font-['Orbitron'] italic font-black text-xs sm:text-sm tracking-wider shadow-[0_0_28px_rgba(244,63,94,0.9)] animate-bounce">
-              {telemetry.spinoutReason || '💥 WEAPON HIT! RECOVERING...'}
-            </div>
-          </div>
-        </>
-      )}
-
       {/* TOP BAR: Position Rank Badge (Left) | Streamlined Speedometer & Lap Counter (Right) */}
       <header className="flex items-start justify-between gap-2 w-full">
         {/* Top-Left: Menu, Settings & Live 1st-4th Position Badge */}
         <div className="pointer-events-auto flex items-center gap-2">
           <button
             type="button"
-            onTouchStart={(e) => {
-              e.stopPropagation();
-              window.__theRaceEngine?.clearTouchControls();
-              onOpenMenu();
-            }}
             onClick={(e) => {
               e.stopPropagation();
               window.__theRaceEngine?.clearTouchControls();
               onOpenMenu();
             }}
+            style={{ touchAction: 'manipulation' }}
             className="px-3 py-1.5 rounded-xl bg-slate-950/80 border border-white/25 active:border-cyan-400 font-['Orbitron'] italic font-bold text-[11px] text-white tracking-wider uppercase cursor-pointer shadow-lg active:scale-95"
           >
             ← MENU
@@ -262,14 +131,11 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
 
           <button
             type="button"
-            onTouchStart={(e) => {
-              e.stopPropagation();
-              onOpenSettings();
-            }}
             onClick={(e) => {
               e.stopPropagation();
               onOpenSettings();
             }}
+            style={{ touchAction: 'manipulation' }}
             aria-label="Settings"
             className="w-8 h-8 rounded-xl bg-slate-950/80 border border-white/20 active:border-cyan-400 text-slate-200 flex items-center justify-center cursor-pointer shadow-lg active:scale-95 text-sm"
           >
@@ -289,15 +155,15 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
           <div className="hidden lg:flex items-center gap-2 px-2.5 py-1 rounded-xl bg-slate-950/70 border border-white/10">
             <span
               className="w-2 h-2 rounded-full"
-              style={{ backgroundColor: equippedKit.primaryColor }}
+              style={{ backgroundColor: currentMap?.accentHex || equippedKit.primaryColor }}
             />
             <span className="font-['Orbitron'] italic font-bold text-[10px] text-slate-200 tracking-wide">
-              {equippedKit.name}
+              {currentMap ? `${currentMap.name} · ${equippedKit.name}` : equippedKit.name}
             </span>
           </div>
         </div>
 
-        {/* Top-Right: Streamlined Speedometer & Lap Counter with Reduced Padding */}
+        {/* Top-Right: Streamlined Speedometer & Lap Counter */}
         <div className="flex items-center gap-2.5 sm:gap-3.5 bg-slate-950/80 border border-white/15 rounded-xl px-2.5 py-1 sm:px-3 sm:py-1.5 shadow-lg">
           {/* Speedometer */}
           <div className="flex items-baseline gap-1">
@@ -343,17 +209,17 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
         </div>
       )}
 
-      {/* MOBILE CONTROLS & DOCKED ROUND FIRE BADGE
-          BOTTOM-LEFT: Steering Pads ( < and > )
-          BOTTOM-RIGHT: Brake/Nitro + Throttle Pedal with Round Fire Badge Docked Directly Above Throttle */}
-      <div className="w-full flex items-end justify-between pb-0.5 sm:pb-1 pointer-events-none">
-        {/* BOTTOM-LEFT: STEERING CONTROLS */}
+      {/* PURE ICON-ONLY RACING CONTROLS
+          BOTTOM-LEFT: Left / Right Steering Arrows
+          BOTTOM-RIGHT: Nitro + Brake Pedal (Left Column) & Ergonomic Gap + Throttle Pedal (Right Column) */}
+      <div className="w-full flex items-end justify-between pb-1 sm:pb-1.5 pointer-events-none">
+        {/* BOTTOM-LEFT: PURE SYMBOL STEERING CONTROLS */}
         <div
-          className="pointer-events-auto flex items-center gap-3 sm:gap-4"
+          className="pointer-events-auto flex items-center gap-3.5 sm:gap-4"
           role="group"
           aria-label="Steering Controls"
         >
-          {/* STEER LEFT */}
+          {/* STEER LEFT (ICON ONLY) */}
           <button
             type="button"
             onTouchStart={(e) => {
@@ -378,29 +244,26 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
             onMouseUp={() => setDirectionState('left', false)}
             onMouseLeave={() => setDirectionState('left', false)}
             aria-label="Steer Left"
-            className={`w-20 h-20 sm:w-24 sm:h-24 rounded-3xl flex flex-col items-center justify-center border-2 transition-transform select-none touch-none cursor-pointer ${
+            className={`w-20 h-20 sm:w-22 sm:h-22 rounded-3xl flex items-center justify-center border-2 transition-transform select-none touch-none cursor-pointer backdrop-blur-sm ${
               activeControls.left
-                ? 'bg-cyan-400/40 border-cyan-200 text-white scale-95 shadow-[0_0_24px_rgba(0,240,255,0.75)]'
-                : 'bg-slate-950/60 border-white/30 text-white/90 shadow-lg'
+                ? 'bg-cyan-400/45 border-cyan-200 text-white scale-95 shadow-[0_0_24px_rgba(0,240,255,0.8)]'
+                : 'bg-slate-950/60 border-white/30 text-white/95 shadow-lg'
             }`}
           >
             <svg
-              className="w-9 h-9 sm:w-11 sm:h-11"
+              className="w-10 h-10 sm:w-11 sm:h-11"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="3"
+              strokeWidth="3.2"
               strokeLinecap="round"
               strokeLinejoin="round"
             >
-              <path d="M15 18l-6-6 6-6" />
+              <path d="M15.5 18.5L8.5 12l7-6.5" />
             </svg>
-            <span className="font-['Orbitron'] font-bold text-[9px] tracking-widest uppercase mt-0.5 opacity-80">
-              LEFT
-            </span>
           </button>
 
-          {/* STEER RIGHT */}
+          {/* STEER RIGHT (ICON ONLY) */}
           <button
             type="button"
             onTouchStart={(e) => {
@@ -425,26 +288,23 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
             onMouseUp={() => setDirectionState('right', false)}
             onMouseLeave={() => setDirectionState('right', false)}
             aria-label="Steer Right"
-            className={`w-20 h-20 sm:w-24 sm:h-24 rounded-3xl flex flex-col items-center justify-center border-2 transition-transform select-none touch-none cursor-pointer ${
+            className={`w-20 h-20 sm:w-22 sm:h-22 rounded-3xl flex items-center justify-center border-2 transition-transform select-none touch-none cursor-pointer backdrop-blur-sm ${
               activeControls.right
-                ? 'bg-cyan-400/40 border-cyan-200 text-white scale-95 shadow-[0_0_24px_rgba(0,240,255,0.75)]'
-                : 'bg-slate-950/60 border-white/30 text-white/90 shadow-lg'
+                ? 'bg-cyan-400/45 border-cyan-200 text-white scale-95 shadow-[0_0_24px_rgba(0,240,255,0.8)]'
+                : 'bg-slate-950/60 border-white/30 text-white/95 shadow-lg'
             }`}
           >
             <svg
-              className="w-9 h-9 sm:w-11 sm:h-11"
+              className="w-10 h-10 sm:w-11 sm:h-11"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="3"
+              strokeWidth="3.2"
               strokeLinecap="round"
               strokeLinejoin="round"
             >
-              <path d="M9 18l6-6-6-6" />
+              <path d="M8.5 18.5L15.5 12l-7-6.5" />
             </svg>
-            <span className="font-['Orbitron'] font-bold text-[9px] tracking-widest uppercase mt-0.5 opacity-80">
-              RIGHT
-            </span>
           </button>
         </div>
 
@@ -473,15 +333,15 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
           </div>
         )}
 
-        {/* BOTTOM-RIGHT: NITRO + BRAKE/REV (LEFT COLUMN) & ROUND FIRE BADGE DOCKED ABOVE THROTTLE PEDAL (RIGHT COLUMN) */}
+        {/* BOTTOM-RIGHT: PURE RACING ICON PEDALS + NITRO BOOST */}
         <div
-          className="pointer-events-auto flex items-end gap-3 sm:gap-4"
+          className="pointer-events-auto flex items-end gap-4 sm:gap-5"
           role="group"
-          aria-label="Weapons and Driving Controls"
+          aria-label="Driving Controls"
         >
-          {/* LEFT COLUMN: NITRO BOOST + BRAKE/REVERSE */}
-          <div className="flex flex-col items-end gap-2">
-            {/* NITRO BOOST BUTTON — PURE ICON ONLY (NO TEXT/PERCENTAGE) */}
+          {/* LEFT COLUMN: NITRO BOOST + BRAKE/REVERSE PEDAL */}
+          <div className="flex flex-col items-center gap-2.5">
+            {/* NITRO BOOST BUTTON — SLEEK FLAME/BOLT SYMBOL + CHARGE FILL (NO TEXT) */}
             <button
               type="button"
               onTouchStart={(e) => {
@@ -506,22 +366,29 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
               onMouseUp={() => handleNitroTrigger(false)}
               onMouseLeave={() => handleNitroTrigger(false)}
               aria-label="Nitro Boost"
-              className={`relative overflow-hidden w-20 h-11 sm:w-24 sm:h-12 rounded-2xl flex items-center justify-center border-2 transition-transform select-none touch-none cursor-pointer ${
+              className={`relative overflow-hidden w-20 h-11 sm:w-22 sm:h-12 rounded-2xl flex items-center justify-center border-2 transition-transform select-none touch-none cursor-pointer backdrop-blur-sm ${
                 activeControls.nitro || isBoosting
-                  ? 'bg-amber-400/85 border-white text-slate-950 scale-95 shadow-[0_0_24px_rgba(251,191,36,0.95)]'
-                  : 'bg-slate-950/65 border-amber-400/70 text-amber-300 shadow-lg'
+                  ? 'bg-amber-400/90 border-white text-slate-950 scale-95 shadow-[0_0_24px_rgba(251,191,36,0.95)]'
+                  : nitroReady
+                    ? 'bg-slate-950/65 border-amber-400/85 text-amber-300 shadow-[0_0_16px_rgba(251,191,36,0.35)]'
+                    : 'bg-slate-950/55 border-slate-500/50 text-slate-400 shadow-lg'
               }`}
             >
               <div
-                className="absolute inset-y-0 left-0 bg-amber-400/35 pointer-events-none transition-all duration-150"
+                className="absolute inset-y-0 left-0 bg-gradient-to-r from-amber-500/45 to-cyan-400/35 pointer-events-none transition-all duration-150"
                 style={{ width: `${nitroPercent}%` }}
               />
-              <span className="relative z-10 text-xl sm:text-2xl leading-none select-none drop-shadow-[0_0_8px_rgba(251,191,36,0.8)]">
-                ⚡
-              </span>
+              {/* Motorsport Turbo Flame + Lightning SVG */}
+              <svg
+                className="relative z-10 w-6 h-6 sm:w-7 sm:h-7 drop-shadow-[0_0_6px_rgba(251,191,36,0.75)]"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+              >
+                <path d="M13.5 2L5.5 13h5.5l-1.5 9 8.5-11.5h-5.5L13.5 2z" />
+              </svg>
             </button>
 
-            {/* BRAKE / SMOOTH REVERSE */}
+            {/* BRAKE / REVERSE PEDAL — HORIZONTAL RIBBED BRAKE PEDAL SYMBOL (NO TEXT) */}
             <button
               type="button"
               onTouchStart={(e) => {
@@ -546,83 +413,47 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
               onMouseUp={() => setDirectionState('backward', false)}
               onMouseLeave={() => setDirectionState('backward', false)}
               aria-label="Brake and Reverse"
-              className={`w-20 h-18 sm:w-24 sm:h-20 rounded-2xl font-['Orbitron'] italic font-black text-xs tracking-wider uppercase flex flex-col items-center justify-center border-2 transition-transform select-none touch-none cursor-pointer ${
+              className={`w-20 h-16 sm:w-22 sm:h-18 rounded-2xl flex items-center justify-center border-2 transition-transform select-none touch-none cursor-pointer backdrop-blur-sm ${
                 activeControls.backward
-                  ? 'bg-rose-500/50 border-rose-200 text-white scale-95 shadow-[0_0_24px_rgba(244,63,94,0.8)]'
-                  : 'bg-slate-950/55 border-rose-400/60 text-rose-200 shadow-lg'
+                  ? 'bg-rose-500/55 border-rose-200 text-white scale-95 shadow-[0_0_24px_rgba(244,63,94,0.85)]'
+                  : 'bg-slate-950/60 border-rose-400/70 text-rose-300 shadow-lg'
               }`}
             >
-              <span className="text-xs sm:text-sm font-black">BRAKE</span>
-              <span className="text-[9px] font-bold text-rose-300/85 tracking-widest mt-0.5">
-                REV
-              </span>
+              {/* Distinct Wide Motorsport Brake Pedal Pad + Stop/Reverse Cue */}
+              <svg
+                className="w-11 h-9 sm:w-12 sm:h-10"
+                viewBox="0 0 44 36"
+                fill="none"
+              >
+                {/* Wide Pedal Body */}
+                <rect
+                  x="4"
+                  y="6"
+                  width="36"
+                  height="24"
+                  rx="6"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  fill="currentColor"
+                  fillOpacity="0.16"
+                />
+                {/* Vertical Grip Ribs */}
+                <line x1="12" y1="11" x2="12" y2="25" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" opacity="0.65" />
+                <line x1="32" y1="11" x2="32" y2="25" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" opacity="0.65" />
+                {/* Downward Reverse / Stop Chevron */}
+                <path
+                  d="M17 15.5L22 21L27 15.5"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
             </button>
           </div>
 
-          {/* RIGHT COLUMN: SINGLE-USE POWERUP SLOT DOCKED DIRECTLY ABOVE THROTTLE PEDAL */}
-          <div className="flex flex-col items-center gap-1.5">
-            {/* SINGLE-USE POWERUP SLOT WITH BEACH BUGGY ROULETTE ROLL */}
-            <div className="w-16 h-16 sm:w-18 sm:h-18 flex flex-col items-center justify-center relative">
-              {held ? (
-                <button
-                  type="button"
-                  onTouchStart={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    handlePowerupTrigger();
-                  }}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    handlePowerupTrigger();
-                  }}
-                  aria-label={`Fire ${held.name}`}
-                  className={`w-15 h-15 sm:w-17 sm:h-17 rounded-full flex flex-col items-center justify-center border-2 transition-all select-none touch-none cursor-pointer active:scale-90 animate-pulse shadow-2xl ${held.bg} ${held.border} text-white`}
-                  style={{
-                    boxShadow: `0 0 26px ${held.color}`,
-                  }}
-                >
-                  <span className="text-2xl sm:text-3xl leading-none select-none drop-shadow-[0_0_10px_rgba(255,255,255,0.85)]">
-                    {held.icon}
-                  </span>
-                  <span className="font-['Orbitron'] font-black text-[7px] sm:text-[8px] tracking-wider uppercase text-white/95 mt-0.5 leading-none">
-                    {held.name}
-                  </span>
-                </button>
-              ) : rouletteDetail ? (
-                <button
-                  type="button"
-                  onTouchStart={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    handlePowerupTrigger();
-                  }}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    handlePowerupTrigger();
-                  }}
-                  aria-label="Rolling Powerup"
-                  className="w-15 h-15 sm:w-17 sm:h-17 rounded-full flex flex-col items-center justify-center border-2 border-amber-300 bg-gradient-to-br from-amber-500/45 via-fuchsia-500/45 to-cyan-500/45 text-white shadow-[0_0_24px_rgba(251,191,36,0.9)] cursor-pointer select-none touch-none scale-105 transition-transform"
-                >
-                  <span className="text-2xl sm:text-3xl leading-none select-none animate-bounce">
-                    {rouletteDetail.icon}
-                  </span>
-                  <span className="font-['Orbitron'] font-black text-[7px] tracking-widest uppercase text-amber-200 mt-0.5 leading-none">
-                    ROLL...
-                  </span>
-                </button>
-              ) : (
-                <div
-                  className="w-13 h-13 sm:w-15 sm:h-15 rounded-full border border-dashed border-white/25 bg-slate-950/45 flex items-center justify-center select-none pointer-events-none opacity-45 shadow-inner"
-                  aria-hidden="true"
-                >
-                  <span className="text-lg text-slate-400">❓</span>
-                </div>
-              )}
-            </div>
-
-            {/* LARGE PRIMARY ACCELERATE (THROTTLE) PEDAL */}
+          {/* RIGHT COLUMN: TALL MOTORSPORT THROTTLE / GAS PEDAL (NO TEXT) */}
+          <div className="flex flex-col items-center">
             <button
               type="button"
               onTouchStart={(e) => {
@@ -647,24 +478,47 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
               onMouseUp={() => setDirectionState('forward', false)}
               onMouseLeave={() => setDirectionState('forward', false)}
               aria-label="Accelerate"
-              className={`w-24 h-22 sm:w-28 sm:h-26 rounded-3xl font-['Orbitron'] italic font-black text-sm sm:text-base tracking-wider uppercase flex flex-col items-center justify-center border-2 transition-transform select-none touch-none cursor-pointer ${
+              className={`w-20 h-24 sm:w-24 sm:h-28 rounded-3xl flex items-center justify-center border-2 transition-transform select-none touch-none cursor-pointer backdrop-blur-sm ${
                 activeControls.forward
-                  ? 'bg-emerald-400/45 border-emerald-200 text-white scale-95 shadow-[0_0_28px_rgba(16,185,129,0.85)]'
-                  : 'bg-slate-950/55 border-emerald-400/75 text-emerald-200 shadow-xl'
+                  ? 'bg-emerald-400/50 border-emerald-200 text-white scale-95 shadow-[0_0_28px_rgba(16,185,129,0.9)]'
+                  : 'bg-slate-950/60 border-emerald-400/80 text-emerald-300 shadow-xl'
               }`}
             >
+              {/* Tall Angled Motorsport Gas / Accelerator Pedal SVG */}
               <svg
-                className="w-7 h-7 sm:w-8 sm:h-8 mb-0.5"
-                viewBox="0 0 24 24"
+                className="w-11 h-16 sm:w-12 sm:h-20"
+                viewBox="0 0 40 60"
                 fill="none"
-                stroke="currentColor"
-                strokeWidth="3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
               >
-                <path d="M18 15l-6-6-6 6" />
+                {/* Pedal Plate */}
+                <path
+                  d="M9 10C9 6.68629 11.6863 4 15 4H27C30.3137 4 33 6.68629 33 10L31 50C31 53.3137 28.3137 56 25 56H13C9.68629 56 7 53.3137 7 50L9 10Z"
+                  stroke="currentColor"
+                  strokeWidth="2.6"
+                  fill="currentColor"
+                  fillOpacity="0.16"
+                />
+                {/* Double Upward Thrust Chevrons */}
+                <path
+                  d="M14.5 22L20 15.5L25.5 22"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M14.5 31L20 24.5L25.5 31"
+                  stroke="currentColor"
+                  strokeWidth="2.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity="0.85"
+                />
+                {/* Lower Grip Treads */}
+                <line x1="13" y1="39" x2="26" y2="39" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" opacity="0.6" />
+                <line x1="12.5" y1="45" x2="25.5" y2="45" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" opacity="0.6" />
+                <line x1="12" y1="51" x2="25" y2="51" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" opacity="0.6" />
               </svg>
-              <span>ACCEL</span>
             </button>
           </div>
         </div>

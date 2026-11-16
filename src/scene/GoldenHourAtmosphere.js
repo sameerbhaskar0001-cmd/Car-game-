@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { calibrateTrackCoasterGlb } from './CoasterTrackBuilder.js';
 
 /**
  * Creates the V3.0/V4.0 Golden-Hour Window Sunlight (3200K, #ffb84d -> #ffe8a3),
@@ -20,9 +19,9 @@ export function buildGoldenHourAtmosphere(scene) {
   const defaultLampScale = 1.15;
 
   const hemiLight = new THREE.HemisphereLight(
-    0x1c2238,
-    0x090706,
-    0.045 + 0.025 * defaultLampScale + 0.42 * defaultSunScale
+    0x435688,
+    0x1d1714,
+    0.22 + 0.06 * defaultLampScale + 0.35 * defaultSunScale
   );
   atmosphereGroup.add(hemiLight);
 
@@ -529,9 +528,9 @@ export function buildGoldenHourAtmosphere(scene) {
 
       // Dark Cozy Night-Time Desk Lamp Key Light + High-Contrast Shadows
       sunLight.intensity = 0.85 * sunScale;
-      hemiLight.intensity = 0.045 + 0.025 * lampScale + 0.42 * sunScale;
-      hemiLight.color.setHex(0x1c2238);
-      hemiLight.groundColor.setHex(0x090706);
+      hemiLight.intensity = 0.16 + 0.05 * lampScale + 0.30 * sunScale;
+      hemiLight.color.setHex(0x435688);
+      hemiLight.groundColor.setHex(0x1d1714);
       windowGlowLight.intensity = 0.50 * sunScale;
       goldenFillLight.intensity = 0.24 * sunScale;
       rimLight.intensity = 0.22 * sunScale;
@@ -551,7 +550,7 @@ export function buildGoldenHourAtmosphere(scene) {
 
       // Dynamic Tone Mapping Exposure scaling: balanced warm night indoor exposure
       if (renderer) {
-        renderer.toneMappingExposure = 0.74 + 0.07 * sunScale + 0.06 * lampScale;
+        renderer.toneMappingExposure = 0.68 + 0.06 * sunScale + 0.04 * lampScale;
       }
 
       // Dynamically blend scene.background and scene.fog.color from #06070b (0x) -> #3a2919 (2.25x) -> #5c4126 (5.0x)
@@ -583,7 +582,7 @@ export function buildGoldenHourAtmosphere(scene) {
         diorama.updateLightingMaterials(sunScale, lampScale);
       }
     } else if (renderer) {
-      renderer.toneMappingExposure = 0.74 + 0.07 * sunScale + 0.06 * lampScale;
+      renderer.toneMappingExposure = 0.68 + 0.06 * sunScale + 0.04 * lampScale;
     }
 
     if (bloomPass) {
@@ -595,6 +594,133 @@ export function buildGoldenHourAtmosphere(scene) {
 
   // Run initial calibration immediately
   updateAtmosphere(0.0, { sunIntensity: defaultSunScale, lampIntensity: defaultLampScale, showDustMotes: false }, null, null, scene, null);
+
+  function applyMapAtmospherePreset(mapId = 'coast', isShowroom = false, targetScene = scene, renderer = null) {
+    sunbeamGroup.visible = false;
+    dustPoints.visible = false;
+    micAuraCone.visible = false;
+    micPointLight.visible = false;
+    micSpotLight.visible = false;
+    kbBacklight.visible = false;
+
+    if (isShowroom) {
+      // Enclosed Pit-Lane Garage: let the dedicated showroom rig + bay ceiling light sculpt the car
+      // without stacking extra full-strength outdoor directional lights on top.
+      windowGlowLight.visible = false;
+      lampKeyLight.visible = false;
+      lampGlowPoint.visible = false;
+      sunLight.visible = false;
+      goldenFillLight.visible = false;
+      rimLight.visible = false;
+
+      hemiLight.color.setHex(0x64748b);
+      hemiLight.groundColor.setHex(0x0f172a);
+      hemiLight.intensity = 0.24;
+
+      if (targetScene) {
+        if (targetScene.background && targetScene.background.isColor) {
+          targetScene.background.setHex(0x070b14);
+        }
+        if (targetScene.fog) {
+          targetScene.fog.color.setHex(0x070b14);
+          targetScene.fog.density = 0.045;
+        }
+      }
+      if (renderer) {
+        renderer.toneMappingExposure = 0.70;
+      }
+      return;
+    }
+
+    // Outdoor Real-World Circuit Lighting Presets (used for Home Start-Grid Showcase & Race)
+    lampKeyLight.visible = false;
+    lampGlowPoint.visible = false;
+    windowGlowLight.visible = false;
+    sunLight.visible = true;
+    goldenFillLight.visible = true;
+    rimLight.visible = true;
+
+    if (mapId === 'city') {
+      sunLight.color.setHex(0x7dd3fc);
+      sunLight.intensity = 0.50;
+      sunLight.position.set(0.35, 0.72, -0.55);
+
+      hemiLight.color.setHex(0x1e3a8a);
+      hemiLight.groundColor.setHex(0x090d16);
+      hemiLight.intensity = 0.30;
+
+      goldenFillLight.color.setHex(0x38bdf8);
+      goldenFillLight.intensity = 0.18;
+      rimLight.color.setHex(0xf472b6);
+      rimLight.intensity = 0.22;
+
+      if (targetScene) {
+        if (targetScene.background && targetScene.background.isColor) {
+          targetScene.background.setHex(0x050814);
+        }
+        if (targetScene.fog) {
+          targetScene.fog.color.setHex(0x080d1d);
+          targetScene.fog.density = 0.26;
+        }
+      }
+      if (renderer) {
+        renderer.toneMappingExposure = 0.70;
+      }
+    } else if (mapId === 'canyon') {
+      sunLight.color.setHex(0xfde68a);
+      sunLight.intensity = 0.68;
+      sunLight.position.set(-0.48, 0.65, -0.52);
+
+      hemiLight.color.setHex(0x64748b);
+      hemiLight.groundColor.setHex(0x1e293b);
+      hemiLight.intensity = 0.32;
+
+      goldenFillLight.color.setHex(0xfbbf24);
+      goldenFillLight.intensity = 0.18;
+      rimLight.color.setHex(0x34d399);
+      rimLight.intensity = 0.16;
+
+      if (targetScene) {
+        if (targetScene.background && targetScene.background.isColor) {
+          targetScene.background.setHex(0x162032);
+        }
+        if (targetScene.fog) {
+          targetScene.fog.color.setHex(0x1a2436);
+          targetScene.fog.density = 0.24;
+        }
+      }
+      if (renderer) {
+        renderer.toneMappingExposure = 0.68;
+      }
+    } else {
+      // 'coast': Sunset Coastal Beach Highway
+      sunLight.color.setHex(0xffb84d);
+      sunLight.intensity = 0.70;
+      sunLight.position.set(-0.42, 0.58, -0.62);
+
+      hemiLight.color.setHex(0x38bdf8);
+      hemiLight.groundColor.setHex(0x33261e);
+      hemiLight.intensity = 0.34;
+
+      goldenFillLight.color.setHex(0xfdba74);
+      goldenFillLight.intensity = 0.20;
+      rimLight.color.setHex(0x38bdf8);
+      rimLight.intensity = 0.18;
+
+      if (targetScene) {
+        if (targetScene.background && targetScene.background.isColor) {
+          targetScene.background.setHex(0x1e293b);
+        }
+        if (targetScene.fog) {
+          targetScene.fog.color.setHex(0x26293d);
+          targetScene.fog.density = 0.22;
+        }
+      }
+      if (renderer) {
+        renderer.toneMappingExposure = 0.68;
+      }
+    }
+  }
 
   return {
     atmosphereGroup,
@@ -616,6 +742,7 @@ export function buildGoldenHourAtmosphere(scene) {
     dustPoints,
     requestShadowMapUpdate,
     updateAtmosphere,
+    applyMapAtmospherePreset,
     update: updateAtmosphere,
   };
 }

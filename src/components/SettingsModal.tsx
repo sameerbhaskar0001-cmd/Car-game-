@@ -11,7 +11,6 @@ interface SettingsModalProps {
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   audioEnabled,
   onToggleAudio,
-  onResetCoins,
   onBackToMenu,
   onClose,
 }) => {
@@ -59,19 +58,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md bg-slate-950/95 border-2 border-cyan-400/60 rounded-2xl p-4 sm:p-5 shadow-2xl text-left pointer-events-auto relative"
+        className="w-full max-w-md max-h-[92vh] overflow-y-auto bg-slate-950/95 border-2 border-cyan-400/55 rounded-2xl p-5 sm:p-6 shadow-2xl text-left pointer-events-auto relative"
         style={{ zIndex: 100000, touchAction: 'manipulation' }}
       >
-        {/* Header with Single-Tap Close Button */}
-        <div className="flex items-center justify-between mb-3.5">
-          <div>
-            <h2 className="font-['Orbitron'] italic font-black text-xl sm:text-2xl text-white uppercase leading-none">
-              SETTINGS
-            </h2>
-            <p className="text-[11px] text-slate-400 mt-1">
-              Mobile audio &amp; performance options
-            </p>
-          </div>
+        {/* Header */}
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <h2 className="font-['Orbitron'] italic font-black text-lg sm:text-2xl text-white uppercase leading-none">
+            SETTINGS
+          </h2>
 
           <button
             type="button"
@@ -82,21 +76,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             }}
             aria-label="Close Settings"
             style={{ touchAction: 'manipulation' }}
-            className="w-10 h-10 rounded-xl bg-slate-900 border border-white/25 active:bg-rose-500/40 text-white font-black text-base flex items-center justify-center cursor-pointer shadow-lg active:scale-95"
+            className="w-9 h-9 rounded-xl bg-slate-900 border border-white/25 hover:border-cyan-400 active:bg-rose-500/40 text-white font-black text-sm flex items-center justify-center cursor-pointer shadow-md active:scale-95 shrink-0"
           >
             ✕
           </button>
         </div>
 
         <div className="flex flex-col gap-3">
-          {/* 1. Music & Sound FX (Single-Tap Toggle) */}
-          <div className="flex items-center justify-between p-3.5 rounded-xl bg-slate-900/95 border border-white/15">
+          {/* 1. Sound FX */}
+          <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-slate-900/90 border border-white/15">
             <div>
-              <div className="font-['Orbitron'] italic font-black text-xs sm:text-sm text-white uppercase">
-                MUSIC &amp; SOUND FX
+              <div className="font-['Orbitron'] italic font-bold text-xs sm:text-sm text-white uppercase leading-tight">
+                SOUND FX
               </div>
-              <div className="text-[11px] text-slate-400 mt-0.5">
-                Engine roar, tire drift, powerups &amp; UI audio
+              <div className="text-[11px] text-slate-400 mt-0.5 leading-tight">
+                Engine roar, tire drift &amp; nitro audio
               </div>
             </div>
             <button
@@ -108,9 +102,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 onToggleAudio();
               }}
               style={{ touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' }}
-              className={`min-w-[104px] px-4 py-2.5 rounded-xl font-['Orbitron'] italic font-black text-xs uppercase cursor-pointer border-2 transition-transform active:scale-95 ${
+              className={`min-w-[84px] px-4 py-2 rounded-xl font-['Orbitron'] italic font-black text-xs uppercase cursor-pointer border-2 transition-transform active:scale-95 shrink-0 ${
                 audioEnabled
-                  ? 'bg-emerald-500/25 border-emerald-400 text-emerald-200 shadow-[0_0_14px_rgba(52,211,153,0.3)]'
+                  ? 'bg-emerald-500/25 border-emerald-400 text-emerald-200 shadow-[0_0_12px_rgba(52,211,153,0.3)]'
                   : 'bg-slate-800 border-white/25 text-slate-300'
               }`}
             >
@@ -118,18 +112,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
           </div>
 
-          {/* 2. Visual Quality (Performance 60FPS / Ultra) */}
-          <div className="p-3.5 rounded-xl bg-slate-900/95 border border-white/15 flex flex-col gap-2.5">
+          {/* 2. Visual Quality */}
+          <div className="px-4 py-3 rounded-xl bg-slate-900/90 border border-white/15 flex flex-col gap-2.5">
             <div className="flex items-center justify-between">
-              <div className="font-['Orbitron'] italic font-black text-xs sm:text-sm text-white uppercase">
-                VISUAL QUALITY
-              </div>
+              <span className="font-['Orbitron'] italic font-bold text-xs sm:text-sm text-white uppercase">
+                GRAPHICS
+              </span>
               <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-cyan-300">
-                {visualQuality === 'performance' ? 'LOCKED 60 FPS' : 'HIGH BLOOM + FX'}
+                {visualQuality === 'performance' ? '60 FPS SMOOTH' : 'HIGH DETAIL'}
               </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
                 onPointerDown={(e) => e.stopPropagation()}
@@ -139,16 +133,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   handleSetQuality('performance');
                 }}
                 style={{ touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' }}
-                className={`py-2.5 px-3 rounded-xl font-['Orbitron'] italic font-black text-xs uppercase cursor-pointer border-2 transition-transform active:scale-95 flex flex-col items-center gap-0.5 ${
+                className={`py-2.5 px-3 rounded-xl font-['Orbitron'] italic font-black text-xs uppercase cursor-pointer border-2 transition-transform active:scale-95 flex items-center justify-center ${
                   visualQuality === 'performance'
-                    ? 'bg-cyan-500/30 border-cyan-300 text-white shadow-[0_0_15px_rgba(34,211,238,0.35)]'
+                    ? 'bg-cyan-500/30 border-cyan-300 text-white shadow-[0_0_14px_rgba(34,211,238,0.3)]'
                     : 'bg-slate-950/80 border-white/15 text-slate-400'
                 }`}
               >
-                <span>PERFORMANCE</span>
-                <span className="text-[9px] font-mono font-bold text-cyan-300">
-                  60 FPS
-                </span>
+                PERFORMANCE
               </button>
 
               <button
@@ -160,35 +151,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   handleSetQuality('ultra');
                 }}
                 style={{ touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' }}
-                className={`py-2.5 px-3 rounded-xl font-['Orbitron'] italic font-black text-xs uppercase cursor-pointer border-2 transition-transform active:scale-95 flex flex-col items-center gap-0.5 ${
+                className={`py-2.5 px-3 rounded-xl font-['Orbitron'] italic font-black text-xs uppercase cursor-pointer border-2 transition-transform active:scale-95 flex items-center justify-center ${
                   visualQuality === 'ultra'
-                    ? 'bg-amber-500/30 border-amber-300 text-white shadow-[0_0_15px_rgba(251,191,36,0.35)]'
+                    ? 'bg-amber-500/30 border-amber-300 text-white shadow-[0_0_14px_rgba(251,191,36,0.3)]'
                     : 'bg-slate-950/80 border-white/15 text-slate-400'
                 }`}
               >
-                <span>ULTRA</span>
-                <span className="text-[9px] font-mono font-bold text-amber-300">
-                  MAX FX
-                </span>
+                ULTRA
               </button>
             </div>
           </div>
 
-          {/* 3. Action Buttons: +500 CR, Back to Menu, Resume */}
-          <div className="flex items-center gap-2.5 pt-1">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                window.__theRaceEngine?.playUiClick('equip');
-                onResetCoins();
-              }}
-              style={{ touchAction: 'manipulation' }}
-              className="px-3 py-3 rounded-xl bg-amber-500/15 border border-amber-400/50 active:bg-amber-500/35 text-[11px] font-mono font-bold text-amber-300 cursor-pointer active:scale-95"
-            >
-              +500 CR
-            </button>
-
+          {/* 3. Clean 2-Button Action Footer */}
+          <div className="grid grid-cols-2 gap-3 pt-1">
             <button
               type="button"
               onClick={(e) => {
@@ -197,9 +172,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 onBackToMenu();
               }}
               style={{ touchAction: 'manipulation' }}
-              className="flex-1 py-3 px-4 rounded-xl bg-slate-800/95 border-2 border-white/30 active:bg-slate-700 font-['Orbitron'] italic font-black text-xs sm:text-sm text-white uppercase tracking-wider cursor-pointer shadow-lg active:scale-95"
+              className="py-2.5 px-4 rounded-xl bg-slate-800/95 border border-white/25 active:bg-slate-700 font-['Orbitron'] italic font-bold text-xs sm:text-sm text-white uppercase tracking-wider cursor-pointer shadow-md active:scale-95"
             >
-              BACK TO MENU
+              MAIN MENU
             </button>
 
             <button
@@ -210,7 +185,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 onClose();
               }}
               style={{ touchAction: 'manipulation' }}
-              className="flex-1 py-3 px-4 rounded-xl bg-cyan-500/35 border-2 border-cyan-300 active:bg-cyan-500/60 font-['Orbitron'] italic font-black text-xs sm:text-sm text-white uppercase tracking-wider cursor-pointer shadow-lg active:scale-95"
+              className="py-2.5 px-4 rounded-xl bg-cyan-500/35 border-2 border-cyan-300 active:bg-cyan-500/60 font-['Orbitron'] italic font-black text-xs sm:text-sm text-white uppercase tracking-wider cursor-pointer shadow-md active:scale-95"
             >
               RESUME
             </button>

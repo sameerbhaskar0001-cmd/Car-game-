@@ -1,16 +1,21 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import {
   BODY_KITS,
   BodyKitId,
   BodyKitSpec,
   GameState,
+  MAP_SPECS,
+  MapId,
+  MapSpec,
   RaceFinishResult,
   RaceTelemetry,
   RimId,
   SpoilerId,
   TheRaceEngineBridge,
+  getNextRotatedMapId,
   normalizeCarId,
+  normalizeMapId,
 } from './types/game';
 import { SplashScreen } from './components/SplashScreen';
 import { MainMenu } from './components/MainMenu';
@@ -25,6 +30,8 @@ const STORAGE_RIM_KEY = 'the_race_3d_equipped_rim_v1';
 const STORAGE_SPOILER_KEY = 'the_race_3d_equipped_spoiler_v1';
 const STORAGE_PAINT_KEY = 'the_race_3d_equipped_paint_v1';
 const STORAGE_UNLOCKED_KEY = 'the_race_3d_unlocked_kits_v1';
+const STORAGE_MAP_KEY = 'the_race_3d_selected_map_v1';
+const STORAGE_AUTO_ROTATE_KEY = 'the_race_3d_auto_rotate_v1';
 
 const DEFAULT_COINS = 500;
 
@@ -110,6 +117,37 @@ export default function App() {
     return null;
   });
 
+  // Persistent Selected Circuit Map ('coast' | 'city' | 'canyon')
+  const [selectedMapId, setSelectedMapId] = useState<MapId>(() => {
+    try {
+      const saved = window.localStorage.getItem(STORAGE_MAP_KEY);
+      return normalizeMapId(saved);
+    } catch {
+      // ignore
+    }
+    return 'coast';
+  });
+
+  // Persistent Post-Race Auto-Rotate Setting
+  const [autoRotateMaps, setAutoRotateMaps] = useState<boolean>(() => {
+    try {
+      const saved = window.localStorage.getItem(STORAGE_AUTO_ROTATE_KEY);
+      if (saved === 'false') return false;
+      if (saved === 'true') return true;
+    } catch {
+      // ignore
+    }
+    return true;
+  });
+
+  const selectedMapIdRef = useRef<MapId>(selectedMapId);
+  const autoRotateMapsRef = useRef<boolean>(autoRotateMaps);
+  selectedMapIdRef.current = selectedMapId;
+  autoRotateMapsRef.current = autoRotateMaps;
+
+  const activeMapSpec: MapSpec =
+    MAP_SPECS.find((m) => m.id === selectedMapId) || MAP_SPECS[0];
+
   // Live Race Telemetry State
   const [telemetry, setTelemetry] = useState<RaceTelemetry>({
     speedKmh: 0,
@@ -126,9 +164,6 @@ export default function App() {
     audioEnabled: false,
     positionRank: 1,
     rivals: [],
-    heldPowerup: null,
-    shieldActive: false,
-    spinoutActive: false,
   });
 
   // Last Completed Race Result
@@ -178,30 +213,84 @@ export default function App() {
     return window.__theRaceEngine;
   }, []);
 
-  // Synchronize GameState and Equipped Body Kit + Rims + Spoiler + Paint with the 3D Engine
+  // Persist selected map and synchronize 3D engine map
   useEffect(() => {
-    const syncWithEngine = () => {
+    try {
+      window.localStorage.setItem(STORAGE_MAP_KEY, selectedMapId);
+    } catch {
+      // ignore
+    }
+
+    const syncMap = () => {
       const engine = getEngine();
-      if (!engine) return false;
-      engine.setScreen(gameState);
-      engine.setBodyKit(equippedKit.id, equippedKit.physics, {
-        rimId: equippedRimId,
-        spoilerId: equippedSpoilerId,
-        paintHex: equippedPaintHex,
-      });
-      setAudioEnabled(engine.isAudioEnabled());
+      if (!engine || !engine.setMap) return false;
+      if (engine.getMap?.() !== selectedMapId) {
+        engine.setMap(selectedMapId);
+      }
       return true;
     };
 
-    if (!syncWithEngine()) {
+    if (!syncMap()) {
       const interval = window.setInterval(() => {
-        if (syncWithEngine()) {
+        if (syncMap()) {
           window.clearInterval(interval);
         }
       }, 100);
       return () => window.clearInterval(interval);
     }
-  }, [gameState, equippedKit, equippedRimId, equippedSpoilerId, equippedPaintHex, getEngine]);
+  }, [selectedMapId, getEngine]);
+
+  // Persist auto-rotate toggle
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(STORAGE_AUTO_ROTATE_KEY, String(autoRotateMaps));
+    } catch {
+      // ignore
+    }
+  }, [autoRotateMaps]);
+
+  // Synchronize GameState with 3D Engine without re-triggering heavy vehicle model swaps on screen flip
+  useEffect(() => {
+    const syncScreen = () => {
+      const engine = getEngine();
+      if (!engine) return false;
+      engine.setScreen(gameState);
+      setAudioEnabled(engine.isAudioEnabled());
+      return true;
+    };
+
+    if (!syncScreen()) {
+      const interval = window.setInterval(() => {
+        if (syncScreen()) {
+          window.clearInterval(interval);
+        }
+      }, 100);
+      return () => window.clearInterval(interval);
+    }
+  }, [gameState, getEngine]);
+
+  // Synchronize Equipped Car Kit / Parts / Paint only when vehicle customization changes
+  useEffect(() => {
+    const syncKit = () => {
+      const engine = getEngine();
+      if (!engine) return false;
+      engine.setBodyKit(equippedKit.id, equippedKit.physics, {
+        rimId: equippedRimId,
+        spoilerId: equippedSpoilerId,
+        paintHex: equippedPaintHex,
+      });
+      return true;
+    };
+
+    if (!syncKit()) {
+      const interval = window.setInterval(() => {
+        if (syncKit()) {
+          window.clearInterval(interval);
+        }
+      }, 100);
+      return () => window.clearInterval(interval);
+    }
+  }, [equippedKit, equippedRimId, equippedSpoilerId, equippedPaintHex, getEngine]);
 
   // Subscribe to 3D Engine Telemetry & Race Finish Events
   useEffect(() => {
@@ -223,6 +312,7 @@ export default function App() {
         const speedBonus =
           finishData.totalTime < 55 ? 50 : finishData.totalTime < 70 ? 25 : 10;
         const totalReward = rankReward + speedBonus;
+        const completedMapId = normalizeMapId(engine.getMap?.() || selectedMapIdRef.current);
 
         setCoins((prev) => prev + totalReward);
         setRaceResult({
@@ -231,7 +321,14 @@ export default function App() {
           lapTimes: finishData.lapTimes,
           coinsEarned: totalReward,
           finishRank: rank,
+          mapId: completedMapId,
         });
+
+        if (autoRotateMapsRef.current) {
+          const nextMapId = getNextRotatedMapId(completedMapId);
+          setSelectedMapId(nextMapId);
+        }
+
         setGameState('GAMEOVER');
       });
 
@@ -303,6 +400,29 @@ export default function App() {
     };
   }, [settingsOpen, gameState, equippedKit, equippedRimId, equippedSpoilerId, equippedPaintHex, getEngine]);
 
+  const requestLandscapeMode = useCallback(async () => {
+    try {
+      const docEl = document.documentElement as HTMLElement & {
+        webkitRequestFullscreen?: () => Promise<void>;
+      };
+      if (!document.fullscreenElement) {
+        if (docEl.requestFullscreen) {
+          await docEl.requestFullscreen();
+        } else if (docEl.webkitRequestFullscreen) {
+          await docEl.webkitRequestFullscreen();
+        }
+      }
+      const orientation = screen.orientation as ScreenOrientation & {
+        lock?: (orientation: string) => Promise<void>;
+      };
+      if (orientation && typeof orientation.lock === 'function') {
+        await orientation.lock('landscape');
+      }
+    } catch {
+      // Browser/iframe may block programmatic orientation lock until user rotates device
+    }
+  }, []);
+
   // Prevent browser pull-to-refresh or gesture scrolling during gameplay
   useEffect(() => {
     const preventDefaultTouch = (e: TouchEvent) => {
@@ -321,18 +441,45 @@ export default function App() {
     setGameState('MENU');
   }, []);
 
-  const handleStartRace = useCallback(() => {
+  const handleSelectMap = useCallback(
+    (mapId: MapId) => {
+      const normalized = normalizeMapId(mapId);
+      setSelectedMapId(normalized);
+      const engine = getEngine();
+      if (engine) {
+        engine.playUiClick('click');
+        if (engine.getMap?.() !== normalized) {
+          engine.setMap?.(normalized);
+        }
+      }
+    },
+    [getEngine]
+  );
+
+  const handleToggleAutoRotate = useCallback(() => {
+    setAutoRotateMaps((prev) => !prev);
     const engine = getEngine();
-    setGameState('RACE');
-    if (engine) {
-      engine.setBodyKit(equippedKit.id, equippedKit.physics, {
-        rimId: equippedRimId,
-        spoilerId: equippedSpoilerId,
-        paintHex: equippedPaintHex,
-      });
-      engine.startRace();
-    }
-  }, [equippedKit, equippedRimId, equippedSpoilerId, equippedPaintHex, getEngine]);
+    engine?.playUiClick('click');
+  }, [getEngine]);
+
+  const handleStartRace = useCallback(
+    (overrideMapId?: MapId) => {
+      requestLandscapeMode();
+      const engine = getEngine();
+      const targetMapId = normalizeMapId(overrideMapId ?? selectedMapId);
+      if (targetMapId !== selectedMapId) {
+        setSelectedMapId(targetMapId);
+      }
+      if (engine) {
+        if (engine.getMap?.() !== targetMapId) {
+          engine.setMap?.(targetMapId);
+        }
+        engine.startRace();
+      }
+      setGameState('RACE');
+    },
+    [getEngine, selectedMapId, requestLandscapeMode]
+  );
 
   const handleOpenGarage = useCallback(() => {
     setGameState('GARAGE');
@@ -409,6 +556,10 @@ export default function App() {
     }
   }, [getEngine]);
 
+  const completedMapSpec: MapSpec =
+    MAP_SPECS.find((m) => m.id === (raceResult.mapId || selectedMapId)) || MAP_SPECS[0];
+  const nextMapSpec: MapSpec = autoRotateMaps ? activeMapSpec : completedMapSpec;
+
   return (
     <div className="relative w-screen h-screen overflow-hidden select-none pointer-events-none">
       {/* STATE 1: SPLASH SCREEN */}
@@ -419,13 +570,17 @@ export default function App() {
         <MainMenu
           coins={coins}
           equippedKit={equippedKit}
-          onStartRace={handleStartRace}
+          selectedMapId={selectedMapId}
+          autoRotateMaps={autoRotateMaps}
+          onSelectMap={handleSelectMap}
+          onToggleAutoRotate={handleToggleAutoRotate}
+          onStartRace={() => handleStartRace()}
           onOpenGarage={handleOpenGarage}
           onOpenSettings={() => setSettingsOpen(true)}
         />
       )}
 
-      {/* STATE 3: GARAGE & CUSTOMIZATION SHELL (S64 COMPACT 13-FBX PACK) */}
+      {/* STATE 3: GARAGE & CUSTOMIZATION SHELL */}
       {gameState === 'GARAGE' && (
         <GarageScreen
           coins={coins}
@@ -447,7 +602,7 @@ export default function App() {
             }
             setGameState('MENU');
           }}
-          onStartRace={handleStartRace}
+          onStartRace={() => handleStartRace()}
         />
       )}
 
@@ -456,6 +611,7 @@ export default function App() {
         <RaceHUD
           telemetry={telemetry}
           equippedKit={equippedKit}
+          currentMap={activeMapSpec}
           onOpenMenu={() => setGameState('MENU')}
           onOpenSettings={() => setSettingsOpen(true)}
           onTriggerFinishDemo={handleTriggerFinishDemo}
@@ -468,7 +624,10 @@ export default function App() {
           result={raceResult}
           coins={coins}
           equippedKit={equippedKit}
-          onRetryRace={handleStartRace}
+          currentMap={completedMapSpec}
+          nextMap={nextMapSpec}
+          autoRotateMaps={autoRotateMaps}
+          onRetryRace={() => handleStartRace(nextMapSpec.id)}
           onOpenGarage={handleOpenGarage}
           onMainMenu={() => setGameState('MENU')}
         />
