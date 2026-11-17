@@ -39,17 +39,17 @@ function buildMapAsphaltTexture256(mapId) {
   const h = 256;
 
   const baseColor =
-    mapId === 'city' ? '#121622' : mapId === 'canyon' ? '#1f242d' : '#242934';
+    mapId === 'city' ? '#1e2638' : mapId === 'canyon' ? '#323946' : '#363f4e';
   ctx.fillStyle = baseColor;
   ctx.fillRect(0, 0, w, h);
 
   // Dual tire racing grooves
   const grooveGrad = ctx.createLinearGradient(0, 0, w, 0);
-  grooveGrad.addColorStop(0.0, 'rgba(38, 44, 56, 0.45)');
-  grooveGrad.addColorStop(0.25, 'rgba(14, 17, 24, 0.72)');
-  grooveGrad.addColorStop(0.5, 'rgba(26, 31, 42, 0.55)');
-  grooveGrad.addColorStop(0.75, 'rgba(14, 17, 24, 0.72)');
-  grooveGrad.addColorStop(1.0, 'rgba(38, 44, 56, 0.45)');
+  grooveGrad.addColorStop(0.0, 'rgba(64, 74, 92, 0.45)');
+  grooveGrad.addColorStop(0.25, 'rgba(28, 34, 46, 0.65)');
+  grooveGrad.addColorStop(0.5, 'rgba(48, 56, 72, 0.52)');
+  grooveGrad.addColorStop(0.75, 'rgba(28, 34, 46, 0.65)');
+  grooveGrad.addColorStop(1.0, 'rgba(64, 74, 92, 0.45)');
   ctx.fillStyle = grooveGrad;
   ctx.fillRect(0, 0, w, h);
 
@@ -57,8 +57,8 @@ function buildMapAsphaltTexture256(mapId) {
   for (let i = 0; i < 1800; i++) {
     const x = (i * 73) & 255;
     const y = (i * 151) & 255;
-    const v = 22 + (i % 28);
-    ctx.fillStyle = `rgb(${v}, ${v + 2}, ${v + 6})`;
+    const v = 42 + (i % 34);
+    ctx.fillStyle = `rgb(${v}, ${v + 3}, ${v + 8})`;
     ctx.fillRect(x, y, 2, 2);
   }
 

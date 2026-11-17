@@ -571,9 +571,6 @@ export default function App() {
           coins={coins}
           equippedKit={equippedKit}
           selectedMapId={selectedMapId}
-          autoRotateMaps={autoRotateMaps}
-          onSelectMap={handleSelectMap}
-          onToggleAutoRotate={handleToggleAutoRotate}
           onStartRace={() => handleStartRace()}
           onOpenGarage={handleOpenGarage}
           onOpenSettings={() => setSettingsOpen(true)}

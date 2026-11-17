@@ -32,11 +32,11 @@ export function buildGoldenHourAtmosphere(scene) {
   sunLight.shadow.mapSize.width = 512;
   sunLight.shadow.mapSize.height = 512;
   sunLight.shadow.camera.near = 0.08;
-  sunLight.shadow.camera.far = 2.4;
-  sunLight.shadow.camera.left = -0.55;
-  sunLight.shadow.camera.right = 0.55;
-  sunLight.shadow.camera.top = 0.48;
-  sunLight.shadow.camera.bottom = -0.42;
+  sunLight.shadow.camera.far = 3.2;
+  sunLight.shadow.camera.left = -0.85;
+  sunLight.shadow.camera.right = 0.85;
+  sunLight.shadow.camera.top = 0.85;
+  sunLight.shadow.camera.bottom = -0.85;
   sunLight.shadow.bias = -0.00012;
   sunLight.shadow.normalBias = 0.0006;
   sunLight.shadow.radius = 1.15;
@@ -605,7 +605,7 @@ export function buildGoldenHourAtmosphere(scene) {
 
     if (isShowroom) {
       // Enclosed Pit-Lane Garage: let the dedicated showroom rig + bay ceiling light sculpt the car
-      // without stacking extra full-strength outdoor directional lights on top.
+      // with balanced studio contrast (neither pitch-black nor overexposed).
       windowGlowLight.visible = false;
       lampKeyLight.visible = false;
       lampGlowPoint.visible = false;
@@ -613,21 +613,21 @@ export function buildGoldenHourAtmosphere(scene) {
       goldenFillLight.visible = false;
       rimLight.visible = false;
 
-      hemiLight.color.setHex(0x64748b);
-      hemiLight.groundColor.setHex(0x0f172a);
-      hemiLight.intensity = 0.24;
+      hemiLight.color.setHex(0x94a3b8);
+      hemiLight.groundColor.setHex(0x1e293b);
+      hemiLight.intensity = 0.34;
 
       if (targetScene) {
         if (targetScene.background && targetScene.background.isColor) {
-          targetScene.background.setHex(0x070b14);
+          targetScene.background.setHex(0x090e1a);
         }
         if (targetScene.fog) {
-          targetScene.fog.color.setHex(0x070b14);
-          targetScene.fog.density = 0.045;
+          targetScene.fog.color.setHex(0x090e1a);
+          targetScene.fog.density = 0.04;
         }
       }
       if (renderer) {
-        renderer.toneMappingExposure = 0.70;
+        renderer.toneMappingExposure = 0.72;
       }
       return;
     }
@@ -639,20 +639,22 @@ export function buildGoldenHourAtmosphere(scene) {
     sunLight.visible = true;
     goldenFillLight.visible = true;
     rimLight.visible = true;
+    goldenFillLight.position.set(0.55, 0.45, 0.55);
+    rimLight.position.set(0.25, 0.42, -0.65);
 
     if (mapId === 'city') {
-      sunLight.color.setHex(0x7dd3fc);
-      sunLight.intensity = 0.50;
-      sunLight.position.set(0.35, 0.72, -0.55);
+      sunLight.color.setHex(0xbae6fd);
+      sunLight.intensity = 0.72;
+      sunLight.position.set(0.42, 0.82, 0.38);
 
-      hemiLight.color.setHex(0x1e3a8a);
-      hemiLight.groundColor.setHex(0x090d16);
-      hemiLight.intensity = 0.30;
+      hemiLight.color.setHex(0x38bdf8);
+      hemiLight.groundColor.setHex(0x1e293b);
+      hemiLight.intensity = 0.54;
 
       goldenFillLight.color.setHex(0x38bdf8);
-      goldenFillLight.intensity = 0.18;
+      goldenFillLight.intensity = 0.30;
       rimLight.color.setHex(0xf472b6);
-      rimLight.intensity = 0.22;
+      rimLight.intensity = 0.32;
 
       if (targetScene) {
         if (targetScene.background && targetScene.background.isColor) {
@@ -660,25 +662,25 @@ export function buildGoldenHourAtmosphere(scene) {
         }
         if (targetScene.fog) {
           targetScene.fog.color.setHex(0x080d1d);
-          targetScene.fog.density = 0.26;
+          targetScene.fog.density = 0.24;
         }
       }
       if (renderer) {
-        renderer.toneMappingExposure = 0.70;
+        renderer.toneMappingExposure = 0.76;
       }
     } else if (mapId === 'canyon') {
-      sunLight.color.setHex(0xfde68a);
-      sunLight.intensity = 0.68;
-      sunLight.position.set(-0.48, 0.65, -0.52);
+      sunLight.color.setHex(0xfef3c7);
+      sunLight.intensity = 0.86;
+      sunLight.position.set(-0.45, 0.82, 0.45);
 
-      hemiLight.color.setHex(0x64748b);
-      hemiLight.groundColor.setHex(0x1e293b);
-      hemiLight.intensity = 0.32;
+      hemiLight.color.setHex(0x94a3b8);
+      hemiLight.groundColor.setHex(0x334155);
+      hemiLight.intensity = 0.56;
 
       goldenFillLight.color.setHex(0xfbbf24);
-      goldenFillLight.intensity = 0.18;
+      goldenFillLight.intensity = 0.28;
       rimLight.color.setHex(0x34d399);
-      rimLight.intensity = 0.16;
+      rimLight.intensity = 0.24;
 
       if (targetScene) {
         if (targetScene.background && targetScene.background.isColor) {
@@ -686,26 +688,26 @@ export function buildGoldenHourAtmosphere(scene) {
         }
         if (targetScene.fog) {
           targetScene.fog.color.setHex(0x1a2436);
-          targetScene.fog.density = 0.24;
+          targetScene.fog.density = 0.22;
         }
       }
       if (renderer) {
-        renderer.toneMappingExposure = 0.68;
+        renderer.toneMappingExposure = 0.74;
       }
     } else {
       // 'coast': Sunset Coastal Beach Highway
-      sunLight.color.setHex(0xffb84d);
-      sunLight.intensity = 0.70;
-      sunLight.position.set(-0.42, 0.58, -0.62);
+      sunLight.color.setHex(0xffd89b);
+      sunLight.intensity = 0.85;
+      sunLight.position.set(-0.48, 0.78, 0.42);
 
-      hemiLight.color.setHex(0x38bdf8);
-      hemiLight.groundColor.setHex(0x33261e);
-      hemiLight.intensity = 0.34;
+      hemiLight.color.setHex(0x7dd3fc);
+      hemiLight.groundColor.setHex(0x475569);
+      hemiLight.intensity = 0.58;
 
       goldenFillLight.color.setHex(0xfdba74);
-      goldenFillLight.intensity = 0.20;
+      goldenFillLight.intensity = 0.30;
       rimLight.color.setHex(0x38bdf8);
-      rimLight.intensity = 0.18;
+      rimLight.intensity = 0.26;
 
       if (targetScene) {
         if (targetScene.background && targetScene.background.isColor) {
@@ -713,13 +715,14 @@ export function buildGoldenHourAtmosphere(scene) {
         }
         if (targetScene.fog) {
           targetScene.fog.color.setHex(0x26293d);
-          targetScene.fog.density = 0.22;
+          targetScene.fog.density = 0.20;
         }
       }
       if (renderer) {
-        renderer.toneMappingExposure = 0.68;
+        renderer.toneMappingExposure = 0.74;
       }
     }
+    sunLight.shadow.needsUpdate = true;
   }
 
   return {

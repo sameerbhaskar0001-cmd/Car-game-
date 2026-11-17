@@ -776,15 +776,15 @@ export function buildRealWorldMap(mapId, splineData, scene) {
   rootGroup.add(gantryGroup);
 
   const gantrySpan = (roadHalfW + curbW) * 2.15;
-  const gantryH = 0.024;
-  const postGeo = trackGeo(new THREE.CylinderGeometry(0.0012, 0.0014, gantryH, 12));
+  const gantryH = 0.0155;
+  const postGeo = trackGeo(new THREE.CylinderGeometry(0.00075, 0.0009, gantryH, 12));
   for (const gx of [-gantrySpan * 0.5, gantrySpan * 0.5]) {
     const post = new THREE.Mesh(postGeo, structureMat);
-    post.position.set(gx, gantryH * 0.5 - 0.0006, 0);
+    post.position.set(gx, gantryH * 0.5 - 0.0004, 0);
     gantryGroup.add(post);
   }
 
-  const bannerGeo = trackGeo(new THREE.BoxGeometry(gantrySpan + 0.004, 0.0068, 0.0024));
+  const bannerGeo = trackGeo(new THREE.BoxGeometry(gantrySpan + 0.003, 0.0052, 0.0020));
   const bannerMat = trackMat(
     new THREE.MeshStandardMaterial({
       map: textures.gantryTex,
@@ -793,11 +793,11 @@ export function buildRealWorldMap(mapId, splineData, scene) {
     })
   );
   const bannerMesh = new THREE.Mesh(bannerGeo, bannerMat);
-  bannerMesh.position.set(0, gantryH - 0.002, 0);
+  bannerMesh.position.set(0, gantryH - 0.0012, 0);
   gantryGroup.add(bannerMesh);
 
   // 5 F1 Countdown Light Pods mounted beneath the Start/Finish Banner
-  const f1PodGeo = trackGeo(new THREE.SphereGeometry(0.00095, 12, 12));
+  const f1PodGeo = trackGeo(new THREE.SphereGeometry(0.00075, 12, 12));
   const f1LightMats = [];
   for (let l = 0; l < 5; l++) {
     const podMat = trackMat(
@@ -811,8 +811,8 @@ export function buildRealWorldMap(mapId, splineData, scene) {
     );
     f1LightMats.push(podMat);
     const pod = new THREE.Mesh(f1PodGeo, podMat);
-    const lx = (l - 2) * 0.0034;
-    pod.position.set(lx, gantryH - 0.0064, 0.0014);
+    const lx = (l - 2) * 0.0032;
+    pod.position.set(lx, gantryH - 0.0046, 0.0012);
     gantryGroup.add(pod);
   }
 

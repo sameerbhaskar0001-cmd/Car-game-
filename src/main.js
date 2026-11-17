@@ -76,13 +76,13 @@ async function initApp() {
   renderer.debug.checkShaderErrors = false;
   container.appendChild(renderer.domElement);
 
-  // Dark Asphalt-style Automotive Studio PMREM: 92% deep midnight (#050811) + 3 crisp studio softbox strips
-  // so black/dark cars stay rich obsidian black with razor-sharp edge reflections instead of RoomEnvironment whiteout.
+  // Balanced Automotive Studio PMREM: slate-midnight base (#141c2e) + crisp studio softbox strips
+  // so metallic bodywork catches rich sky/horizon highlights instead of crushing into black.
   function createAutomotiveStudioEnv() {
     const envScene = new THREE.Scene();
-    envScene.background = new THREE.Color(0x050811);
+    envScene.background = new THREE.Color(0x141c2e);
 
-    const studioAmbient = new THREE.HemisphereLight(0x334155, 0x050811, 0.35);
+    const studioAmbient = new THREE.HemisphereLight(0x94a3b8, 0x1e293b, 0.85);
     envScene.add(studioAmbient);
 
     const stripGeo = new THREE.BoxGeometry(1, 1, 1);
@@ -452,7 +452,7 @@ async function initApp() {
   showroomGroup.add(showroomLightTarget);
 
   // 1. Direct Overhead Studio Directional Light + Crisp Contact Shadow Mapping
-  const showroomOverheadDirLight = new THREE.DirectionalLight(0xffffff, 0.32);
+  const showroomOverheadDirLight = new THREE.DirectionalLight(0xffffff, 0.38);
   showroomOverheadDirLight.position.set(0.0, 0.095, 0.002);
   showroomOverheadDirLight.target = showroomLightTarget;
   showroomOverheadDirLight.castShadow = true;
@@ -468,25 +468,25 @@ async function initApp() {
   showroomGroup.add(showroomOverheadDirLight);
 
   // 2. Front-Right Warm Key Light (sculpts 3D hood bevels & side character lines)
-  const showroomKeyLight = new THREE.DirectionalLight(0xfff7ed, 0.52);
+  const showroomKeyLight = new THREE.DirectionalLight(0xfff7ed, 0.58);
   showroomKeyLight.position.set(0.024, 0.036, 0.032);
   showroomKeyLight.target = showroomLightTarget;
   showroomGroup.add(showroomKeyLight);
 
   // 3. Front-Left Cool Sky Fill Light (shadow side stays deeply 3D)
-  const showroomFillLight = new THREE.DirectionalLight(0x93c5fd, 0.14);
+  const showroomFillLight = new THREE.DirectionalLight(0x93c5fd, 0.18);
   showroomFillLight.position.set(-0.026, 0.024, 0.026);
   showroomFillLight.target = showroomLightTarget;
   showroomGroup.add(showroomFillLight);
 
   // 4. Rear-Top Golden Rim Backlight (crisp edge silhouette along roofline & rear spoiler)
-  const showroomRimLight = new THREE.DirectionalLight(0xfde68a, 0.32);
+  const showroomRimLight = new THREE.DirectionalLight(0xfde68a, 0.34);
   showroomRimLight.position.set(0.0, 0.032, -0.030);
   showroomRimLight.target = showroomLightTarget;
   showroomGroup.add(showroomRimLight);
 
   // 5. Subtle Cyan Bounce Light from glowing turntable ring
-  const showroomUnderFill = new THREE.PointLight(0x38bdf8, 0.06, 0.055, 1.4);
+  const showroomUnderFill = new THREE.PointLight(0x38bdf8, 0.07, 0.055, 1.4);
   showroomUnderFill.position.set(0.0, 0.0045, 0.018);
   showroomGroup.add(showroomUnderFill);
 
@@ -2896,16 +2896,17 @@ async function initApp() {
 
   function snapHomeStartGridCamera() {
     const stHome = physics.state;
+    // Front-3/4 hero shot from ahead & outer edge looking diagonally across the car down the open highway
     _showroomCamTarget
       .copy(stHome.position)
-      .addScaledVector(stHome.tangent, -0.0115)
-      .addScaledVector(stHome.right, -0.0074)
-      .addScaledVector(stHome.normal, 0.0046);
+      .addScaledVector(stHome.tangent, 0.0125)
+      .addScaledVector(stHome.right, -0.0085)
+      .addScaledVector(stHome.normal, 0.0042);
     _showroomLookTarget
       .copy(stHome.position)
-      .addScaledVector(stHome.tangent, 0.0095)
-      .addScaledVector(stHome.right, 0.0012)
-      .addScaledVector(stHome.normal, 0.0016);
+      .addScaledVector(stHome.tangent, -0.0035)
+      .addScaledVector(stHome.right, 0.0005)
+      .addScaledVector(stHome.normal, 0.0014);
     camCurrentPos.copy(_showroomCamTarget);
     camCurrentLookAt.copy(_showroomLookTarget);
     camera.up.set(0, 1, 0);
@@ -3308,20 +3309,20 @@ async function initApp() {
         camera.updateProjectionMatrix();
       }
 
-      const sway = Math.sin(elapsedTime * 0.35) * 0.0018;
-      const lift = Math.cos(elapsedTime * 0.28) * 0.0004;
-      const distBack = isPortraitScreen ? -0.0135 : -0.0115;
-      const sidePull = isPortraitScreen ? -0.0085 : -0.0074;
+      const sway = Math.sin(elapsedTime * 0.32) * 0.0014;
+      const lift = Math.cos(elapsedTime * 0.25) * 0.00035;
+      const distAhead = isPortraitScreen ? 0.0145 : 0.0125;
+      const sidePull = isPortraitScreen ? -0.0096 : -0.0085;
       _showroomCamTarget
         .copy(stHome.position)
-        .addScaledVector(stHome.tangent, distBack)
+        .addScaledVector(stHome.tangent, distAhead)
         .addScaledVector(stHome.right, sidePull + sway)
-        .addScaledVector(stHome.normal, 0.0046 + lift);
+        .addScaledVector(stHome.normal, 0.0042 + lift);
       _showroomLookTarget
         .copy(stHome.position)
-        .addScaledVector(stHome.tangent, 0.0095)
-        .addScaledVector(stHome.right, 0.0012)
-        .addScaledVector(stHome.normal, isPortraitScreen ? 0.0008 : 0.0016);
+        .addScaledVector(stHome.tangent, -0.0035)
+        .addScaledVector(stHome.right, 0.0005)
+        .addScaledVector(stHome.normal, isPortraitScreen ? 0.0008 : 0.0014);
 
       if (lastStageMode !== 'HOME') {
         camCurrentPos.copy(_showroomCamTarget);
@@ -3559,7 +3560,7 @@ async function initApp() {
       renderer.setRenderTarget(null);
       renderer.autoClear = true;
       renderer.render(scene, camera);
-      if (!isShowroomActive && microKart && microKart.sparkPoints && microKart.sparkPoints.visible) {
+      if (!isGarageMode && !isHomeOutdoorMode && microKart && microKart.sparkPoints && microKart.sparkPoints.visible) {
         const prevAutoClear = renderer.autoClear;
         renderer.autoClear = false;
         renderer.render(sparkScene, camera);

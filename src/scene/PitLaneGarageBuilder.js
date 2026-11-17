@@ -17,10 +17,10 @@ export function buildPitLaneGarage(scene, centerPos = new THREE.Vector3(0.0, 0.0
   const floorGeo = new THREE.PlaneGeometry(0.26, 0.22);
   const floorMat = new THREE.MeshStandardMaterial({
     map: concreteFloorTex,
-    color: 0x64748b,
+    color: 0x7c8ea6,
     roughness: 0.42,
     metalness: 0.20,
-    envMapIntensity: 0.38,
+    envMapIntensity: 0.40,
   });
   const floorMesh = new THREE.Mesh(floorGeo, floorMat);
   floorMesh.rotation.x = -Math.PI / 2;
@@ -28,8 +28,8 @@ export function buildPitLaneGarage(scene, centerPos = new THREE.Vector3(0.0, 0.0
   floorMesh.receiveShadow = true;
   rootGroup.add(floorMesh);
 
-  // Subtle Overhead Pit-Bay Illumination (keeps pit walls readable without washing out car shadows)
-  const bayCeilingLight = new THREE.PointLight(0xe0f2fe, 0.18, 0.28, 1.7);
+  // Balanced Overhead Pit-Bay Illumination (keeps pit walls readable without washing out car shadows)
+  const bayCeilingLight = new THREE.PointLight(0xe0f2fe, 0.24, 0.28, 1.6);
   bayCeilingLight.position.set(0.0, 0.056, 0.012);
   rootGroup.add(bayCeilingLight);
 
