@@ -26,9 +26,9 @@ export const MAP_SPECS: MapSpec[] = [
     id: 'coast',
     name: 'SUNSET COAST',
     shortName: 'COAST',
-    subtitle: 'Coastal Beach Highway',
-    environmentTag: 'OCEAN · BRIDGE · PALMS',
-    lengthLabel: '3.8 KM',
+    subtitle: 'Coastal Asphalt Circuit',
+    environmentTag: 'ASPHALT · BANKED · PALMS',
+    lengthLabel: '1.49 KM',
     laps: 3,
     accentHex: '#fb923c',
     secondaryHex: '#0ea5e9',
@@ -36,15 +36,15 @@ export const MAP_SPECS: MapSpec[] = [
     skyHorizonHex: '#fb923c',
     fogHex: '#2a2438',
     fogDensity: 0.32,
-    description: 'Golden-hour oceanfront highway with swaying palms, sandy bay, and suspension bridge.',
+    description: 'Golden-hour 15.5m wide asphalt circuit with banked turns, elevation climbs, and swaying coastal palms.',
   },
   {
     id: 'city',
     name: 'NEON CITY',
     shortName: 'CITY',
-    subtitle: 'Midnight City Circuit',
-    environmentTag: 'SKYLINE · TUNNEL · NEON',
-    lengthLabel: '3.6 KM',
+    subtitle: 'Midnight Neon Circuit',
+    environmentTag: 'WET ASPHALT · SKYLINE · NEON',
+    lengthLabel: '1.49 KM',
     laps: 3,
     accentHex: '#00e5ff',
     secondaryHex: '#ec4899',
@@ -52,15 +52,15 @@ export const MAP_SPECS: MapSpec[] = [
     skyHorizonHex: '#0f172a',
     fogHex: '#080d1d',
     fogDensity: 0.36,
-    description: 'High-speed downtown circuit through glowing skyscrapers, wet asphalt, and a highway tunnel.',
+    description: 'High-speed midnight circuit with glossy wet-asphalt reflections, glowing skyscrapers, and neon curbs.',
   },
   {
     id: 'canyon',
-    name: 'ALPINE PASS',
-    shortName: 'CANYON',
-    subtitle: 'Mountain Canyon Pass',
-    environmentTag: 'CLIFFS · GORGE · PINES',
-    lengthLabel: '4.1 KM',
+    name: 'ALPINE SNOW',
+    shortName: 'SNOW',
+    subtitle: 'Alpine Snow Pass',
+    environmentTag: 'SNOW · CLIFFS · PINES',
+    lengthLabel: '1.49 KM',
     laps: 3,
     accentHex: '#34d399',
     secondaryHex: '#fbbf24',
@@ -68,12 +68,17 @@ export const MAP_SPECS: MapSpec[] = [
     skyHorizonHex: '#475569',
     fogHex: '#182436',
     fogDensity: 0.34,
-    description: 'Sweeping mountain switchbacks, pine ridges, and a steel truss bridge over a misty gorge.',
+    description: 'Frost-covered mountain pass featuring banked snow corners, alpine cliffs, and evergreen pine ridges.',
   },
 ];
 
 export function normalizeMapId(id: string | undefined | null): MapId {
-  if (id === 'coast' || id === 'city' || id === 'canyon') return id;
+  if (!id) return 'coast';
+  const cleaned = String(id).trim().toLowerCase();
+  if (cleaned === 'coast' || cleaned === 'city' || cleaned === 'canyon') return cleaned;
+  if (cleaned.includes('neon') || cleaned.includes('city')) return 'city';
+  if (cleaned.includes('snow') || cleaned.includes('canyon') || cleaned.includes('alpine')) return 'canyon';
+  if (cleaned.includes('asphalt') || cleaned.includes('coast')) return 'coast';
   return 'coast';
 }
 

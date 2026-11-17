@@ -62,8 +62,18 @@ function buildMapAsphaltTexture256(mapId) {
     ctx.fillRect(x, y, 2, 2);
   }
 
-  // Outer shoulder lines
+  // Outer shoulder lines & wet neon puddle sheen
   if (mapId === 'city') {
+    // Subtle cyan/magenta wet reflection glow along damp wheel tracks
+    const wetSheen = ctx.createLinearGradient(0, 0, w, 0);
+    wetSheen.addColorStop(0.0, 'rgba(0, 229, 255, 0.16)');
+    wetSheen.addColorStop(0.28, 'rgba(14, 165, 233, 0.08)');
+    wetSheen.addColorStop(0.5, 'rgba(15, 23, 42, 0.0)');
+    wetSheen.addColorStop(0.72, 'rgba(236, 72, 153, 0.08)');
+    wetSheen.addColorStop(1.0, 'rgba(244, 63, 94, 0.16)');
+    ctx.fillStyle = wetSheen;
+    ctx.fillRect(0, 0, w, h);
+
     ctx.fillStyle = '#00e5ff';
     ctx.fillRect(10, 0, 4, h);
     ctx.fillStyle = '#f43f5e';
@@ -71,6 +81,7 @@ function buildMapAsphaltTexture256(mapId) {
   } else if (mapId === 'canyon') {
     ctx.fillStyle = '#e2e8f0';
     ctx.fillRect(10, 0, 4, h);
+    ctx.fillStyle = '#e2e8f0';
     ctx.fillRect(w - 14, 0, 4, h);
   } else {
     ctx.fillStyle = '#fb923c';
@@ -94,6 +105,56 @@ function buildMapAsphaltTexture256(mapId) {
   }
 
   return finalizeCanvasTexture(canvas, { isSRGB: true, repeatX: 1, repeatY: 72 });
+}
+
+/**
+ * Generates a non-sRGB grayscale roughness map for Neon City's wet/puddled asphalt:
+ * Dark puddle patches (low roughness ~0.06 -> mirror-like specular reflections)
+ * mixed with damp porous tarmac (roughness ~0.34).
+ */
+function buildCityWetRoughnessTexture256() {
+  const { canvas, ctx } = make256Canvas();
+  const w = 256;
+  const h = 256;
+
+  // Base damp asphalt roughness (~0.36 grayscale)
+  ctx.fillStyle = 'rgb(92, 92, 92)';
+  ctx.fillRect(0, 0, w, h);
+
+  // Smooth polished wet tire tracks along left & right lanes
+  const trackGrad = ctx.createLinearGradient(0, 0, w, 0);
+  trackGrad.addColorStop(0.0, 'rgb(110, 110, 110)');
+  trackGrad.addColorStop(0.26, 'rgb(28, 28, 28)');
+  trackGrad.addColorStop(0.50, 'rgb(76, 76, 76)');
+  trackGrad.addColorStop(0.74, 'rgb(28, 28, 28)');
+  trackGrad.addColorStop(1.0, 'rgb(110, 110, 110)');
+  ctx.fillStyle = trackGrad;
+  ctx.fillRect(0, 0, w, h);
+
+  // Organic rainwater puddles (near-zero roughness for mirror neon/headlight reflections)
+  const puddles = [
+    [62, 36, 38, 52],
+    [194, 88, 42, 60],
+    [74, 148, 44, 58],
+    [182, 206, 36, 48],
+    [128, 112, 30, 42],
+  ];
+  for (const [px, py, rx, ry] of puddles) {
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.scale(1.0, ry / rx);
+    const pGrad = ctx.createRadialGradient(0, 0, 4, 0, 0, rx);
+    pGrad.addColorStop(0.0, 'rgba(10, 10, 10, 0.95)');
+    pGrad.addColorStop(0.65, 'rgba(18, 18, 18, 0.80)');
+    pGrad.addColorStop(1.0, 'rgba(72, 72, 72, 0.0)');
+    ctx.fillStyle = pGrad;
+    ctx.beginPath();
+    ctx.arc(0, 0, rx, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  return finalizeCanvasTexture(canvas, { isSRGB: false, repeatX: 1, repeatY: 72 });
 }
 
 /**
@@ -247,6 +308,7 @@ export function getMapTextures(mapId = 'coast') {
 
   const bundle = {
     asphaltTex: buildMapAsphaltTexture256(safeId),
+    wetRoughnessTex: safeId === 'city' ? buildCityWetRoughnessTexture256() : null,
     terrainTex: buildMapTerrainTexture256(safeId),
     detailTex: buildMapDetailTexture256(safeId),
     gantryTex: createCheckeredGantryTexture(safeId),

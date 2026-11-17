@@ -639,87 +639,95 @@ export function buildGoldenHourAtmosphere(scene) {
     sunLight.visible = true;
     goldenFillLight.visible = true;
     rimLight.visible = true;
-    goldenFillLight.position.set(0.55, 0.45, 0.55);
-    rimLight.position.set(0.25, 0.42, -0.65);
 
     if (mapId === 'city') {
-      sunLight.color.setHex(0xbae6fd);
-      sunLight.intensity = 0.72;
-      sunLight.position.set(0.42, 0.82, 0.38);
+      sunLight.color.setHex(0xc4b5fd);
+      sunLight.intensity = 1.15;
+      sunLight.position.set(0.42, 0.82, 0.48);
 
       hemiLight.color.setHex(0x38bdf8);
-      hemiLight.groundColor.setHex(0x1e293b);
-      hemiLight.intensity = 0.54;
+      hemiLight.groundColor.setHex(0x1e1b4b);
+      hemiLight.intensity = 0.68;
 
-      goldenFillLight.color.setHex(0x38bdf8);
-      goldenFillLight.intensity = 0.30;
+      goldenFillLight.position.set(0.5, 0.35, -0.55);
+      goldenFillLight.color.setHex(0x00e5ff);
+      goldenFillLight.intensity = 0.52;
+
+      rimLight.position.set(-0.4, 0.35, -0.6);
       rimLight.color.setHex(0xf472b6);
-      rimLight.intensity = 0.32;
+      rimLight.intensity = 0.58;
 
       if (targetScene) {
         if (targetScene.background && targetScene.background.isColor) {
-          targetScene.background.setHex(0x050814);
+          targetScene.background.setHex(0x0a132c);
         }
         if (targetScene.fog) {
-          targetScene.fog.color.setHex(0x080d1d);
-          targetScene.fog.density = 0.24;
+          targetScene.fog.color.setHex(0x101c3d);
+          targetScene.fog.density = 0.11;
         }
       }
       if (renderer) {
-        renderer.toneMappingExposure = 0.76;
+        renderer.toneMappingExposure = 0.88;
       }
     } else if (mapId === 'canyon') {
-      sunLight.color.setHex(0xfef3c7);
-      sunLight.intensity = 0.86;
-      sunLight.position.set(-0.45, 0.82, 0.45);
+      // Alpine Snow Peaks: crisp bright alpine sun + sky bounce + clear rear rim highlight
+      sunLight.color.setHex(0xfffbeb);
+      sunLight.intensity = 1.95;
+      sunLight.position.set(-0.48, 0.78, 0.68);
 
-      hemiLight.color.setHex(0x94a3b8);
-      hemiLight.groundColor.setHex(0x334155);
-      hemiLight.intensity = 0.56;
+      hemiLight.color.setHex(0xbae6fd);
+      hemiLight.groundColor.setHex(0x64748b);
+      hemiLight.intensity = 1.05;
 
-      goldenFillLight.color.setHex(0xfbbf24);
-      goldenFillLight.intensity = 0.28;
-      rimLight.color.setHex(0x34d399);
-      rimLight.intensity = 0.24;
+      goldenFillLight.position.set(0.45, 0.42, -0.58);
+      goldenFillLight.color.setHex(0xe0f2fe);
+      goldenFillLight.intensity = 0.58;
+
+      rimLight.position.set(-0.38, 0.35, -0.62);
+      rimLight.color.setHex(0x7dd3fc);
+      rimLight.intensity = 0.55;
 
       if (targetScene) {
         if (targetScene.background && targetScene.background.isColor) {
-          targetScene.background.setHex(0x162032);
+          targetScene.background.setHex(0xc7dff2);
         }
         if (targetScene.fog) {
-          targetScene.fog.color.setHex(0x1a2436);
-          targetScene.fog.density = 0.22;
+          targetScene.fog.color.setHex(0xc7dff2);
+          targetScene.fog.density = 0.07;
         }
       }
       if (renderer) {
-        renderer.toneMappingExposure = 0.74;
+        renderer.toneMappingExposure = 0.96;
       }
     } else {
-      // 'coast': Sunset Coastal Beach Highway
-      sunLight.color.setHex(0xffd89b);
-      sunLight.intensity = 0.85;
-      sunLight.position.set(-0.48, 0.78, 0.42);
+      // 'coast': Sunset Coastal Beach Highway — warm golden sunlight + sky-blue fill + crisp rim
+      sunLight.color.setHex(0xffe0a6);
+      sunLight.intensity = 1.85;
+      sunLight.position.set(-0.55, 0.72, 0.72);
 
-      hemiLight.color.setHex(0x7dd3fc);
-      hemiLight.groundColor.setHex(0x475569);
-      hemiLight.intensity = 0.58;
+      hemiLight.color.setHex(0x93c5fd);
+      hemiLight.groundColor.setHex(0xb45309);
+      hemiLight.intensity = 0.95;
 
+      goldenFillLight.position.set(0.45, 0.45, -0.55);
       goldenFillLight.color.setHex(0xfdba74);
-      goldenFillLight.intensity = 0.30;
-      rimLight.color.setHex(0x38bdf8);
-      rimLight.intensity = 0.26;
+      goldenFillLight.intensity = 0.55;
+
+      rimLight.position.set(-0.45, 0.38, -0.65);
+      rimLight.color.setHex(0xfef08a);
+      rimLight.intensity = 0.62;
 
       if (targetScene) {
         if (targetScene.background && targetScene.background.isColor) {
-          targetScene.background.setHex(0x1e293b);
+          targetScene.background.setHex(0xe89c6c);
         }
         if (targetScene.fog) {
-          targetScene.fog.color.setHex(0x26293d);
-          targetScene.fog.density = 0.20;
+          targetScene.fog.color.setHex(0xd99b66);
+          targetScene.fog.density = 0.075;
         }
       }
       if (renderer) {
-        renderer.toneMappingExposure = 0.74;
+        renderer.toneMappingExposure = 0.96;
       }
     }
     sunLight.shadow.needsUpdate = true;

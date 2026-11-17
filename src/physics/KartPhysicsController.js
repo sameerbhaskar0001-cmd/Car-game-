@@ -12,72 +12,66 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
   // -------------------------------------------------------------------------
   let samples = [];
   let N = 0;
-  let totalLength = 3.8371;
+  let totalLength = 3.2825;
   let smoothPositions = [];
   let smoothTangents = [];
   let smoothNormals = [];
   let smoothRights = [];
   let smoothBanks = [];
+  let smoothHalfWidths = [];
+  let smoothRacingOffsets = [];
+  let smoothRacingFactors = [];
   let rawCurvatures = new Float32Array(0);
   let smoothCurvatures = new Float32Array(0);
-  let startFinishIdx = 646;
+  let startFinishIdx = 1;
   let startFinishArc = 0;
   let sectorStartArcs = {};
+  let trackCheckpoints = [];
+  let playerGridSlot = null;
 
   function buildSplineTables(nextSplineData) {
     samples = nextSplineData.samples;
     N = samples.length;
-    totalLength = nextSplineData.total_length_m || 3.8371;
+    totalLength = nextSplineData.total_length_m || 3.2825;
+    trackCheckpoints = Array.isArray(nextSplineData.checkpoints) ? nextSplineData.checkpoints : [];
+    playerGridSlot =
+      Array.isArray(nextSplineData.gridSlots) && nextSplineData.gridSlots.length > 0
+        ? nextSplineData.gridSlots[0]
+        : null;
 
+    // Keep smoothPositions 1:1 locked to the GLB centerLine vertices so the car never sinks under
+    // hill crests or cuts inside curved road edges!
     smoothPositions = samples.map((s) => new THREE.Vector3().fromArray(s.position));
-    for (let pass = 0; pass < 2; pass++) {
-      const nextP = smoothPositions.map((v) => v.clone());
-      for (let i = 0; i < N; i++) {
-        const pPrev = smoothPositions[(i - 1 + N) % N];
-        const pCurr = smoothPositions[i];
-        const pNext = smoothPositions[(i + 1) % N];
-        nextP[i]
-          .copy(pCurr)
-          .multiplyScalar(0.6)
-          .addScaledVector(pPrev, 0.2)
-          .addScaledVector(pNext, 0.2);
-      }
-      for (let i = 0; i < N; i++) {
-        smoothPositions[i].copy(nextP[i]);
-      }
-    }
 
     smoothTangents = samples.map((s) => new THREE.Vector3().fromArray(s.tangent).normalize());
     smoothNormals = samples.map((s) => new THREE.Vector3().fromArray(s.normal).normalize());
     smoothRights = samples.map((s) => new THREE.Vector3().fromArray(s.right).normalize());
     smoothBanks = samples.map((s) => s.bank_deg || 0);
+    smoothHalfWidths = samples.map((s) => s.half_width_m || 0.01705);
+    smoothRacingOffsets = samples.map((s) => s.racing_line_offset_m || 0.0);
+    smoothRacingFactors = samples.map((s) => s.racing_line_speed_factor || 1.0);
 
-    for (let pass = 0; pass < 4; pass++) {
-      const nextT = smoothTangents.map((v) => v.clone());
-      const nextN = smoothNormals.map((v) => v.clone());
-      const nextB = smoothBanks.slice();
-      const weights = [1, 2, 3, 2, 1];
-      for (let i = 0; i < N; i++) {
-        nextT[i].set(0, 0, 0);
-        nextN[i].set(0, 0, 0);
-        let bSum = 0;
-        for (let k = -2; k <= 2; k++) {
-          const idx = (i + k + N) % N;
-          const w = weights[k + 2];
-          nextT[i].addScaledVector(smoothTangents[idx], w);
-          nextN[i].addScaledVector(smoothNormals[idx], w);
-          bSum += smoothBanks[idx] * w;
-        }
-        nextT[i].normalize();
-        nextN[i].normalize();
-        nextB[i] = bSum / 9.0;
-      }
-      for (let i = 0; i < N; i++) {
-        smoothTangents[i].copy(nextT[i]);
-        smoothRights[i].crossVectors(smoothTangents[i], nextN[i]).normalize();
-        smoothNormals[i].crossVectors(smoothRights[i], smoothTangents[i]).normalize();
-        smoothBanks[i] = nextB[i];
-      }
+    const worldUp = new THREE.Vector3(0, 1, 0);
+    const _r0 = new THREE.Vector3();
+    const _u0 = new THREE.Vector3();
+
+    for (let i = 0; i < N; i++) {
+      _r0.crossVectors(smoothTangents[i], worldUp).normalize();
+      _u0.crossVectors(_r0, smoothTangents[i]).normalize();
+      const bankRad = THREE.MathUtils.degToRad(smoothBanks[i]);
+      const cosB = Math.cos(bankRad);
+      const sinB = Math.sin(bankRad);
+      // Exact GameShipKit GLB banking basis: right = r0*cosB - u0*sinB, normal = u0*cosB + r0*sinB
+      smoothRights[i]
+        .copy(_r0)
+        .multiplyScalar(cosB)
+        .addScaledVector(_u0, -sinB)
+        .normalize();
+      smoothNormals[i]
+        .copy(_u0)
+        .multiplyScalar(cosB)
+        .addScaledVector(_r0, sinB)
+        .normalize();
     }
 
     rawCurvatures = new Float32Array(N);
@@ -98,7 +92,7 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
       smoothCurvatures[i] = cSum / 9.0;
     }
 
-    startFinishIdx = Math.min(nextSplineData.startFinishIdx || 646, N - 1);
+    startFinishIdx = Math.min(nextSplineData.startFinishIdx ?? 1, N - 1);
     sectorStartArcs = {};
 
     for (let i = 0; i < N; i++) {
@@ -109,7 +103,9 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
     }
 
     startFinishArc = samples[startFinishIdx].arc_length_m;
-    sectorStartArcs[6] = (startFinishArc - 0.022 + totalLength) % totalLength;
+    sectorStartArcs[6] = playerGridSlot
+      ? playerGridSlot.s
+      : (startFinishArc - 0.024 + totalLength) % totalLength;
   }
 
   buildSplineTables(splineData);
@@ -121,6 +117,8 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
   const _rotMat = new THREE.Matrix4();
   const _baseQuat = new THREE.Quaternion();
   const _yawQuat = new THREE.Quaternion();
+  const _impactPos = new THREE.Vector3();
+  const _impactNormal = new THREE.Vector3();
   const _sampleOut = {
     index: 0,
     sector: 6,
@@ -129,6 +127,9 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
     right: new THREE.Vector3(),
     normal: new THREE.Vector3(),
     bankDeg: 0,
+    halfWidth: 0.01705,
+    racingLineOffset: 0.0,
+    racingLineSpeedFactor: 1.0,
     signedCurvature: 0,
     slope: 0,
   };
@@ -140,6 +141,9 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
     right: new THREE.Vector3(),
     normal: new THREE.Vector3(),
     bankDeg: 0,
+    halfWidth: 0.01705,
+    racingLineOffset: 0.0,
+    racingLineSpeedFactor: 1.0,
     signedCurvature: 0,
     slope: 0,
   };
@@ -180,10 +184,24 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
       alpha
     );
     const bankDeg = THREE.MathUtils.lerp(smoothBanks[i0], smoothBanks[i1], alpha);
+    const halfWidth = THREE.MathUtils.lerp(smoothHalfWidths[i0], smoothHalfWidths[i1], alpha);
+    const racingLineOffset = THREE.MathUtils.lerp(
+      smoothRacingOffsets[i0],
+      smoothRacingOffsets[i1],
+      alpha
+    );
+    const racingLineSpeedFactor = THREE.MathUtils.lerp(
+      smoothRacingFactors[i0],
+      smoothRacingFactors[i1],
+      alpha
+    );
 
     out.index = i0;
     out.sector = s0.sector;
     out.bankDeg = bankDeg;
+    out.halfWidth = halfWidth;
+    out.racingLineOffset = racingLineOffset;
+    out.racingLineSpeedFactor = racingLineSpeedFactor;
     out.signedCurvature = signedCurvature;
     out.slope = out.tangent.y;
     return out;
@@ -224,6 +242,7 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
     accelMultiplier: 1.0,
     handlingMultiplier: 1.0,
     steerInput: 0.0,
+    isBraking: false,
     isDrifting: false,
     driftDir: 0, // -1 left, +1 right
     driftAngle: 0.0,
@@ -234,12 +253,21 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
     hopHeight: 0.0,
     hopVel: 0.0,
     rampPitch: 0.0,
+    terrainPitch: 0.0,
+    slopeAngleRad: 0.0,
     onRampSurface: false,
     rampSurfaceHeight: 0.0,
     spinoutTimer: 0.0,
     spinoutDir: 1,
     carImpactTimer: 0.0,
     cameraShake: 0.0,
+    pendingImpactCount: 0,
+    pendingImpacts: [
+      { pos: new THREE.Vector3(), normal: new THREE.Vector3(), severity: 0.0 },
+      { pos: new THREE.Vector3(), normal: new THREE.Vector3(), severity: 0.0 },
+      { pos: new THREE.Vector3(), normal: new THREE.Vector3(), severity: 0.0 },
+      { pos: new THREE.Vector3(), normal: new THREE.Vector3(), severity: 0.0 },
+    ],
     curbRumble: 0.0,
     railImpactActive: false,
     railHitCooldown: 0.0,
@@ -293,11 +321,13 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
     );
   }
 
-  function computeRailZone(latOffset) {
-    if (latOffset <= -0.0122) return 'L-RAIL';
-    if (latOffset >= 0.0122) return 'R-RAIL';
-    if (latOffset <= -0.0108) return 'L-CURB';
-    if (latOffset >= 0.0108) return 'R-CURB';
+  function computeRailZone(latOffset, halfW = 0.01705) {
+    const railLim = Math.max(0.0086, halfW - 0.0038);
+    const curbLim = Math.max(0.0074, halfW - 0.0052);
+    if (latOffset <= -railLim) return 'L-RAIL';
+    if (latOffset >= railLim) return 'R-RAIL';
+    if (latOffset <= -curbLim) return 'L-CURB';
+    if (latOffset >= curbLim) return 'R-CURB';
     return 'TRACK';
   }
 
@@ -307,18 +337,28 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
    */
   function syncPoseFromSpline() {
     const newFrame = sampleTrackAtArcLength(state.s);
+    const aheadFrame = sampleTrackAtArcLength(state.s + 0.012, _nextSampleOut);
+    const halfW = newFrame.halfWidth || 0.01705;
     state.sector = newFrame.sector;
     state.bankDeg = newFrame.bankDeg;
+    state.halfWidth = halfW;
     state.slope = newFrame.slope;
     state.curvature = Math.abs(newFrame.signedCurvature);
     state.signedCurvature = newFrame.signedCurvature;
-    state.distToLeftRailMm = (state.lateralOffset - -0.0124) * 1000;
-    state.distToRightRailMm = (0.0124 - state.lateralOffset) * 1000;
-    state.railZone = computeRailZone(state.lateralOffset);
+    state.distToLeftRailMm = (state.lateralOffset - -halfW) * 1000;
+    state.distToRightRailMm = (halfW - state.lateralOffset) * 1000;
+    state.railZone = computeRailZone(state.lateralOffset, halfW);
     state.activeKeysStr = computeActiveKeysStr();
     state.tangent.copy(newFrame.tangent);
     state.right.copy(newFrame.right);
     state.normal.copy(newFrame.normal);
+
+    // Calculate forward spline gradient/slope pitch at the car's current s position
+    // (Combining instantaneous tangent slope and look-ahead wheelbase gradient)
+    const wheelBaseDy = aheadFrame.position.y - newFrame.position.y;
+    const lookAheadSlope = THREE.MathUtils.clamp(wheelBaseDy / 0.012, -0.65, 0.65);
+    const blendedSlope = newFrame.slope * 0.55 + lookAheadSlope * 0.45;
+    state.slopeAngleRad = Math.asin(THREE.MathUtils.clamp(blendedSlope, -0.65, 0.65));
 
     // Compute magnetic/aerodynamic downforce G-load (1.0G + speed^2 banking G)
     state.downforceG =
@@ -350,6 +390,11 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
   }
 
   // Initialize exact right-handed pose at the Start/Finish gantry before frame 1
+  if (playerGridSlot) {
+    state.s = playerGridSlot.s;
+    state.lateralOffset = playerGridSlot.lateralOffset;
+    state.headingYaw = playerGridSlot.headingYaw || 0.0;
+  }
   syncPoseFromSpline();
 
   function setAutopilot(val) {
@@ -378,15 +423,19 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
   }
 
   function teleportToSector(sectorNum) {
-    const targetArc = sectorStartArcs[sectorNum] ?? sectorStartArcs[6] ?? 0.0;
+    const isStartGrid = sectorNum === 6 && playerGridSlot;
+    const targetArc = isStartGrid
+      ? playerGridSlot.s
+      : (sectorStartArcs[sectorNum] ?? sectorStartArcs[6] ?? 0.0);
     state.s = targetArc;
-    state.lateralOffset = 0.0;
+    state.lateralOffset = isStartGrid ? playerGridSlot.lateralOffset : 0.0;
     state.lateralVel = 0.0;
-    state.headingYaw = 0.0;
+    state.headingYaw = isStartGrid ? (playerGridSlot.headingYaw || 0.0) : 0.0;
     state.turnRight = 0.0;
     state.steerSmooth = 0.0;
     state.steerAngle = 0.0;
     state.steerInput = 0.0;
+    state.isBraking = false;
     state.driftAngle = 0.0;
     state.isDrifting = false;
     state.driftDir = 0;
@@ -403,11 +452,14 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
     state.hopHeight = 0.0;
     state.hopVel = 0.0;
     state.rampPitch = 0.0;
+    state.terrainPitch = 0.0;
+    state.slopeAngleRad = 0.0;
     state.onRampSurface = false;
     state.rampSurfaceHeight = 0.0;
     state.spinoutTimer = 0.0;
     state.carImpactTimer = 0.0;
     state.cameraShake = 0.0;
+    state.pendingImpactCount = 0;
     state.speed = state.autopilot || state.victoryCruise ? 0.187 : 0.0;
     syncPoseFromSpline();
   }
@@ -418,8 +470,12 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
     state.totalRaceTime = 0.0;
     state.currentLapTime = 0.0;
     state.lapCount = 1;
-    state.lapDistanceTraveled = 0.0;
-    state.totalDistanceTraveled = 0.0;
+    const startOffset = playerGridSlot ? (playerGridSlot.signedOffsetFromStart || -0.025) : 0.0;
+    state.lapDistanceTraveled = startOffset;
+    state.totalDistanceTraveled = startOffset;
+    state.nextCheckpointIdx = 0;
+    state.checkpointsPassedCount = 0;
+    state.totalCheckpoints = trackCheckpoints.length || 8;
     state.lapTimes = [];
     state.finishTotalTime = null;
     state.raceClockActive = false;
@@ -612,12 +668,13 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
         state.boostCharge = Math.max(0.2, state.boostCharge - clampedDt * 0.35);
       }
     } else if (state.raceFinished) {
-      // Post-finish stop: lock out manual throttle/steering and gently straighten the car as it brakes to a stop
+      // Cinematic Victory Finish Cruise: lock out manual input & coast heroically across the finish line
       throttle = 0.0;
       turnRight = 0.0;
       state.boostActive = 0.0;
       state.isDrifting = false;
       state.driftDir = 0;
+      state.speed = Math.max(0.0, state.speed * Math.exp(-0.85 * clampedDt));
       const stopAlpha = 1.0 - Math.exp(-8.0 * clampedDt);
       state.headingYaw = THREE.MathUtils.lerp(state.headingYaw, 0.0, stopAlpha);
       state.driftAngle = THREE.MathUtils.lerp(state.driftAngle, 0.0, stopAlpha);
@@ -636,6 +693,8 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
       if (keys.backward) throttle -= 1.0;
       turnRight = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
     }
+
+    state.isBraking = Boolean(!isAiCruise && keys.backward && !state.countdownLocked);
 
     if (state.carImpactTimer > 0) {
       state.carImpactTimer = Math.max(0.0, state.carImpactTimer - clampedDt);
@@ -883,17 +942,17 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
       if (
         state.railImpactActive ||
         state.speed <= 0.08 ||
-        Math.abs(state.lateralOffset) >= 0.0122
+        Math.abs(state.lateralOffset) >= 0.0162
       ) {
         state.cornerCleanTimer = 0.0;
       } else if (
-        Math.abs(frame.signedCurvature) > 0.25 &&
+        Math.abs(frame.signedCurvature) > 0.22 &&
         state.speed > 0.11 &&
-        Math.abs(state.lateralOffset) < 0.0118 &&
+        Math.abs(state.lateralOffset) < 0.0156 &&
         !state.railImpactActive
       ) {
         state.cornerCleanTimer += clampedDt;
-      } else if (Math.abs(frame.signedCurvature) < 0.20) {
+      } else if (Math.abs(frame.signedCurvature) < 0.18) {
         if (state.cornerCleanTimer >= 0.35 && throttle > 0) {
           state.boostActive = Math.max(state.boostActive, 0.65);
           state.cornerCleanTimer = 0.0;
@@ -911,9 +970,9 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
         turnRight * 0.024 * (0.35 + 0.65 * Math.min(1.0, Math.abs(state.speed) / 0.10));
     } else {
       const handlingBoost = state.handlingMultiplier || 1.0;
-      // Subtle natural centrifugal pull on sharp curves so corners feel alive without fighting the player
+      // Subtle natural centrifugal pull on curves so corners feel alive without fighting the player
       const centrifugalPull =
-        -Math.tanh(frame.signedCurvature * 0.45) * Math.abs(state.speed) * 0.028;
+        -Math.tanh(frame.signedCurvature * 0.40) * Math.abs(state.speed) * 0.024;
       lateralDot =
         state.speed * (-Math.sin(state.headingYaw)) * 0.92 * handlingBoost +
         state.steerSmooth * state.speed * 0.095 * handlingBoost +
@@ -922,26 +981,33 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
     state.lateralVel = lateralDot;
     state.lateralOffset += lateralDot * clampedDt;
 
-    // 3. Forgiving FIA Curbs & Smooth Arcade Guardrail Wall-Gliding (30.8mm Roadbed)
+    // 3. Forgiving FIA Curbs & Smooth Arcade Guardrail Wall-Gliding (Dynamic Road Width from JSON)
     state.curbRumble = 0.0;
+    const halfW = frame.halfWidth || 0.01705;
+    const curbStartLat = Math.max(0.0074, halfW - 0.0052);
+    const railLimitLat = Math.max(0.0086, halfW - 0.0038);
     const absLat = Math.abs(state.lateralOffset);
     const signLatCurrent = Math.sign(state.lateralOffset) || 1;
     state.angledIntoRail =
-      absLat >= 0.0112 &&
+      absLat >= curbStartLat + 0.0006 &&
       ((signLatCurrent > 0 && state.headingYaw < -0.05) ||
         (signLatCurrent < 0 && state.headingYaw > 0.05));
     state.steeringAway =
-      absLat >= 0.0108 &&
+      absLat >= curbStartLat &&
       ((signLatCurrent > 0 && turnRight < 0) || (signLatCurrent < 0 && turnRight > 0));
 
-    if (absLat < 0.0118) {
+    if (absLat < railLimitLat - 0.0006) {
       state.railImpactActive = false;
     }
 
-    if (absLat >= 0.0108 && absLat < 0.0122) {
+    if (absLat >= curbStartLat && absLat < railLimitLat) {
       // Stage 1 — Red/White FIA Curbs: tactile rumble feedback with ZERO speed penalty!
-      state.curbRumble = THREE.MathUtils.clamp((absLat - 0.0108) / 0.0014, 0.0, 1.0);
-    } else if (absLat >= 0.0122) {
+      state.curbRumble = THREE.MathUtils.clamp(
+        (absLat - curbStartLat) / Math.max(0.0005, railLimitLat - curbStartLat),
+        0.0,
+        1.0
+      );
+    } else if (absLat >= railLimitLat) {
       // Stage 2 — Guardrail Wall Gliding: smooth deflection keeping >90% speed & active boost!
       const signLat = Math.sign(state.lateralOffset) || 1;
       state.curbRumble = 1.0;
@@ -955,18 +1021,37 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
           state.railHitCooldown = 0.25;
 
           // Gentle inward nudge away from guardrail while preserving 97% forward speed
-          state.lateralOffset = signLat * 0.0116;
+          state.lateralOffset = signLat * (railLimitLat - 0.0008);
           state.lateralVel = -signLat * 0.008;
           state.speed *= 0.97;
-          if (onRailImpactCallback) onRailImpactCallback(0.22);
+
+          _impactPos
+            .copy(frame.position)
+            .addScaledVector(frame.right, signLat * railLimitLat)
+            .addScaledVector(frame.normal, 0.0018);
+          _impactNormal
+            .copy(frame.right)
+            .multiplyScalar(-signLat)
+            .addScaledVector(frame.normal, 0.35)
+            .normalize();
+          const hitSeverity = THREE.MathUtils.clamp(Math.abs(state.speed) / 0.145, 0.35, 1.0);
+          if (state.pendingImpactCount < state.pendingImpacts.length) {
+            const slot = state.pendingImpacts[state.pendingImpactCount++];
+            slot.pos.copy(_impactPos);
+            slot.normal.copy(_impactNormal);
+            slot.severity = hitSeverity;
+          }
+          if (onRailImpactCallback) {
+            onRailImpactCallback(hitSeverity, _impactPos, _impactNormal);
+          }
         } else {
-          state.lateralOffset = signLat * 0.0118;
+          state.lateralOffset = signLat * (railLimitLat - 0.0005);
         }
 
         if (steeringAway) {
           state.railImpactActive = false;
           state.headingYaw = signLat * 0.10;
-          state.lateralOffset = signLat * 0.0112;
+          state.lateralOffset = signLat * (curbStartLat + 0.0004);
           state.wallStuckTimer = 0.0;
         } else {
           // Smoothly align car nose parallel to the guardrail so it glides cleanly along the wall
@@ -977,7 +1062,7 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
           );
         }
       } else {
-        state.lateralOffset = signLat * 0.0118;
+        state.lateralOffset = signLat * (railLimitLat - 0.0005);
         state.lateralVel = 0.0;
       }
     } else {
@@ -992,6 +1077,19 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
         : Math.max(0.25, Math.cos(state.headingYaw));
     const ds = (state.speed * forwardProjection * clampedDt) / apexFactor;
     state.s = ((state.s + ds) % totalLength + totalLength) % totalLength;
+
+    // Sequential Checkpoint Progression (Checkpoint_00 .. Checkpoint_07 from GameShipKit JSON)
+    if (trackCheckpoints.length > 0 && ds > 0) {
+      const targetCp = trackCheckpoints[state.nextCheckpointIdx || 0];
+      if (targetCp) {
+        const distPastCp =
+          ((state.s - targetCp.s) % totalLength + totalLength) % totalLength;
+        if (distPastCp >= 0 && distPastCp <= totalLength * 0.22) {
+          state.checkpointsPassedCount = (state.checkpointsPassedCount || 0) + 1;
+          state.nextCheckpointIdx = ((state.nextCheckpointIdx || 0) + 1) % trackCheckpoints.length;
+        }
+      }
+    }
 
     // Continuous 3-Lap Total Race Clock & Lap Completion (Manual Mode only)
     if (state.autopilot) {
@@ -1011,24 +1109,30 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
       if (!state.countdownLocked && state.raceClockActive) {
         state.currentLapTime += clampedDt;
         state.totalRaceTime += clampedDt;
-        state.lapDistanceTraveled = Math.max(0.0, (state.lapDistanceTraveled || 0.0) + ds);
-        state.totalDistanceTraveled = Math.max(0.0, (state.totalDistanceTraveled || 0.0) + ds);
+        state.lapDistanceTraveled = (state.lapDistanceTraveled ?? 0.0) + ds;
+        state.totalDistanceTraveled = (state.totalDistanceTraveled ?? 0.0) + ds;
       }
 
       // Reliable finish-line crossing detection:
-      // Checks forward arc-crossing across startFinishArc once the car has driven at least 65% of a lap
-      // OR if net lap distance traveled reaches 100% of totalLength.
+      // Checks forward arc-crossing across startFinishArc once the car has passed sequential checkpoints
+      // and driven at least 65% of a lap OR if net lap distance traveled reaches 100% of totalLength.
       if (state.speed > 0 && state.currentLapTime > 3.0) {
         const distBefore =
           ((startFinishArc - prevS) % totalLength + totalLength) % totalLength;
+        const minCheckpointsRequired =
+          trackCheckpoints.length > 0 ? Math.max(1, Math.floor(trackCheckpoints.length * 0.5)) : 0;
+        const checkpointsOk = (state.checkpointsPassedCount || 0) >= minCheckpointsRequired;
         const crossedFinishLine =
           distBefore > 0 &&
           distBefore <= Math.max(ds * 2.5, 0.045) &&
-          state.lapDistanceTraveled >= totalLength * 0.65;
+          state.lapDistanceTraveled >= totalLength * 0.65 &&
+          checkpointsOk;
         const completedFullLoopDistance = state.lapDistanceTraveled >= totalLength * 0.995;
 
         if (crossedFinishLine || completedFullLoopDistance) {
           state.lapDistanceTraveled = 0.0;
+          state.checkpointsPassedCount = 1;
+          state.nextCheckpointIdx = trackCheckpoints.length > 1 ? 1 : 0;
           state.lastLapTime = state.currentLapTime;
           if (state.bestLapTime === null || state.lastLapTime < state.bestLapTime) {
             state.bestLapTime = state.lastLapTime;
@@ -1049,13 +1153,13 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
               );
             }
           } else {
-            // 3 Laps Completed -> Freeze car controls & trigger Race Complete!
+            // 3 Laps Completed -> Trigger Cinematic Victory Finish Roll-Out!
             state.finishTotalTime = state.totalRaceTime;
             state.raceFinished = true;
             state.raceClockActive = false;
-            state.victoryCruise = false;
+            state.victoryCruise = true;
             state.boostActive = 0.0;
-            state.speed = 0.0;
+            state.speed = Math.max(state.speed, 0.095);
             kbKeys.forward = false;
             kbKeys.backward = false;
             kbKeys.left = false;
@@ -1119,8 +1223,29 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
       );
     }
 
-    // Re-evaluate exact 3D pose & right-handed orientation quaternion on the banked spline
+    //Re-evaluate exact 3D pose & right-handed orientation quaternion on the banked spline
     syncPoseFromSpline();
+
+    // Dynamic Terrain Pitch & Chassis Suspension:
+    // Combine forward spline gradient angle (state.slopeAngleRad) with acceleration squat / brake dive
+    // so the car's 3D chassis nose visibly points up on climbs/ramps and points down on descents.
+    // Note: in kartRoot local space (+X left, +Y up, +Z forward), negative rotation.x tilts the nose UP.
+    const accelSquatPitch =
+      throttle > 0
+        ? -0.022 * (state.boostActive > 0 ? 1.65 : 1.0)
+        : throttle < 0 && state.speed > 0.01
+          ? 0.032
+          : 0.0;
+    const targetTerrainPitch = THREE.MathUtils.clamp(
+      -(state.slopeAngleRad || 0.0) * 0.55 + accelSquatPitch,
+      -0.24,
+      0.24
+    );
+    state.terrainPitch = THREE.MathUtils.lerp(
+      state.terrainPitch || 0.0,
+      targetTerrainPitch,
+      1.0 - Math.exp(-14.0 * clampedDt)
+    );
 
     return state;
   }
