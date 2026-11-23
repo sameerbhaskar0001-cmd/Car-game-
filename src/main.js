@@ -14,6 +14,11 @@ import { preloadCoreCosmoCars, preloadAllCosmoCars } from './scene/CosmoCarLoade
 import { loadS64ModularCar } from './scene/S64CarLoader.js';
 import { normalizeCarId, normalizeMapId } from './types/game';
 import { buildGoldenHourAtmosphere } from './scene/GoldenHourAtmosphere.js';
+import {
+  buildWeatherSystem,
+  normalizeWeatherMode,
+  getNextWeatherMode,
+} from './scene/WeatherSystem.js';
 import { getTrackSplineForMap } from './scene/WorldTrackRegistry.js';
 import { buildPitLaneGarage } from './scene/PitLaneGarageBuilder.js';
 import { buildRealWorldMap } from './scene/RealWorldMapBuilder.js';
@@ -272,11 +277,14 @@ async function initApp() {
   // 2. INITIALIZE REAL-WORLD MAP REGISTRY & SPLINE DATA ('coast' | 'city' | 'canyon')
   // -------------------------------------------------------------------------
   let currentMapId = 'coast';
+  let currentWeather = 'dust';
   let initialSavedKitId = 'coupe';
   let initialSavedPaintHex = null;
   try {
     const savedMap = window.localStorage.getItem('the_race_3d_selected_map_v1');
     if (savedMap) currentMapId = normalizeMapId(savedMap);
+    const savedWeather = window.localStorage.getItem('the_race_3d_weather_v1');
+    if (savedWeather) currentWeather = normalizeWeatherMode(savedWeather);
     const savedKit = window.localStorage.getItem('the_race_3d_equipped_kit_v1');
     if (savedKit) initialSavedKitId = normalizeCarId(savedKit);
     const savedPaint = window.localStorage.getItem('the_race_3d_equipped_paint_v1');
@@ -316,13 +324,15 @@ async function initApp() {
   scene.environmentIntensity = 0.72;
 
   const atmosphere = buildGoldenHourAtmosphere(scene);
+  const weatherSystem = buildWeatherSystem(scene);
+  weatherSystem.setWeather(currentWeather);
   const pitGarage = buildPitLaneGarage(scene, new THREE.Vector3(0.0, 0.088, 0.22));
   pitGarage.rootGroup.visible = false; // Shown strictly in GARAGE workshop mode
   let activeWorldMap = buildRealWorldMap(currentMapId, splineData, scene);
   activeWorldMap.rootGroup.visible = true; // Shown live on HOME Start-Grid & during RACE
 
   const microKart = buildMicroKart();
-  microKart.kartRoot.scale.setScalar(0.56);
+  microKart.kartRoot.scale.setScalar(0.49);
   scene.add(microKart.kartRoot);
   if (microKart.driftSmokeMesh) {
     scene.add(microKart.driftSmokeMesh);
@@ -521,12 +531,12 @@ async function initApp() {
   function syncKartScaleForCamera(mode) {
     const is1P = mode === 1 || mode === 2;
     const targetScale = is1P
-      ? 0.56
+      ? 0.49
       : settings.panoKart100
-        ? 1.00
+        ? 0.92
         : settings.droneKartScale
-          ? 0.78
-          : 0.58;
+          ? 0.72
+          : 0.52;
     microKart.kartRoot.scale.setScalar(targetScale);
   }
 
@@ -969,12 +979,31 @@ async function initApp() {
   }
 
   const audioSynth = createWebAudioSynth();
+  if (audioSynth.setCarProfile) {
+    audioSynth.setCarProfile(initialSavedKitId);
+  }
   if (audioSynth.preload) {
     audioSynth.preload().finally(() => {
       audioPreloadProgress = 1.0;
       notifyWarmupProgress();
     });
   }
+
+  // Always-on automatic audio unlock on first user gesture (no manual toggle button needed)
+  let audioAutoUnlocked = false;
+  const unlockAudioOnce = () => {
+    if (audioAutoUnlocked) return;
+    audioAutoUnlocked = true;
+    if (audioSynth.setEnabled && !audioSynth.isEnabled?.()) {
+      audioSynth.setEnabled(true);
+    }
+    window.removeEventListener('pointerdown', unlockAudioOnce, true);
+    window.removeEventListener('touchstart', unlockAudioOnce, true);
+    window.removeEventListener('keydown', unlockAudioOnce, true);
+  };
+  window.addEventListener('pointerdown', unlockAudioOnce, { capture: true, passive: true });
+  window.addEventListener('touchstart', unlockAudioOnce, { capture: true, passive: true });
+  window.addEventListener('keydown', unlockAudioOnce, { capture: true, passive: true });
 
   checkAndLoadGlbModels();
 
@@ -1337,6 +1366,10 @@ async function initApp() {
       if (e.code === 'KeyM') {
         const on = audioSynth.toggle();
         updateAudioButtonUI(on);
+      } else if (e.code === 'KeyT' && !e.repeat) {
+        const nextWeather = setActiveWeather(getNextWeatherMode(currentWeather));
+        if (audioSynth.playUiClick) audioSynth.playUiClick('click');
+        window.dispatchEvent(new CustomEvent('the-race-weather-change', { detail: nextWeather }));
       }
       return;
     }
@@ -1592,16 +1625,26 @@ async function initApp() {
       const totalShakeUp = shakeUp + speedShakeUp;
 
       const isPortraitCam = camera.aspect < 0.95;
-      const portraitPull = isPortraitCam ? -0.0024 : 0.0;
-      const portraitLift = isPortraitCam ? 0.0014 : 0.0;
-      const lookNormalLift = isPortraitCam ? 0.0029 : 0.0024;
-      const boostPullback = isBoostingNow ? -0.0012 : 0.0;
-      const followDist = 0.0126 - boostPullback - portraitPull;
-      const camLift = 0.0068 + portraitLift;
+      const isShockwaveNow = (st.shockwaveTimer || 0.0) > 0.0;
+      const portraitPull = isPortraitCam ? -0.0014 : 0.0;
+      const portraitLift = isPortraitCam ? 0.0006 : 0.0;
+      const lookNormalLift = isPortraitCam ? 0.0021 : 0.0018;
+      const boostPullback = isShockwaveNow ? -0.0016 : isBoostingNow ? -0.0009 : 0.0;
+      const followDist = 0.0102 - boostPullback - portraitPull;
+      const camLift = 0.0046 + portraitLift;
+
+      // Asphalt / NFS Dynamic Corner & Drift Lateral Swing:
+      // Smoothly frames the car's angled side profile & sparks without swinging toward guardrails
+      const camSwingLat = THREE.MathUtils.clamp(
+        (st.driftAngle || 0.0) * 0.0046 - (st.steerSmooth || 0.0) * 0.0012,
+        -0.0038,
+        0.0038
+      );
 
       _camDesiredPos
         .copy(st.position)
         .addScaledVector(camForward, -followDist)
+        .addScaledVector(st.right, camSwingLat)
         .addScaledVector(st.normal, camLift);
       if (totalShakeRight !== 0.0 || totalShakeUp !== 0.0) {
         _camDesiredPos
@@ -1615,7 +1658,7 @@ async function initApp() {
       if (physics.sampleTrackAtArcLength) {
         physics.sampleTrackAtArcLength(st.s - followDist, _camBehindSample);
         const behindHalfW = _camBehindSample.halfWidth || 0.01705;
-        const safeCamMaxLat = Math.max(0.0065, behindHalfW - 0.0038);
+        const safeCamMaxLat = Math.max(0.0065, behindHalfW - 0.0036);
         _camBehindDelta.subVectors(_camDesiredPos, _camBehindSample.position);
         const latProj = _camBehindDelta.dot(_camBehindSample.right);
         if (Math.abs(latProj) > safeCamMaxLat) {
@@ -1624,7 +1667,7 @@ async function initApp() {
         }
         // Keep camera safely above the behind-track roadbed normal as well
         const normalProj = _camBehindDelta.dot(_camBehindSample.normal);
-        const minCamHeightAboveBehind = 0.0052 + hopH;
+        const minCamHeightAboveBehind = 0.0040 + hopH;
         if (normalProj < minCamHeightAboveBehind) {
           _camDesiredPos.addScaledVector(
             _camBehindSample.normal,
@@ -1633,21 +1676,21 @@ async function initApp() {
         }
       }
 
-      // Sample 16.5mm ahead on the track spline for smooth corner anticipation
+      // Sample 18mm ahead on the track spline for smooth corner anticipation
       const aheadSample = physics.sampleTrackAtArcLength
-        ? physics.sampleTrackAtArcLength(st.s + 0.0165)
+        ? physics.sampleTrackAtArcLength(st.s + 0.018)
         : null;
       if (aheadSample && aheadSample.position) {
         _camSplineAhead.copy(aheadSample.position).addScaledVector(st.normal, hopH);
         _camDesiredLook
           .copy(st.position)
-          .addScaledVector(camForward, 0.0165)
+          .addScaledVector(camForward, 0.018)
           .lerp(_camSplineAhead, 0.35)
           .addScaledVector(st.normal, lookNormalLift);
       } else {
         _camDesiredLook
           .copy(st.position)
-          .addScaledVector(camForward, 0.0165)
+          .addScaledVector(camForward, 0.018)
           .addScaledVector(st.normal, lookNormalLift);
       }
 
@@ -1658,19 +1701,31 @@ async function initApp() {
           .addScaledVector(st.normal, speedShakeUp);
       }
 
-      // Dynamic FOV Sense of Speed: resting FOV of 70°, stretching smoothly to 95°+ at top speed / boost
-      const speedFovGain = THREE.MathUtils.clamp(Math.pow(speedNorm, 1.15) * 21.0, 0.0, 24.0);
-      const boostFovBonus = isBoostingNow ? 5.5 : 0.0;
-      const targetArcadeFov = THREE.MathUtils.clamp(70.0 + speedFovGain + boostFovBonus, 70.0, 97.0);
+      // Dynamic FOV Sense of Speed: resting FOV of 74°, stretching smoothly during drifts & Shockwave / boost
+      const speedFovGain = THREE.MathUtils.clamp(Math.pow(speedNorm, 1.15) * 20.0, 0.0, 22.0);
+      const boostFovBonus = isShockwaveNow ? 8.5 : isBoostingNow ? 5.5 : 0.0;
+      const driftFovBonus = st.isDrifting ? 2.6 : 0.0;
+      const targetArcadeFov = THREE.MathUtils.clamp(
+        74.0 + speedFovGain + boostFovBonus + driftFovBonus,
+        74.0,
+        101.5
+      );
       if (Math.abs(camera.fov - targetArcadeFov) > 0.05) {
         camera.fov = THREE.MathUtils.lerp(camera.fov, targetArcadeFov, 1.0 - Math.exp(-dt * 8.5));
         camera.updateProjectionMatrix();
       }
 
+      // Subtle Asphalt Horizon Roll / Lean into high-speed turns & power slides
+      const camBankRoll = THREE.MathUtils.clamp(
+        -(st.steerSmooth || 0.0) * 0.030 + (st.driftAngle || 0.0) * 0.045,
+        -0.055,
+        0.055
+      );
       const smoothUp = isScreenshotMode ? 1.0 : 1.0 - Math.exp(-dt * 12.0);
       _camBlendedUp
         .set(0, 0.88, 0)
         .addScaledVector(st.normal, 0.12)
+        .addScaledVector(st.right, camBankRoll)
         .normalize();
       camCurrentUp.lerp(_camBlendedUp, smoothUp).normalize();
 
@@ -1682,7 +1737,7 @@ async function initApp() {
       // Hard Car-Exclusion Sphere: guarantee camera never clips into the roof, trunk, or side mirrors
       _camBehindDelta.subVectors(camCurrentPos, st.position);
       const distToCar = _camBehindDelta.length();
-      const minCamCarDist = 0.0132;
+      const minCamCarDist = 0.0102;
       if (distToCar < minCamCarDist) {
         if (distToCar > 1e-5) {
           _camBehindDelta.divideScalar(distToCar);
@@ -2767,20 +2822,21 @@ async function initApp() {
     const st = physics.state;
     camShakeTimer = 0.0;
     camShakeIntensity = 0.0;
+    const isPortraitCam = camera.aspect < 0.95;
     if (activeCameraMode === 1) {
-      camera.fov = 70.0;
+      camera.fov = 74.0;
       camera.updateProjectionMatrix();
     }
     camForward.copy(st.tangent).normalize();
     camCurrentUp.set(0, 1, 0);
     camCurrentPos
       .copy(st.position)
-      .addScaledVector(st.tangent, -0.0124)
-      .addScaledVector(st.normal, 0.0068);
+      .addScaledVector(st.tangent, isPortraitCam ? -0.0116 : -0.0102)
+      .addScaledVector(st.normal, isPortraitCam ? 0.0052 : 0.0046);
     camCurrentLookAt
       .copy(st.position)
-      .addScaledVector(st.tangent, 0.0165)
-      .addScaledVector(st.normal, 0.0024);
+      .addScaledVector(st.tangent, 0.018)
+      .addScaledVector(st.normal, isPortraitCam ? 0.0021 : 0.0018);
     camera.up.copy(camCurrentUp);
     camera.position.copy(camCurrentPos);
     camera.lookAt(camCurrentLookAt);
@@ -3203,14 +3259,30 @@ async function initApp() {
     rebuildMinimapForSpline(splineData);
 
     // 4. Hard-snap camera directly onto the new start grid (Home showcase or Race grid)
-    if (currentAppScreen === 'MENU' || currentAppScreen === 'SPLASH') {
+    if (
+      currentAppScreen === 'MENU' ||
+      currentAppScreen === 'SPLASH' ||
+      currentAppScreen === 'EVENTS' ||
+      currentAppScreen === 'MISSIONS'
+    ) {
       snapHomeStartGridCamera();
     } else if (currentAppScreen === 'RACE') {
       snapChaseCameraToStartGrid();
     }
     if (atmosphere.applyMapAtmospherePreset) {
-      atmosphere.applyMapAtmospherePreset(currentMapId, isGarage, scene, renderer);
+      atmosphere.applyMapAtmospherePreset(currentMapId, isGarage, scene, renderer, currentWeather, 0.016, true);
     }
+  }
+
+  function setActiveWeather(mode) {
+    currentWeather = normalizeWeatherMode(mode);
+    weatherSystem.setWeather(currentWeather);
+    try {
+      window.localStorage.setItem('the_race_3d_weather_v1', currentWeather);
+    } catch (_e) {
+      // ignore storage write error
+    }
+    return currentWeather;
   }
 
   // Expose clean engine API for React multi-screen UI ("The Race: Car Driving 3D")
@@ -3241,7 +3313,12 @@ async function initApp() {
         physics.state.boostActive = 0;
         physics.state.isDrifting = false;
         physics.state.curbRumble = 0;
-        if (screen === 'MENU' || screen === 'SPLASH') {
+        if (
+          screen === 'MENU' ||
+          screen === 'SPLASH' ||
+          screen === 'EVENTS' ||
+          screen === 'MISSIONS'
+        ) {
           if (prev === 'RACE' || prev === 'GAMEOVER') {
             physics.resetToStart();
           }
@@ -3249,15 +3326,17 @@ async function initApp() {
           pitGarage.rootGroup.visible = false;
           if (activeWorldMap) activeWorldMap.rootGroup.visible = true;
           if (atmosphere.applyMapAtmospherePreset) {
-            atmosphere.applyMapAtmospherePreset(currentMapId, false, scene, renderer);
+            atmosphere.applyMapAtmospherePreset(currentMapId, false, scene, renderer, currentWeather, 0.016, true);
           }
-          snapHomeStartGridCamera();
+          if (prev !== 'MENU' && prev !== 'EVENTS' && prev !== 'MISSIONS') {
+            snapHomeStartGridCamera();
+          }
         } else if (screen === 'GARAGE') {
           showroomGroup.visible = true;
           pitGarage.rootGroup.visible = true;
           if (activeWorldMap) activeWorldMap.rootGroup.visible = false;
           if (atmosphere.applyMapAtmospherePreset) {
-            atmosphere.applyMapAtmospherePreset(currentMapId, true, scene, renderer);
+            atmosphere.applyMapAtmospherePreset(currentMapId, true, scene, renderer, currentWeather, 0.016, true);
           }
         }
       }
@@ -3271,6 +3350,15 @@ async function initApp() {
     getMap() {
       return currentMapId;
     },
+    setWeather(mode) {
+      return setActiveWeather(mode);
+    },
+    getWeather() {
+      return currentWeather;
+    },
+    cycleWeather() {
+      return setActiveWeather(getNextWeatherMode(currentWeather));
+    },
     startRace() {
       currentAppScreen = 'RACE';
       showroomGroup.visible = false;
@@ -3283,6 +3371,9 @@ async function initApp() {
     setBodyKit(kitId, stats, customOverrides) {
       if (microKart.setBodyKit) {
         microKart.setBodyKit(kitId, customOverrides);
+      }
+      if (audioSynth.setCarProfile) {
+        audioSynth.setCarProfile(kitId);
       }
       if (stats && physics.setVehicleStats) {
         physics.setVehicleStats(stats);
@@ -3330,6 +3421,14 @@ async function initApp() {
     setAutopilot(val) {
       physics.setAutopilot(val);
     },
+    setAutoGas(val) {
+      if (physics.setAutoGas) {
+        physics.setAutoGas(val);
+      }
+    },
+    getAutoGas() {
+      return physics.getAutoGas ? physics.getAutoGas() : true;
+    },
     toggleAudio() {
       const on = audioSynth.toggle();
       updateAudioButtonUI(on);
@@ -3351,6 +3450,17 @@ async function initApp() {
     playUiClick(variant = 'click') {
       if (audioSynth.playUiClick) {
         audioSynth.playUiClick(variant);
+      }
+    },
+    playCarRevPreview(kitId) {
+      if (audioSynth.setEnabled && !audioSynth.isEnabled?.()) {
+        audioSynth.setEnabled(true);
+      }
+      if (audioSynth.setCarProfile && kitId) {
+        audioSynth.setCarProfile(kitId);
+      }
+      if (audioSynth.playCarRevPreview) {
+        audioSynth.playCarRevPreview(kitId);
       }
     },
     setGraphicsSettings(newSettings) {
@@ -3436,7 +3546,10 @@ async function initApp() {
     const isGarageMode = !isScreenshotMode && currentAppScreen === 'GARAGE';
     const isHomeOutdoorMode =
       !isScreenshotMode &&
-      (currentAppScreen === 'SPLASH' || currentAppScreen === 'MENU');
+      (currentAppScreen === 'SPLASH' ||
+        currentAppScreen === 'MENU' ||
+        currentAppScreen === 'EVENTS' ||
+        currentAppScreen === 'MISSIONS');
 
     if (isGarageMode) {
       // GARAGE BACKGROUND: Indoor Automotive Pit-Lane Workshop Bay & Spinning Turntable
@@ -3501,8 +3614,9 @@ async function initApp() {
       camera.lookAt(camCurrentLookAt);
 
       pitGarage.update(elapsedTime);
+      weatherSystem.setVisible(false);
       if (atmosphere.applyMapAtmospherePreset) {
-        atmosphere.applyMapAtmospherePreset(currentMapId, true, scene, renderer);
+        atmosphere.applyMapAtmospherePreset(currentMapId, true, scene, renderer, currentWeather, dt, false);
       }
 
       const activeShowroomDof = (settings.dofStrength ?? 0.0) > 0.01;
@@ -3521,7 +3635,6 @@ async function initApp() {
       }
     } else if (isHomeOutdoorMode) {
       // HOME SCREEN BACKGROUND: Live Outdoor Real-World Circuit Start Grid of Selected Map
-      scene.environmentIntensity = currentMapId === 'city' ? 0.72 : 0.88;
       showroomGroup.visible = false;
       pitGarage.rootGroup.visible = false;
       if (activeWorldMap) {
@@ -3539,7 +3652,7 @@ async function initApp() {
 
       const stHome = physics.state;
       microKart.setCockpitRoadOnly(false);
-      microKart.kartRoot.scale.setScalar(0.56);
+      microKart.kartRoot.scale.setScalar(0.49);
       microKart.kartRoot.position.copy(stHome.position).addScaledVector(stHome.normal, bounceOffset);
       microKart.kartRoot.quaternion.copy(stHome.quaternion);
       microKart.chassisGroup.rotation.set(0, 0, 0);
@@ -3585,12 +3698,13 @@ async function initApp() {
       camera.lookAt(camCurrentLookAt);
 
       if (atmosphere.applyMapAtmospherePreset) {
-        atmosphere.applyMapAtmospherePreset(currentMapId, false, scene, renderer);
+        atmosphere.applyMapAtmospherePreset(currentMapId, false, scene, renderer, currentWeather, dt, false);
       }
+      weatherSystem.setVisible(true);
+      weatherSystem.update(dt, elapsedTime, stHome.position, currentMapId, renderer);
       bokehPass.enabled = false;
     } else {
       lastStageMode = 'RACE';
-      scene.environmentIntensity = currentMapId === 'city' ? 0.72 : 0.88;
       showroomGroup.visible = false;
       pitGarage.rootGroup.visible = false;
       if (activeWorldMap) {
@@ -3637,6 +3751,14 @@ async function initApp() {
         physics.syncPoseFromSpline();
       }
 
+      // Play distinct drift-exit turbo pop when auto-carve drift releases a boost tier
+      if ((st.justFiredDriftBoostTier || 0) > 0) {
+        if (audioSynth.playDriftBoostPop) {
+          audioSynth.playDriftBoostPop(st.justFiredDriftBoostTier);
+        }
+        st.justFiredDriftBoostTier = 0;
+      }
+
       // Drain collision impact queue -> spawn bright orange/yellow contact sparks & punchy micro shake
       if (st.pendingImpactCount > 0 && st.pendingImpacts) {
         for (let i = 0; i < st.pendingImpactCount; i++) {
@@ -3675,10 +3797,12 @@ async function initApp() {
         vfxManager.update(vfxDt, st, microKart.kartRoot, true);
       }
 
-      // 3. Apply Active Real-World Map Outdoor Atmosphere & Sky/Fog Preset
+      // 3. Apply Active Real-World Map Outdoor Atmosphere, Weather Lighting & Particle Effects
       if (atmosphere.applyMapAtmospherePreset) {
-        atmosphere.applyMapAtmospherePreset(currentMapId, false, scene, renderer);
+        atmosphere.applyMapAtmospherePreset(currentMapId, false, scene, renderer, currentWeather, dt, false);
       }
+      weatherSystem.setVisible(true);
+      weatherSystem.update(dt, elapsedTime, st.position, currentMapId, renderer);
 
       // 4. Update Camera (always uses real `dt` so slow-motion hero sweep glides smoothly at 60 FPS)
       updateCamera(dt, elapsedTime, st);
@@ -3775,14 +3899,21 @@ async function initApp() {
             bestLapTime: st.bestLapTime,
             boostCharge: st.boostCharge ?? 1.0,
             boostActive: st.boostActive ?? 0.0,
+            shockwaveActive: (st.shockwaveTimer || 0.0) > 0.0,
+            slipstreamActive: (st.slipstreamTimer || 0.0) > 0.0,
             isDrifting: Boolean(st.isDrifting),
             driftCharge: st.driftChargeTimer || 0.0,
+            driftBoostTier: st.driftBoostTier || 0,
             countdownStep,
             cameraMode: activeCameraMode,
             autopilot: Boolean(st.autopilot),
+            autoGas: Boolean(st.autoGas),
+            weather: currentWeather,
             audioEnabled: audioSynth.isEnabled ? audioSynth.isEnabled() : false,
             positionRank: currentRank,
             rivals: rivalsController.getRivalsData(),
+            actionBanner: st.actionBanner || null,
+            actionBannerColor: st.actionBannerColor || '#00f0ff',
           };
           for (const cb of telemetryListeners) {
             cb(payload);

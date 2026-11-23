@@ -1,6 +1,64 @@
-export type GameState = 'SPLASH' | 'MENU' | 'GARAGE' | 'RACE' | 'GAMEOVER';
+export type GameState =
+  | 'SPLASH'
+  | 'MENU'
+  | 'EVENTS'
+  | 'GARAGE'
+  | 'MISSIONS'
+  | 'RACE'
+  | 'GAMEOVER';
 
 export type MapId = 'coast' | 'city' | 'canyon';
+
+export type RaceModeId = 'circuit' | 'elimination' | 'drift' | 'time_attack';
+
+export interface RaceModeSpec {
+  id: RaceModeId;
+  name: string;
+  shortName: string;
+  ruleSummary: string;
+  description: string;
+  rewardMultiplier: number;
+  accentHex: string;
+}
+
+export const RACE_MODES: RaceModeSpec[] = [
+  {
+    id: 'circuit',
+    name: 'Circuit Race',
+    shortName: 'Circuit',
+    ruleSummary: '3 Laps · 4-Car Grid',
+    description: 'Classic high-speed pack battle across 3 laps for the podium.',
+    rewardMultiplier: 1.0,
+    accentHex: '#06b6d4',
+  },
+  {
+    id: 'elimination',
+    name: 'Elimination',
+    shortName: 'Elimination',
+    ruleSummary: 'Knockout · Last Out',
+    description: 'Stay ahead of the pack before the elimination clock drops.',
+    rewardMultiplier: 1.25,
+    accentHex: '#f97316',
+  },
+  {
+    id: 'drift',
+    name: 'Drift Challenge',
+    shortName: 'Drift',
+    ruleSummary: 'Score Attack · Chain x5',
+    description: 'Link wide auto-carve slides and exit boosts for maximum score.',
+    rewardMultiplier: 1.2,
+    accentHex: '#f59e0b',
+  },
+  {
+    id: 'time_attack',
+    name: 'Time Attack',
+    shortName: 'Time Trial',
+    ruleSummary: '3 Laps · Target Clock',
+    description: 'Pure pace run chasing gold lap splits and personal best records.',
+    rewardMultiplier: 1.15,
+    accentHex: '#38bdf8',
+  },
+];
 
 export interface MapSpec {
   id: MapId;
@@ -10,12 +68,14 @@ export interface MapSpec {
   environmentTag: string;
   lengthLabel: string;
   laps: number;
+  goldTargetSec: number;
   accentHex: string;
   secondaryHex: string;
   skyTopHex: string;
   skyHorizonHex: string;
   fogHex: string;
   fogDensity: number;
+  previewImage: string;
   description: string;
 }
 
@@ -27,48 +87,54 @@ export const MAP_SPECS: MapSpec[] = [
     name: 'SUNSET COAST',
     shortName: 'COAST',
     subtitle: 'Coastal Asphalt Circuit',
-    environmentTag: 'ASPHALT · BANKED · PALMS',
+    environmentTag: 'Asphalt · Banked · Palms',
     lengthLabel: '1.49 KM',
     laps: 3,
+    goldTargetSec: 58,
     accentHex: '#fb923c',
     secondaryHex: '#0ea5e9',
     skyTopHex: '#1e293b',
     skyHorizonHex: '#fb923c',
     fogHex: '#2a2438',
     fogDensity: 0.32,
-    description: 'Golden-hour 15.5m wide asphalt circuit with banked turns, elevation climbs, and swaying coastal palms.',
+    previewImage: '/src/assets/images/circuit_sunset_coast_1795180167058.jpg',
+    description: 'Golden-hour wide coastal asphalt circuit with banked turns, elevation climbs, and sunlit ocean curbs.',
   },
   {
     id: 'city',
     name: 'NEON CITY',
     shortName: 'CITY',
-    subtitle: 'Midnight Neon Circuit',
-    environmentTag: 'WET ASPHALT · SKYLINE · NEON',
+    subtitle: 'Midnight Street Circuit',
+    environmentTag: 'Wet Asphalt · Skyline · Night',
     lengthLabel: '1.49 KM',
     laps: 3,
+    goldTargetSec: 56,
     accentHex: '#00e5ff',
     secondaryHex: '#ec4899',
     skyTopHex: '#050814',
     skyHorizonHex: '#0f172a',
     fogHex: '#080d1d',
     fogDensity: 0.36,
-    description: 'High-speed midnight circuit with glossy wet-asphalt reflections, glowing skyscrapers, and neon curbs.',
+    previewImage: '/src/assets/images/circuit_neon_city_1795180030711.jpg',
+    description: 'High-speed midnight circuit with glossy wet-asphalt reflections, glowing skyscrapers, and neon barriers.',
   },
   {
     id: 'canyon',
     name: 'ALPINE SNOW',
     shortName: 'SNOW',
-    subtitle: 'Alpine Snow Pass',
-    environmentTag: 'SNOW · CLIFFS · PINES',
+    subtitle: 'Alpine Mountain Pass',
+    environmentTag: 'Alpine Tarmac · Cliffs · Pines',
     lengthLabel: '1.49 KM',
     laps: 3,
-    accentHex: '#34d399',
+    goldTargetSec: 60,
+    accentHex: '#38bdf8',
     secondaryHex: '#fbbf24',
     skyTopHex: '#0f172a',
     skyHorizonHex: '#475569',
     fogHex: '#182436',
     fogDensity: 0.34,
-    description: 'Frost-covered mountain pass featuring banked snow corners, alpine cliffs, and evergreen pine ridges.',
+    previewImage: '/src/assets/images/circuit_alpine_snow_1795180030553.jpg',
+    description: 'Frost-lined mountain pass featuring sweeping banked corners, rocky cliffs, and twilight floodlights.',
   },
 ];
 
@@ -550,6 +616,59 @@ export interface RivalRacerData {
   position: [number, number, number];
 }
 
+export type WeatherMode = 'clear' | 'dust' | 'mist' | 'drizzle';
+
+export interface WeatherSpec {
+  id: WeatherMode;
+  label: string;
+  shortLabel: string;
+  description: string;
+  accentHex: string;
+}
+
+export const WEATHER_SPECS: WeatherSpec[] = [
+  {
+    id: 'clear',
+    label: 'Clear Skies',
+    shortLabel: 'Clear',
+    description: 'Crisp natural lighting with clear horizon visibility',
+    accentHex: '#38bdf8',
+  },
+  {
+    id: 'dust',
+    label: 'Golden Dust',
+    shortLabel: 'Dust',
+    description: 'Warm amber sunlight with subtle floating dust motes',
+    accentHex: '#fbbf24',
+  },
+  {
+    id: 'mist',
+    label: 'Light Mist',
+    shortLabel: 'Mist',
+    description: 'Soft diffused light with low-lying drifting track mist',
+    accentHex: '#cbd5e1',
+  },
+  {
+    id: 'drizzle',
+    label: 'Twilight Drizzle',
+    shortLabel: 'Drizzle',
+    description: 'Moody cool atmosphere with fine diagonal mist streaks',
+    accentHex: '#60a5fa',
+  },
+];
+
+export function normalizeWeatherMode(id?: string | null): WeatherMode {
+  if (id === 'clear' || id === 'dust' || id === 'mist' || id === 'drizzle') {
+    return id;
+  }
+  return 'dust';
+}
+
+export function getNextWeatherMode(current: WeatherMode): WeatherMode {
+  const idx = WEATHER_SPECS.findIndex((w) => w.id === current);
+  return WEATHER_SPECS[(idx + 1) % WEATHER_SPECS.length].id;
+}
+
 export interface RaceTelemetry {
   speedKmh: number;
   lapCount: number;
@@ -558,8 +677,15 @@ export interface RaceTelemetry {
   bestLapTime: number | null;
   boostCharge: number;
   boostActive: number;
+  shockwaveActive?: boolean;
+  slipstreamActive?: boolean;
+  autoGas?: boolean;
+  weather?: WeatherMode;
+  actionBanner?: string | null;
+  actionBannerColor?: string;
   isDrifting: boolean;
   driftCharge?: number;
+  driftBoostTier?: number;
   countdownStep: number;
   cameraMode: number;
   autopilot: boolean;
@@ -568,13 +694,237 @@ export interface RaceTelemetry {
   rivals: RivalRacerData[];
 }
 
+export type UpgradePartKey = 'engine' | 'turbo' | 'tires' | 'nitro';
+
+export interface CarUpgradeLevels {
+  engine: number; // 1..5
+  turbo: number; // 1..5
+  tires: number; // 1..5
+  nitro: number; // 1..5
+}
+
+export const DEFAULT_CAR_UPGRADES: CarUpgradeLevels = {
+  engine: 1,
+  turbo: 1,
+  tires: 1,
+  nitro: 1,
+};
+
+export const UPGRADE_PART_COSTS: Record<number, number> = {
+  1: 75,
+  2: 140,
+  3: 240,
+  4: 380,
+};
+
+export function getUpgradeCost(currentLevel: number): number | null {
+  if (currentLevel >= 5) return null;
+  return UPGRADE_PART_COSTS[currentLevel] ?? 400;
+}
+
+export function getEffectiveCarPerformance(
+  kit: BodyKitSpec,
+  upgrades?: Partial<CarUpgradeLevels>
+) {
+  const eng = Math.min(5, Math.max(1, upgrades?.engine ?? 1));
+  const trb = Math.min(5, Math.max(1, upgrades?.turbo ?? 1));
+  const tir = Math.min(5, Math.max(1, upgrades?.tires ?? 1));
+  const nit = Math.min(5, Math.max(1, upgrades?.nitro ?? 1));
+
+  const speed = Math.min(100, kit.stats.speed + (eng - 1) * 3 + Math.floor((nit - 1) * 0.75));
+  const acceleration = Math.min(100, kit.stats.acceleration + (trb - 1) * 3 + Math.floor((nit - 1) * 0.75));
+  const handling = Math.min(100, kit.stats.handling + (tir - 1) * 3);
+  const drift = Math.min(100, kit.stats.drift + (tir - 1) * 2 + (nit - 1) * 1);
+
+  const pr = Math.round(speed * 1.45 + acceleration * 1.35 + handling * 1.25 + drift * 1.15);
+  const carClass: 'D' | 'C' | 'B' | 'A' | 'S' =
+    pr >= 490 ? 'S' : pr >= 460 ? 'A' : pr >= 435 ? 'B' : pr >= 415 ? 'C' : 'D';
+
+  const physics = {
+    topSpeedMultiplier: Number((kit.physics.topSpeedMultiplier + (eng - 1) * 0.022 + (nit - 1) * 0.008).toFixed(3)),
+    accelMultiplier: Number((kit.physics.accelMultiplier + (trb - 1) * 0.028 + (nit - 1) * 0.010).toFixed(3)),
+    handlingMultiplier: Number((kit.physics.handlingMultiplier + (tir - 1) * 0.025).toFixed(3)),
+  };
+
+  return {
+    levels: { engine: eng, turbo: trb, tires: tir, nitro: nit },
+    stats: { speed, acceleration, handling, drift },
+    pr,
+    carClass,
+    physics,
+  };
+}
+
+export interface TrackRecord {
+  bestLap: number | null;
+  bestTotalTime: number | null;
+  bestStars: number; // 0..3
+  racesCompleted: number;
+  wins: number;
+}
+
+export interface PlayerCareerState {
+  xp: number;
+  totalRaces: number;
+  totalWins: number;
+  totalUpgrades: number;
+  mapsRaced: MapId[];
+  bestSingleRaceTime: number | null;
+  claimedMissionIds: string[];
+  trackRecords: Record<MapId, TrackRecord>;
+}
+
+export const DEFAULT_CAREER_STATE: PlayerCareerState = {
+  xp: 0,
+  totalRaces: 0,
+  totalWins: 0,
+  totalUpgrades: 0,
+  mapsRaced: [],
+  bestSingleRaceTime: null,
+  claimedMissionIds: [],
+  trackRecords: {
+    coast: { bestLap: null, bestTotalTime: null, bestStars: 0, racesCompleted: 0, wins: 0 },
+    city: { bestLap: null, bestTotalTime: null, bestStars: 0, racesCompleted: 0, wins: 0 },
+    canyon: { bestLap: null, bestTotalTime: null, bestStars: 0, racesCompleted: 0, wins: 0 },
+  },
+};
+
+export interface DriverLevelInfo {
+  level: number;
+  title: string;
+  currentXp: number;
+  nextLevelXp: number;
+  progressPct: number;
+}
+
+export function getDriverLevelInfo(xp: number): DriverLevelInfo {
+  const safeXp = Math.max(0, Math.floor(xp || 0));
+  const xpPerLevel = 250;
+  const level = Math.min(25, Math.floor(safeXp / xpPerLevel) + 1);
+  const currentXp = safeXp % xpPerLevel;
+  const titles = [
+    'Rookie Driver',
+    'Street Challenger',
+    'Circuit Contender',
+    'Drift Specialist',
+    'Apex Runner',
+    'Pro Motorsport',
+    'Track Legend',
+  ];
+  const title = titles[Math.min(titles.length - 1, Math.floor((level - 1) / 2))];
+  return {
+    level,
+    title,
+    currentXp,
+    nextLevelXp: xpPerLevel,
+    progressPct: Math.min(100, Math.round((currentXp / xpPerLevel) * 100)),
+  };
+}
+
+export interface MissionSpec {
+  id: string;
+  title: string;
+  description: string;
+  category: 'Daily' | 'Career';
+  rewardCoins: number;
+  rewardXp: number;
+  target: number;
+  getProgress: (career: PlayerCareerState, unlockedCount: number) => number;
+}
+
+export const MISSIONS_LIST: MissionSpec[] = [
+  {
+    id: 'm_first_race',
+    title: 'Ignition Start',
+    description: 'Complete your first official race on any circuit.',
+    category: 'Daily',
+    rewardCoins: 120,
+    rewardXp: 100,
+    target: 1,
+    getProgress: (c) => c.totalRaces,
+  },
+  {
+    id: 'm_first_win',
+    title: 'Checkered Flag',
+    description: 'Finish 1st place in any race event.',
+    category: 'Daily',
+    rewardCoins: 180,
+    rewardXp: 140,
+    target: 1,
+    getProgress: (c) => c.totalWins,
+  },
+  {
+    id: 'm_tune_parts',
+    title: 'Garage Tuner',
+    description: 'Install 2 performance upgrades in the Garage.',
+    category: 'Daily',
+    rewardCoins: 160,
+    rewardXp: 120,
+    target: 2,
+    getProgress: (c) => c.totalUpgrades,
+  },
+  {
+    id: 'm_neon_city',
+    title: 'Midnight Runner',
+    description: 'Complete a race at Neon City circuit.',
+    category: 'Daily',
+    rewardCoins: 150,
+    rewardXp: 120,
+    target: 1,
+    getProgress: (c) => (c.mapsRaced.includes('city') ? 1 : 0),
+  },
+  {
+    id: 'm_alpine_snow',
+    title: 'Alpine Conqueror',
+    description: 'Complete a race at Alpine Snow pass.',
+    category: 'Career',
+    rewardCoins: 150,
+    rewardXp: 120,
+    target: 1,
+    getProgress: (c) => (c.mapsRaced.includes('canyon') ? 1 : 0),
+  },
+  {
+    id: 'm_world_tour',
+    title: 'Circuit World Tour',
+    description: 'Race on all 3 circuits (Sunset Coast, Neon City, Alpine Snow).',
+    category: 'Career',
+    rewardCoins: 280,
+    rewardXp: 220,
+    target: 3,
+    getProgress: (c) => c.mapsRaced.length,
+  },
+  {
+    id: 'm_car_collector',
+    title: 'Showroom Collector',
+    description: 'Own 4 cars in your personal garage.',
+    category: 'Career',
+    rewardCoins: 260,
+    rewardXp: 200,
+    target: 4,
+    getProgress: (_c, unlockedCount) => unlockedCount,
+  },
+  {
+    id: 'm_pro_veteran',
+    title: 'Season Veteran',
+    description: 'Complete 5 total race events.',
+    category: 'Career',
+    rewardCoins: 350,
+    rewardXp: 280,
+    target: 5,
+    getProgress: (c) => c.totalRaces,
+  },
+];
+
 export interface RaceFinishResult {
   totalTime: number;
   bestLap: number;
   lapTimes: number[];
   coinsEarned: number;
+  xpEarned?: number;
+  starsEarned?: number;
   finishRank: number; // 1, 2, 3, or 4
   mapId?: MapId;
+  modeId?: RaceModeId;
 }
 
 export interface TheRaceEngineBridge {
@@ -583,6 +933,9 @@ export interface TheRaceEngineBridge {
   startRace: () => void;
   setMap?: (mapId: MapId) => void;
   getMap?: () => MapId;
+  setWeather?: (mode: WeatherMode) => WeatherMode;
+  getWeather?: () => WeatherMode;
+  cycleWeather?: () => WeatherMode;
   setBodyKit: (
     kitId: BodyKitId,
     stats?: {
@@ -604,11 +957,13 @@ export interface TheRaceEngineBridge {
   }) => void;
   rotateShowroom?: (deltaRad: number) => void;
   setTouchControl: (
-    dir: 'left' | 'right' | 'forward' | 'backward',
+    dir: 'left' | 'right' | 'forward' | 'backward' | 'drift',
     isDown: boolean
   ) => void;
   clearTouchControls: () => void;
   triggerNitro: () => boolean;
+  setAutoGas?: (val: boolean) => void;
+  getAutoGas?: () => boolean;
   setCameraMode: (mode: number) => void;
   getCameraMode: () => number;
   setAutopilot: (val: boolean) => void;
@@ -617,6 +972,7 @@ export interface TheRaceEngineBridge {
   isAudioEnabled: () => boolean;
   playSplashImpact: () => void;
   playUiClick: (variant?: 'click' | 'equip') => void;
+  playCarRevPreview?: (kitId: BodyKitId) => void;
   setGraphicsSettings: (settings: {
     bloomStrength?: number;
     dofStrength?: number;

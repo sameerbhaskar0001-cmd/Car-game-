@@ -471,13 +471,32 @@ export function createVFXManager(scene) {
     }
 
     // ---------------------------------------------------------------------
-    // B. Nitro Boost Exhaust Flame Particles
+    // B. Nitro Boost Exhaust Flame Particles & Jump Landing Tire Dust Burst
     // ---------------------------------------------------------------------
     if ((state.boostActive || 0) > 0 && !state.countdownLocked && speedMag > 0.02) {
       nitroEmitAccum += clampedDt;
       if (nitroEmitAccum >= 0.018) {
         nitroEmitAccum = 0;
         spawnNitroFlameEmbers(state.position, state, kScale);
+      }
+    }
+
+    if ((state.landingCompression || 0) > 0.72) {
+      const tireHalfW = 0.0029 * kScale;
+      for (let side = -1; side <= 1; side += 2) {
+        _v0
+          .copy(state.position)
+          .addScaledVector(state.right, side * tireHalfW)
+          .addScaledVector(state.normal, 0.0005);
+        spawnSmokePuff(
+          _v0.x,
+          _v0.y,
+          _v0.z,
+          state.right.x * side * 0.025 + (Math.random() - 0.5) * 0.015,
+          0.012 + Math.random() * 0.010,
+          state.right.z * side * 0.025 + (Math.random() - 0.5) * 0.015,
+          kScale * 0.85
+        );
       }
     }
 
@@ -498,15 +517,15 @@ export function createVFXManager(scene) {
 
         const damp = Math.exp(-3.5 * clampedDt);
         smokeVelX[i] *= damp;
-        smokeVelY[i] = smokeVelY[i] * damp + 0.012 * clampedDt;
+        smokeVelY[i] = smokeVelY[i] * damp + 0.010 * clampedDt;
         smokeVelZ[i] *= damp;
 
-        const scaleNow = smokeStartScale[i] * (0.75 + t * 2.45);
-        smokeAlphaArr[i] = 0.44 * (1.0 - t) * (1.0 - t * 0.35);
+        const scaleNow = smokeStartScale[i] * (0.65 + t * 1.85);
+        smokeAlphaArr[i] = 0.16 * (1.0 - t) * (1.0 - t * 0.45);
 
         _dummy.position.set(smokePosX[i], smokePosY[i], smokePosZ[i]);
         _dummy.rotation.set(t * 1.4, t * 2.1, 0);
-        _dummy.scale.setScalar(scaleNow);
+        _dummy.scale.set(scaleNow * 1.25, scaleNow * 0.55, scaleNow * 1.25);
         _dummy.updateMatrix();
         smokeMesh.setMatrixAt(i, _dummy.matrix);
       } else if (smokeAlphaArr[i] > 0.0) {

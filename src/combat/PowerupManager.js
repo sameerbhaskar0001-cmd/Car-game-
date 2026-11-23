@@ -314,6 +314,13 @@ export function createPowerupManager(initialSplineData, scene) {
     playerState.onRampSurface = false;
     playerState.rampSurfaceHeight = 0.0;
 
+    if (playerState.justLanded) {
+      playerState.justLanded = false;
+      if (audioSynth && audioSynth.playLandingThud) {
+        audioSynth.playLandingThud(0.85);
+      }
+    }
+
     for (let jIdx = 0; jIdx < jumpRamps.length; jIdx++) {
       const ramp = jumpRamps[jIdx];
       if (ramp.playerCooldown > 0) {
@@ -327,11 +334,11 @@ export function createPowerupManager(initialSplineData, scene) {
 
         if (signedDS >= -0.0075 && signedDS <= 0.0080 && dLat < 0.0056) {
           const u = THREE.MathUtils.clamp((signedDS + 0.0068) / 0.0136, 0.0, 1.0);
-          const wedgeH = 0.00018 + u * 0.0014;
+          const wedgeH = 0.00018 + u * 0.0016;
           playerState.onRampSurface = true;
           playerState.rampSurfaceHeight = Math.max(playerState.rampSurfaceHeight || 0.0, wedgeH);
           playerState.hopHeight = Math.max(playerState.hopHeight || 0.0, wedgeH);
-          playerState.rampPitch = -0.085 * u;
+          playerState.rampPitch = -0.15 * u;
 
           const minLaunchSpeed = 0.175 * (playerState.topSpeedMultiplier || 1.0);
           if (playerState.speed < minLaunchSpeed) {
@@ -339,11 +346,24 @@ export function createPowerupManager(initialSplineData, scene) {
           }
           playerState.boostActive = Math.max(playerState.boostActive || 0, 1.25);
 
-          if (u >= 0.45 && ramp.playerCooldown <= 0) {
+          if (u >= 0.42 && ramp.playerCooldown <= 0) {
             ramp.playerCooldown = 1.0;
-            playerState.hopVel = Math.max(playerState.hopVel || 0.0, 0.024);
-            playerState.rampPitch = -0.09;
-            playerState.boostCharge = Math.min(1.0, (playerState.boostCharge || 0) + 0.35);
+            playerState.hopVel = Math.max(playerState.hopVel || 0.0, 0.040);
+            playerState.isAirborne = true;
+            playerState.rampPitch = -0.18;
+            playerState.boostCharge = Math.min(1.0, (playerState.boostCharge || 0) + 0.48);
+            playerState.stuntProgress = 0.0;
+            if (playerState.isDrifting || Math.abs(playerState.steerInput || 0) > 0.42) {
+              playerState.stuntType = 'flatspin';
+              playerState.actionBanner = '🌀 360° FLAT SPIN! +NITRO';
+              playerState.actionBannerColor = '#38bdf8';
+              playerState.actionBannerTimer = 1.55;
+            } else {
+              playerState.stuntType = 'barrel';
+              playerState.actionBanner = '✈️ BARREL ROLL! +NITRO';
+              playerState.actionBannerColor = '#fbbf24';
+              playerState.actionBannerTimer = 1.55;
+            }
             if (audioSynth && audioSynth.playNitroBoost) {
               audioSynth.playNitroBoost();
             }
@@ -358,10 +378,10 @@ export function createPowerupManager(initialSplineData, scene) {
         const dLat = Math.abs(rival.lateralOffset - ramp.latOffset);
         if (signedRivalDS >= -0.0075 && signedRivalDS <= 0.0080 && dLat < 0.0052) {
           const u = THREE.MathUtils.clamp((signedRivalDS + 0.0068) / 0.0136, 0.0, 1.0);
-          const wedgeH = 0.00018 + u * 0.0014;
+          const wedgeH = 0.00018 + u * 0.0016;
           rival.hopHeight = Math.max(rival.hopHeight || 0.0, wedgeH);
-          if (u >= 0.45 && (rival.hopVel || 0) < 0.015) {
-            rival.hopVel = 0.022;
+          if (u >= 0.42 && (rival.hopVel || 0) < 0.015) {
+            rival.hopVel = 0.032;
             rival.boostTimer = 1.1;
           }
         }

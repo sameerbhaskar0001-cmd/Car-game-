@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { WEATHER_LIGHTING_PRESETS, normalizeWeatherMode } from './WeatherSystem.js';
 
 /**
  * Creates the V3.0/V4.0 Golden-Hour Window Sunlight (3200K, #ffb84d -> #ffe8a3),
@@ -595,7 +596,28 @@ export function buildGoldenHourAtmosphere(scene) {
   // Run initial calibration immediately
   updateAtmosphere(0.0, { sunIntensity: defaultSunScale, lampIntensity: defaultLampScale, showDustMotes: false }, null, null, scene, null);
 
-  function applyMapAtmospherePreset(mapId = 'coast', isShowroom = false, targetScene = scene, renderer = null) {
+  // Scratch colors & state for zero-allocation smooth weather + map lighting transitions
+  const _targetSunCol = new THREE.Color();
+  const _targetHemiSky = new THREE.Color();
+  const _targetHemiGround = new THREE.Color();
+  const _targetFillCol = new THREE.Color();
+  const _targetRimCol = new THREE.Color();
+  const _targetBgCol = new THREE.Color();
+  const _targetFogCol = new THREE.Color();
+  const _tintScratch = new THREE.Color();
+  let _lastAppliedMapId = null;
+  let _lastAppliedShowroom = null;
+  let _hasSnappedOutdoor = false;
+
+  function applyMapAtmospherePreset(
+    mapId = 'coast',
+    isShowroom = false,
+    targetScene = scene,
+    renderer = null,
+    weatherId = 'clear',
+    dt = 0.016,
+    snapImmediate = false
+  ) {
     sunbeamGroup.visible = false;
     dustPoints.visible = false;
     micAuraCone.visible = false;
@@ -604,6 +626,8 @@ export function buildGoldenHourAtmosphere(scene) {
     kbBacklight.visible = false;
 
     if (isShowroom) {
+      _lastAppliedShowroom = true;
+      _hasSnappedOutdoor = false;
       // Enclosed Pit-Lane Garage: let the dedicated showroom rig + bay ceiling light sculpt the car
       // with balanced studio contrast (neither pitch-black nor overexposed).
       windowGlowLight.visible = false;
@@ -618,6 +642,7 @@ export function buildGoldenHourAtmosphere(scene) {
       hemiLight.intensity = 0.34;
 
       if (targetScene) {
+        targetScene.environmentIntensity = 0.36;
         if (targetScene.background && targetScene.background.isColor) {
           targetScene.background.setHex(0x090e1a);
         }
@@ -640,97 +665,181 @@ export function buildGoldenHourAtmosphere(scene) {
     goldenFillLight.visible = true;
     rimLight.visible = true;
 
+    const wMod =
+      WEATHER_LIGHTING_PRESETS[normalizeWeatherMode(weatherId)] ||
+      WEATHER_LIGHTING_PRESETS.clear;
+
+    const shouldSnap =
+      snapImmediate ||
+      !_hasSnappedOutdoor ||
+      _lastAppliedShowroom === true ||
+      _lastAppliedMapId !== mapId;
+    _lastAppliedShowroom = false;
+    _lastAppliedMapId = mapId;
+    _hasSnappedOutdoor = true;
+
+    const blendT = shouldSnap ? 1.0 : 1.0 - Math.exp(-Math.min(Math.max(dt, 0.001), 0.1) * 4.6);
+
+    let baseSunInt = 1.85;
+    let baseHemiInt = 0.95;
+    let baseFillInt = 0.55;
+    let baseRimInt = 0.62;
+    let baseFogDensity = 0.075;
+    let baseExposure = 0.96;
+    let baseEnvInt = 0.88;
+
     if (mapId === 'city') {
-      sunLight.color.setHex(0xc4b5fd);
-      sunLight.intensity = 1.15;
+      _targetSunCol.setHex(0xc4b5fd);
+      baseSunInt = 1.15;
       sunLight.position.set(0.42, 0.82, 0.48);
 
-      hemiLight.color.setHex(0x38bdf8);
-      hemiLight.groundColor.setHex(0x1e1b4b);
-      hemiLight.intensity = 0.68;
+      _targetHemiSky.setHex(0x38bdf8);
+      _targetHemiGround.setHex(0x1e1b4b);
+      baseHemiInt = 0.68;
 
       goldenFillLight.position.set(0.5, 0.35, -0.55);
-      goldenFillLight.color.setHex(0x00e5ff);
-      goldenFillLight.intensity = 0.52;
+      _targetFillCol.setHex(0x00e5ff);
+      baseFillInt = 0.52;
 
       rimLight.position.set(-0.4, 0.35, -0.6);
-      rimLight.color.setHex(0xf472b6);
-      rimLight.intensity = 0.58;
+      _targetRimCol.setHex(0xf472b6);
+      baseRimInt = 0.58;
 
-      if (targetScene) {
-        if (targetScene.background && targetScene.background.isColor) {
-          targetScene.background.setHex(0x0a132c);
-        }
-        if (targetScene.fog) {
-          targetScene.fog.color.setHex(0x101c3d);
-          targetScene.fog.density = 0.11;
-        }
-      }
-      if (renderer) {
-        renderer.toneMappingExposure = 0.88;
-      }
+      _targetBgCol.setHex(0x0a132c);
+      _targetFogCol.setHex(0x101c3d);
+      baseFogDensity = 0.11;
+      baseExposure = 0.88;
+      baseEnvInt = 0.72;
     } else if (mapId === 'canyon') {
       // Alpine Snow Peaks: crisp bright alpine sun + sky bounce + clear rear rim highlight
-      sunLight.color.setHex(0xfffbeb);
-      sunLight.intensity = 1.95;
+      _targetSunCol.setHex(0xfffbeb);
+      baseSunInt = 1.95;
       sunLight.position.set(-0.48, 0.78, 0.68);
 
-      hemiLight.color.setHex(0xbae6fd);
-      hemiLight.groundColor.setHex(0x64748b);
-      hemiLight.intensity = 1.05;
+      _targetHemiSky.setHex(0xbae6fd);
+      _targetHemiGround.setHex(0x64748b);
+      baseHemiInt = 1.05;
 
       goldenFillLight.position.set(0.45, 0.42, -0.58);
-      goldenFillLight.color.setHex(0xe0f2fe);
-      goldenFillLight.intensity = 0.58;
+      _targetFillCol.setHex(0xe0f2fe);
+      baseFillInt = 0.58;
 
       rimLight.position.set(-0.38, 0.35, -0.62);
-      rimLight.color.setHex(0x7dd3fc);
-      rimLight.intensity = 0.55;
+      _targetRimCol.setHex(0x7dd3fc);
+      baseRimInt = 0.55;
 
-      if (targetScene) {
-        if (targetScene.background && targetScene.background.isColor) {
-          targetScene.background.setHex(0xc7dff2);
-        }
-        if (targetScene.fog) {
-          targetScene.fog.color.setHex(0xc7dff2);
-          targetScene.fog.density = 0.07;
-        }
-      }
-      if (renderer) {
-        renderer.toneMappingExposure = 0.96;
-      }
+      _targetBgCol.setHex(0xc7dff2);
+      _targetFogCol.setHex(0xc7dff2);
+      baseFogDensity = 0.07;
+      baseExposure = 0.96;
+      baseEnvInt = 0.88;
     } else {
       // 'coast': Sunset Coastal Beach Highway — warm golden sunlight + sky-blue fill + crisp rim
-      sunLight.color.setHex(0xffe0a6);
-      sunLight.intensity = 1.85;
+      _targetSunCol.setHex(0xffe0a6);
+      baseSunInt = 1.85;
       sunLight.position.set(-0.55, 0.72, 0.72);
 
-      hemiLight.color.setHex(0x93c5fd);
-      hemiLight.groundColor.setHex(0xb45309);
-      hemiLight.intensity = 0.95;
+      _targetHemiSky.setHex(0x93c5fd);
+      _targetHemiGround.setHex(0xb45309);
+      baseHemiInt = 0.95;
 
       goldenFillLight.position.set(0.45, 0.45, -0.55);
-      goldenFillLight.color.setHex(0xfdba74);
-      goldenFillLight.intensity = 0.55;
+      _targetFillCol.setHex(0xfdba74);
+      baseFillInt = 0.55;
 
       rimLight.position.set(-0.45, 0.38, -0.65);
-      rimLight.color.setHex(0xfef08a);
-      rimLight.intensity = 0.62;
+      _targetRimCol.setHex(0xfef08a);
+      baseRimInt = 0.62;
 
-      if (targetScene) {
-        if (targetScene.background && targetScene.background.isColor) {
-          targetScene.background.setHex(0xe89c6c);
-        }
-        if (targetScene.fog) {
-          targetScene.fog.color.setHex(0xd99b66);
-          targetScene.fog.density = 0.075;
-        }
+      _targetBgCol.setHex(0xe89c6c);
+      _targetFogCol.setHex(0xd99b66);
+      baseFogDensity = 0.075;
+      baseExposure = 0.96;
+      baseEnvInt = 0.88;
+    }
+
+    // Apply weather lighting & atmosphere tint modifiers onto map base preset
+    if (wMod.sunTintMix > 0) {
+      _tintScratch.setHex(wMod.sunTint);
+      _targetSunCol.lerp(_tintScratch, wMod.sunTintMix);
+    }
+    if (wMod.hemiSkyMix > 0) {
+      _tintScratch.setHex(wMod.hemiSkyTint);
+      _targetHemiSky.lerp(_tintScratch, wMod.hemiSkyMix);
+    }
+    if (wMod.hemiGroundMix > 0) {
+      _tintScratch.setHex(wMod.hemiGroundTint);
+      _targetHemiGround.lerp(_tintScratch, wMod.hemiGroundMix);
+    }
+    if (wMod.fillMix > 0) {
+      _tintScratch.setHex(wMod.fillTint);
+      _targetFillCol.lerp(_tintScratch, wMod.fillMix);
+    }
+    if (wMod.rimMix > 0) {
+      _tintScratch.setHex(wMod.rimTint);
+      _targetRimCol.lerp(_tintScratch, wMod.rimMix);
+    }
+    if (wMod.bgMix > 0) {
+      _tintScratch.setHex(wMod.bgTint);
+      // Keep night city horizon moody instead of washing out completely in light mist
+      const cityBgScale = mapId === 'city' ? 0.42 : 1.0;
+      _targetBgCol.lerp(_tintScratch, wMod.bgMix * cityBgScale);
+    }
+    if (wMod.fogMix > 0) {
+      _tintScratch.setHex(wMod.fogTint);
+      const cityFogScale = mapId === 'city' ? 0.5 : 1.0;
+      _targetFogCol.lerp(_tintScratch, wMod.fogMix * cityFogScale);
+    }
+
+    const targetSunInt = baseSunInt * wMod.sunIntensityMult;
+    const targetHemiInt = baseHemiInt * wMod.hemiIntensityMult;
+    const targetFillInt = baseFillInt * wMod.fillIntensityMult;
+    const targetRimInt = baseRimInt * wMod.rimIntensityMult;
+    const targetFogDensity = baseFogDensity * wMod.fogDensityMult + wMod.fogDensityAdd;
+    const targetEnvInt = baseEnvInt * wMod.envIntensityMult;
+    const targetExposure = THREE.MathUtils.clamp(baseExposure + wMod.exposureOffset, 0.72, 1.12);
+
+    // Smoothly interpolate all active lights, sky/fog, environment IBL, and exposure
+    sunLight.color.lerp(_targetSunCol, blendT);
+    sunLight.intensity = THREE.MathUtils.lerp(sunLight.intensity, targetSunInt, blendT);
+
+    hemiLight.color.lerp(_targetHemiSky, blendT);
+    hemiLight.groundColor.lerp(_targetHemiGround, blendT);
+    hemiLight.intensity = THREE.MathUtils.lerp(hemiLight.intensity, targetHemiInt, blendT);
+
+    goldenFillLight.color.lerp(_targetFillCol, blendT);
+    goldenFillLight.intensity = THREE.MathUtils.lerp(goldenFillLight.intensity, targetFillInt, blendT);
+
+    rimLight.color.lerp(_targetRimCol, blendT);
+    rimLight.intensity = THREE.MathUtils.lerp(rimLight.intensity, targetRimInt, blendT);
+
+    if (targetScene) {
+      const currentEnv = targetScene.environmentIntensity ?? baseEnvInt;
+      targetScene.environmentIntensity = THREE.MathUtils.lerp(currentEnv, targetEnvInt, blendT);
+
+      if (targetScene.background && targetScene.background.isColor) {
+        targetScene.background.lerp(_targetBgCol, blendT);
       }
-      if (renderer) {
-        renderer.toneMappingExposure = 0.96;
+      if (targetScene.fog) {
+        targetScene.fog.color.lerp(_targetFogCol, blendT);
+        targetScene.fog.density = THREE.MathUtils.lerp(
+          targetScene.fog.density,
+          targetFogDensity,
+          blendT
+        );
       }
     }
-    sunLight.shadow.needsUpdate = true;
+    if (renderer) {
+      renderer.toneMappingExposure = THREE.MathUtils.lerp(
+        renderer.toneMappingExposure,
+        targetExposure,
+        blendT
+      );
+    }
+
+    if (shouldSnap) {
+      sunLight.shadow.needsUpdate = true;
+    }
   }
 
   return {

@@ -25,6 +25,8 @@
  * 10/10 Clarity) and a clean <110 Hz acoustic muffler air thump.
  */
 
+import { getCarAudioProfile } from './CarAudioProfiles.js';
+
 const LOOP_STEM_FILES = {
   idle: 'kart_idle_loop.wav',
   cruise: 'kart_cruise_mid_loop.wav',
@@ -107,6 +109,13 @@ export function createDeskRacerHybridAudio(options = {}) {
   let rumbleSubOsc = null;
   let rumbleLowpass = null;
   let rumbleOutGain = null;
+
+  // Active per-car acoustic identity (unique engine + unique drift tire voice per BodyKitId)
+  let currentCarId = 'coupe';
+  let carProfile = getCarAudioProfile('coupe');
+  let carEngineSynth = null;
+  let lastGearIndex = 1;
+  let gearShiftDipTimer = 0.0;
 
   // User-tunable texture parameters
   let userRumbleAmount = options.rumbleAmount ?? 1.0;
@@ -304,7 +313,341 @@ export function createDeskRacerHybridAudio(options = {}) {
     rumbleOutGain.connect(masterGain);
     rumbleSubOsc.start();
 
+    // -----------------------------------------------------------------------
+    // 4B. PER-CAR HARMONIC ENGINE VOICE + TURBO/SUPERCHARGER WHINE SYNTH
+    //     Gives every car (V8 Muscle, V12 Exotic, Flat-Plane V8, V10, Rally Boxer,
+    //     Hypercar, Diesel Tank, Sleeper Van, Street Coupe) a distinct live roar!
+    // -----------------------------------------------------------------------
+    const carVoiceBus = ctx.createGain();
+    carVoiceBus.gain.value = 0.0001;
+
+    const carFilter = ctx.createBiquadFilter();
+    carFilter.type = 'lowpass';
+    carFilter.frequency.value = 950;
+    carFilter.Q.value = carProfile.exhaustQ || 2.6;
+
+    const carExhaustPeak = ctx.createBiquadFilter();
+    carExhaustPeak.type = 'peaking';
+    carExhaustPeak.frequency.value = 340;
+    carExhaustPeak.Q.value = 1.4;
+    carExhaustPeak.gain.value = 4.0;
+
+    carFilter.connect(carExhaustPeak);
+    carExhaustPeak.connect(carVoiceBus);
+    carVoiceBus.connect(misfireDuckGain);
+
+    const oscPrimary = ctx.createOscillator();
+    oscPrimary.type = carProfile.primaryWave || 'sawtooth';
+    oscPrimary.frequency.value = carProfile.baseHz;
+    const gainPrimary = ctx.createGain();
+    gainPrimary.gain.value = carProfile.primaryGain;
+    oscPrimary.connect(gainPrimary);
+    gainPrimary.connect(carFilter);
+
+    const oscHarm = ctx.createOscillator();
+    oscHarm.type = 'triangle';
+    oscHarm.frequency.value = carProfile.baseHz * carProfile.harmRatio;
+    const gainHarm = ctx.createGain();
+    gainHarm.gain.value = carProfile.harmGain;
+    oscHarm.connect(gainHarm);
+    gainHarm.connect(carFilter);
+
+    const oscThird = ctx.createOscillator();
+    oscThird.type = 'sawtooth';
+    oscThird.frequency.value = carProfile.baseHz * carProfile.thirdRatio;
+    const gainThird = ctx.createGain();
+    gainThird.gain.value = carProfile.thirdGain;
+    oscThird.connect(gainThird);
+    gainThird.connect(carFilter);
+
+    const oscSub = ctx.createOscillator();
+    oscSub.type = 'sine';
+    oscSub.frequency.value = carProfile.baseHz * 0.5;
+    const gainSub = ctx.createGain();
+    gainSub.gain.value = carProfile.subGain;
+    oscSub.connect(gainSub);
+    gainSub.connect(carVoiceBus);
+
+    // Optional Turbocharger / Supercharger Spool Whine Oscillator
+    const oscTurbo = ctx.createOscillator();
+    oscTurbo.type = 'sine';
+    oscTurbo.frequency.value = 1400;
+    const turboBandpass = ctx.createBiquadFilter();
+    turboBandpass.type = 'bandpass';
+    turboBandpass.frequency.value = 2400;
+    turboBandpass.Q.value = 2.4;
+    const gainTurbo = ctx.createGain();
+    gainTurbo.gain.value = 0.0001;
+    oscTurbo.connect(turboBandpass);
+    turboBandpass.connect(gainTurbo);
+    gainTurbo.connect(masterGain);
+
+    oscPrimary.start();
+    oscHarm.start();
+    oscThird.start();
+    oscSub.start();
+    oscTurbo.start();
+
+    carEngineSynth = {
+      bus: carVoiceBus,
+      filter: carFilter,
+      exhaustPeak: carExhaustPeak,
+      oscPrimary,
+      gainPrimary,
+      oscHarm,
+      gainHarm,
+      oscThird,
+      gainThird,
+      oscSub,
+      gainSub,
+      oscTurbo,
+      turboBandpass,
+      gainTurbo,
+    };
+
+    // -----------------------------------------------------------------------
+    // 5. PER-CAR DUAL-LAYER TIRE DRIFT SYNTHESIZER
+    //    Layer A: Tuned dual-band resonant tire squeal (compound-specific pitch & Q)
+    //    Layer B: Low-mid rubber-on-asphalt / rally-gravel scrub texture
+    // -----------------------------------------------------------------------
+    const screechBufLen = ctx.sampleRate * 2;
+    const screechBuf = ctx.createBuffer(1, screechBufLen, ctx.sampleRate);
+    const screechData = screechBuf.getChannelData(0);
+    for (let i = 0; i < screechBufLen; i++) {
+      screechData[i] = Math.random() * 2 - 1;
+    }
+    const screechNoise = ctx.createBufferSource();
+    screechNoise.buffer = screechBuf;
+    screechNoise.loop = true;
+
+    const screechBp1 = ctx.createBiquadFilter();
+    screechBp1.type = 'bandpass';
+    screechBp1.frequency.value = carProfile.driftFreq1;
+    screechBp1.Q.value = carProfile.driftQ;
+
+    const screechBp2 = ctx.createBiquadFilter();
+    screechBp2.type = 'peaking';
+    screechBp2.frequency.value = carProfile.driftFreq1 * carProfile.driftFreq2Ratio;
+    screechBp2.Q.value = Math.max(3.5, carProfile.driftQ * 0.72);
+    screechBp2.gain.value = 10.0;
+
+    const screechLfo = ctx.createOscillator();
+    screechLfo.type = 'triangle';
+    screechLfo.frequency.value = carProfile.driftLfoRate;
+    const screechLfoGain = ctx.createGain();
+    screechLfoGain.gain.value = carProfile.driftLfoDepth;
+    screechLfo.connect(screechLfoGain);
+    screechLfoGain.connect(screechBp1.frequency);
+
+    const screechGain = ctx.createGain();
+    screechGain.gain.value = 0.0001;
+
+    screechNoise.connect(screechBp1);
+    screechBp1.connect(screechBp2);
+    screechBp2.connect(screechGain);
+    screechGain.connect(masterGain);
+
+    // Layer B: Tire Rubber & Tarmac/Gravel Scrub Body
+    const scrubBp = ctx.createBiquadFilter();
+    scrubBp.type = 'bandpass';
+    scrubBp.frequency.value = carProfile.driftScrubFreq;
+    scrubBp.Q.value = 1.8;
+    const scrubGain = ctx.createGain();
+    scrubGain.gain.value = 0.0001;
+    screechNoise.connect(scrubBp);
+    scrubBp.connect(scrubGain);
+    scrubGain.connect(masterGain);
+
+    screechNoise.start();
+    screechLfo.start();
+    loopNodes.proceduralScreech = {
+      bp1: screechBp1,
+      bp2: screechBp2,
+      lfo: screechLfo,
+      lfoGain: screechLfoGain,
+      gain: screechGain,
+      scrubBp,
+      scrubGain,
+    };
+
+    // -----------------------------------------------------------------------
+    // 6. PROCEDURAL SYNTHWAVE / ARCADE BGM STEP SEQUENCER (130 BPM Loop)
+    // -----------------------------------------------------------------------
+    const bgmBus = ctx.createGain();
+    bgmBus.gain.value = 0.20;
+    bgmBus.connect(masterGain);
+    loopNodes.bgmBus = bgmBus;
+
     loadAllStems();
+  }
+
+  /**
+   * Switches active car engine & drift tire sound profile immediately.
+   */
+  function setCarProfile(kitId) {
+    currentCarId = kitId || 'coupe';
+    carProfile = getCarAudioProfile(currentCarId);
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    if (carEngineSynth) {
+      carEngineSynth.oscPrimary.type = carProfile.primaryWave || 'sawtooth';
+      carEngineSynth.gainPrimary.gain.setTargetAtTime(carProfile.primaryGain, now, 0.04);
+      carEngineSynth.gainHarm.gain.setTargetAtTime(carProfile.harmGain, now, 0.04);
+      carEngineSynth.gainThird.gain.setTargetAtTime(carProfile.thirdGain, now, 0.04);
+      carEngineSynth.gainSub.gain.setTargetAtTime(carProfile.subGain, now, 0.04);
+      carEngineSynth.filter.Q.setTargetAtTime(carProfile.exhaustQ || 2.6, now, 0.04);
+    }
+    if (loopNodes.proceduralScreech) {
+      loopNodes.proceduralScreech.bp1.Q.setTargetAtTime(carProfile.driftQ, now, 0.04);
+      loopNodes.proceduralScreech.bp2.Q.setTargetAtTime(
+        Math.max(3.5, carProfile.driftQ * 0.72),
+        now,
+        0.04
+      );
+      loopNodes.proceduralScreech.lfo.frequency.setTargetAtTime(
+        carProfile.driftLfoRate,
+        now,
+        0.04
+      );
+      loopNodes.proceduralScreech.lfoGain.gain.setTargetAtTime(
+        carProfile.driftLfoDepth,
+        now,
+        0.04
+      );
+      loopNodes.proceduralScreech.scrubBp.frequency.setTargetAtTime(
+        carProfile.driftScrubFreq,
+        now,
+        0.04
+      );
+    }
+  }
+
+  /**
+   * Plays a crisp turbo blow-off valve flutter ("pshh-tutu") on shifts / drift exits
+   * for turbocharged vehicles (SWIFT, APEX, DRIFT Rally, CARGO Sleeper Van).
+   */
+  function playTurboFlutter(intensity = 0.85) {
+    if (!ctx || !enabled || ctx.state !== 'running') return;
+    const now = ctx.currentTime;
+    const dur = 0.24;
+    const bufLen = Math.floor(ctx.sampleRate * dur);
+    const buf = ctx.createBuffer(1, bufLen, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bufLen; i++) {
+      const t = i / ctx.sampleRate;
+      // 3-pulse flutter cadence ("stu-tu-tu")
+      const pulse = Math.pow(0.5 + 0.5 * Math.cos(t * Math.PI * 2.0 * 17.5), 1.6);
+      data[i] = (Math.random() * 2 - 1) * pulse * Math.exp(-t * 10.5);
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(2950, now);
+    bp.frequency.exponentialRampToValueAtTime(1450, now + dur);
+    bp.Q.value = 3.2;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(Math.min(0.24, 0.17 * intensity), now);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    src.connect(bp);
+    bp.connect(g);
+    g.connect(masterGain);
+    src.start(now);
+  }
+
+  /**
+   * Plays a punchy car-specific engine rev blip in Garage when equipping or previewing a car.
+   */
+  let lastRevPreviewMs = 0;
+  function playCarRevPreview(kitId) {
+    const nowMs = performance.now();
+    if (nowMs - lastRevPreviewMs < 260) return;
+    lastRevPreviewMs = nowMs;
+
+    const prof = getCarAudioProfile(kitId || currentCarId);
+    initAudio();
+    if (!ctx) return;
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+    const now = ctx.currentTime;
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, now);
+    out.gain.linearRampToValueAtTime(0.24, now + 0.06);
+    out.gain.setValueAtTime(0.22, now + 0.24);
+    out.gain.exponentialRampToValueAtTime(0.0001, now + 0.56);
+    out.connect(ctx.destination);
+
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.Q.value = prof.exhaustQ || 2.6;
+    lp.frequency.setValueAtTime(prof.filterLow * 1.4, now);
+    lp.frequency.exponentialRampToValueAtTime(prof.filterHigh * 0.95, now + 0.20);
+    lp.frequency.exponentialRampToValueAtTime(prof.filterLow * 1.1, now + 0.54);
+    lp.connect(out);
+
+    const fIdle = prof.baseHz * 1.15;
+    const fPeak = prof.baseHz * prof.redlineMult * 0.86;
+    [
+      { mult: 1.0, type: prof.primaryWave || 'sawtooth', amp: 0.48 },
+      { mult: prof.harmRatio, type: 'triangle', amp: 0.34 },
+      { mult: prof.thirdRatio, type: 'sawtooth', amp: 0.16 },
+      { mult: 0.5, type: 'sine', amp: 0.42 },
+    ].forEach((layer) => {
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = layer.type;
+      osc.frequency.setValueAtTime(fIdle * layer.mult, now);
+      osc.frequency.exponentialRampToValueAtTime(fPeak * layer.mult, now + 0.20);
+      osc.frequency.exponentialRampToValueAtTime(fIdle * 1.05 * layer.mult, now + 0.54);
+      g.gain.value = layer.amp;
+      osc.connect(g);
+      g.connect(lp);
+      osc.start(now);
+      osc.stop(now + 0.58);
+    });
+
+    if (prof.turboGain > 0.01) {
+      const tOsc = ctx.createOscillator();
+      const tG = ctx.createGain();
+      tOsc.type = 'sine';
+      tOsc.frequency.setValueAtTime(prof.turboStartHz, now);
+      tOsc.frequency.exponentialRampToValueAtTime(prof.turboPeakHz * 0.85, now + 0.22);
+      tOsc.frequency.exponentialRampToValueAtTime(prof.turboStartHz * 0.85, now + 0.52);
+      tG.gain.setValueAtTime(0.0001, now);
+      tG.gain.linearRampToValueAtTime(prof.turboGain * 0.95, now + 0.18);
+      tG.gain.exponentialRampToValueAtTime(0.0001, now + 0.50);
+      tOsc.connect(tG);
+      tG.connect(out);
+      tOsc.start(now);
+      tOsc.stop(now + 0.54);
+    }
+  }
+
+  /**
+   * Plays an exhilarating drift-exit mini-turbo surge + car-specific exhaust pop/BOV flutter!
+   */
+  function playDriftBoostPop(tier = 1) {
+    if (!ctx || !enabled || ctx.state !== 'running') return;
+    const intensity = tier >= 3 ? 1.25 : tier === 2 ? 1.0 : 0.78;
+    fireSingleRealSputterPop(0.0, intensity * (carProfile.sputterIntensity || 1.0), 'overrun');
+    if (carProfile.bovFlutter) {
+      playTurboFlutter(intensity);
+    }
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = 'triangle';
+    const fStart = tier >= 3 ? 210 : tier === 2 ? 165 : 135;
+    osc.frequency.setValueAtTime(fStart, now);
+    osc.frequency.exponentialRampToValueAtTime(fStart * 2.1, now + 0.18);
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.linearRampToValueAtTime(0.18 * intensity, now + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.26);
+    osc.connect(g);
+    g.connect(masterGain);
+    osc.start(now);
+    osc.stop(now + 0.28);
   }
 
   /**
@@ -396,6 +739,102 @@ export function createDeskRacerHybridAudio(options = {}) {
     }
   }
 
+  let bgmActive = false;
+  let bgmStepIndex = 0;
+  let bgmNextStepTime = 0;
+
+  const BGM_BASS_NOTES = [
+    55.0, 55.0, 110.0, 55.0, 55.0, 55.0, 110.0, 55.0,
+    43.65, 43.65, 87.31, 43.65, 49.0, 49.0, 98.0, 65.41,
+  ];
+  const BGM_ARP_NOTES = [
+    440.0, 523.25, 659.25, 783.99, 659.25, 523.25, 880.0, 659.25,
+    349.23, 440.0, 523.25, 659.25, 392.0, 493.88, 587.33, 783.99,
+  ];
+
+  function scheduleBgmStep(stepTime, stepIdx) {
+    if (!ctx || !loopNodes.bgmBus || !enabled || !bgmActive) return;
+    const out = loopNodes.bgmBus;
+    const step16 = stepIdx % 16;
+
+    if (step16 % 4 === 0) {
+      const kickOsc = ctx.createOscillator();
+      const kickGain = ctx.createGain();
+      kickOsc.type = 'sine';
+      kickOsc.frequency.setValueAtTime(128, stepTime);
+      kickOsc.frequency.exponentialRampToValueAtTime(36, stepTime + 0.11);
+      kickGain.gain.setValueAtTime(0.001, stepTime);
+      kickGain.gain.linearRampToValueAtTime(0.42, stepTime + 0.004);
+      kickGain.gain.exponentialRampToValueAtTime(0.0001, stepTime + 0.14);
+      kickOsc.connect(kickGain);
+      kickGain.connect(out);
+      kickOsc.start(stepTime);
+      kickOsc.stop(stepTime + 0.15);
+    }
+
+    if (step16 === 4 || step16 === 12) {
+      const snLen = Math.floor(ctx.sampleRate * 0.09);
+      const snBuf = ctx.createBuffer(1, snLen, ctx.sampleRate);
+      const snData = snBuf.getChannelData(0);
+      for (let i = 0; i < snLen; i++) {
+        snData[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.028));
+      }
+      const snSrc = ctx.createBufferSource();
+      snSrc.buffer = snBuf;
+      const snFilter = ctx.createBiquadFilter();
+      snFilter.type = 'highpass';
+      snFilter.frequency.setValueAtTime(520, stepTime);
+      const snGain = ctx.createGain();
+      snGain.gain.setValueAtTime(0.24, stepTime);
+      snGain.gain.exponentialRampToValueAtTime(0.0001, stepTime + 0.085);
+      snSrc.connect(snFilter);
+      snFilter.connect(snGain);
+      snGain.connect(out);
+      snSrc.start(stepTime);
+    }
+
+    const bassFreq = BGM_BASS_NOTES[step16];
+    if (bassFreq) {
+      const bassOsc = ctx.createOscillator();
+      const bassFilter = ctx.createBiquadFilter();
+      const bassGain = ctx.createGain();
+      bassOsc.type = 'sawtooth';
+      bassOsc.frequency.setValueAtTime(bassFreq, stepTime);
+      bassFilter.type = 'lowpass';
+      bassFilter.Q.value = 3.2;
+      bassFilter.frequency.setValueAtTime(780, stepTime);
+      bassFilter.frequency.exponentialRampToValueAtTime(160, stepTime + 0.105);
+      bassGain.gain.setValueAtTime(0.001, stepTime);
+      bassGain.gain.linearRampToValueAtTime(0.22, stepTime + 0.006);
+      bassGain.gain.exponentialRampToValueAtTime(0.0001, stepTime + 0.11);
+      bassOsc.connect(bassFilter);
+      bassFilter.connect(bassGain);
+      bassGain.connect(out);
+      bassOsc.start(stepTime);
+      bassOsc.stop(stepTime + 0.115);
+    }
+
+    const arpFreq = BGM_ARP_NOTES[step16];
+    if (arpFreq && (step16 % 2 === 0 || step16 === 7 || step16 === 15)) {
+      const arpOsc = ctx.createOscillator();
+      const arpFilter = ctx.createBiquadFilter();
+      const arpGain = ctx.createGain();
+      arpOsc.type = 'triangle';
+      arpOsc.frequency.setValueAtTime(arpFreq, stepTime);
+      arpFilter.type = 'lowpass';
+      arpFilter.frequency.setValueAtTime(2400, stepTime);
+      arpFilter.frequency.exponentialRampToValueAtTime(680, stepTime + 0.13);
+      arpGain.gain.setValueAtTime(0.001, stepTime);
+      arpGain.gain.linearRampToValueAtTime(0.11, stepTime + 0.008);
+      arpGain.gain.exponentialRampToValueAtTime(0.0001, stepTime + 0.14);
+      arpOsc.connect(arpFilter);
+      arpFilter.connect(arpGain);
+      arpGain.connect(out);
+      arpOsc.start(stepTime);
+      arpOsc.stop(stepTime + 0.145);
+    }
+  }
+
   function setEnabled(state) {
     enabled = Boolean(state);
     if (enabled) {
@@ -406,7 +845,12 @@ export function createDeskRacerHybridAudio(options = {}) {
       if (masterGain && ctx) {
         masterGain.gain.setTargetAtTime(masterVolume, ctx.currentTime, 0.05);
       }
+      bgmActive = true;
+      if (ctx) {
+        bgmNextStepTime = ctx.currentTime + 0.04;
+      }
     } else if (masterGain && ctx) {
+      bgmActive = false;
       stopEngine();
       masterGain.gain.setTargetAtTime(0.0001, ctx.currentTime, 0.03);
     }
@@ -437,6 +881,22 @@ export function createDeskRacerHybridAudio(options = {}) {
       rumbleOutGain.gain.cancelScheduledValues(now);
       rumbleOutGain.gain.setValueAtTime(0.0001, now);
     }
+    if (carEngineSynth) {
+      carEngineSynth.bus.gain.cancelScheduledValues(now);
+      carEngineSynth.bus.gain.setValueAtTime(0.0001, now);
+      carEngineSynth.gainTurbo.gain.cancelScheduledValues(now);
+      carEngineSynth.gainTurbo.gain.setValueAtTime(0.0001, now);
+    }
+    if (loopNodes.proceduralScreech) {
+      loopNodes.proceduralScreech.gain.gain.cancelScheduledValues(now);
+      loopNodes.proceduralScreech.gain.gain.setValueAtTime(0.0001, now);
+      if (loopNodes.proceduralScreech.scrubGain) {
+        loopNodes.proceduralScreech.scrubGain.gain.cancelScheduledValues(now);
+        loopNodes.proceduralScreech.scrubGain.gain.setValueAtTime(0.0001, now);
+      }
+    }
+    lastGearIndex = 1;
+    gearShiftDipTimer = 0.0;
   }
 
   function toggle() {
@@ -550,20 +1010,113 @@ export function createDeskRacerHybridAudio(options = {}) {
     const now = ctx.currentTime;
     const timeConst = 0.035;
 
+    const stemPitchScale = carProfile.stemPitchMult || 1.0;
+    const scaledCruiseRate = Math.max(0.55, Math.min(1.65, targetCruiseRate * stemPitchScale));
+
     if (loopNodes.idle && loopNodes.cruise) {
       const launchU =
           Math.min(1.0, Math.max(0.0, (rawSpeed - 0.005) / (0.012 - 0.005)));
-      const idleGain = 0.96 * Math.cos(0.5 * Math.PI * launchU);
-      const cruiseGain = 0.96 * Math.sin(0.5 * Math.PI * launchU);
+      // Keep real studio stems subtle underneath so each car's unique harmonic voice leads clearly!
+      const idleGain = 0.42 * Math.cos(0.5 * Math.PI * launchU);
+      const cruiseGain = 0.46 * Math.sin(0.5 * Math.PI * launchU);
       loopNodes.idle.gain.gain.setTargetAtTime(idleGain, now, timeConst);
-      loopNodes.idle.src.playbackRate.setTargetAtTime(1.0, now, timeConst);
+      loopNodes.idle.src.playbackRate.setTargetAtTime(Math.max(0.68, Math.min(1.35, stemPitchScale)), now, timeConst);
       loopNodes.cruise.gain.gain.setTargetAtTime(cruiseGain, now, timeConst);
       loopNodes.cruise.src.playbackRate.setTargetAtTime(
-          targetCruiseRate, now, timeConst);
+          scaledCruiseRate, now, timeConst);
     } else if (loopNodes.cruise) {
-      loopNodes.cruise.gain.gain.setTargetAtTime(0.96, now, timeConst);
+      loopNodes.cruise.gain.gain.setTargetAtTime(0.46, now, timeConst);
       loopNodes.cruise.src.playbackRate.setTargetAtTime(
-          targetCruiseRate, now, timeConst);
+          scaledCruiseRate, now, timeConst);
+    }
+
+    // --- PER-CAR SIMULATED MULTI-GEAR ENGINE VOICE + TURBO WHINE ---
+    if (carEngineSynth) {
+      const totalGears = carProfile.gears || 6;
+      const speedRatio = Math.min(1.18, Math.max(0.0, smoothNormSpeed));
+      const rawGearFloat = speedRatio * (totalGears - 0.35);
+      const gearIdx = Math.min(totalGears, Math.max(1, Math.floor(rawGearFloat) + 1));
+      const gearFrac = Math.min(1.0, Math.max(0.0, rawGearFloat - (gearIdx - 1)));
+
+      // Trigger crisp upshift exhaust pop / turbo flutter when climbing a gear under power!
+      if (gearIdx > lastGearIndex && smoothNormSpeed > 0.16 && !state.countdownLocked) {
+        gearShiftDipTimer = 0.095;
+        if (carProfile.bovFlutter && gearIdx >= 3) {
+          playTurboFlutter(0.58);
+        } else if ((carProfile.sputterIntensity || 1.0) >= 1.1) {
+          fireSingleRealSputterPop(0.0, 0.55 * (carProfile.sputterIntensity || 1.0), 'overrun');
+        }
+      }
+      lastGearIndex = gearIdx;
+      if (gearShiftDipTimer > 0) {
+        gearShiftDipTimer = Math.max(0.0, gearShiftDipTimer - dt);
+      }
+
+      // Expressive RPM curve: starts at idle, climbs smoothly through each gear with progressive higher base per gear
+      const gearBaseNorm = (gearIdx - 1) / totalGears;
+      const rpmNorm =
+        rawSpeed < 0.006
+          ? 0.06 + 0.025 * Math.sin(now * 28.0)
+          : Math.min(
+              1.18,
+              0.24 +
+                gearBaseNorm * 0.32 +
+                gearFrac * 0.54 +
+                smoothBoostBlend * 0.16 +
+                (state.isDrifting ? 0.08 : 0.0) -
+                (gearShiftDipTimer > 0 ? 0.14 : 0.0)
+            );
+
+      const engineHz =
+        carProfile.baseHz * (1.0 + rpmNorm * (carProfile.redlineMult - 1.0));
+      carEngineSynth.oscPrimary.frequency.setTargetAtTime(engineHz, now, 0.024);
+      carEngineSynth.oscHarm.frequency.setTargetAtTime(
+        engineHz * carProfile.harmRatio,
+        now,
+        0.024
+      );
+      carEngineSynth.oscThird.frequency.setTargetAtTime(
+        engineHz * carProfile.thirdRatio,
+        now,
+        0.024
+      );
+      carEngineSynth.oscSub.frequency.setTargetAtTime(
+        Math.max(30.0, engineHz * 0.5),
+        now,
+        0.028
+      );
+
+      const carCutoff =
+        carProfile.filterLow +
+        (carProfile.filterHigh - carProfile.filterLow) * Math.min(1.0, rpmNorm);
+      carEngineSynth.filter.frequency.setTargetAtTime(carCutoff, now, 0.032);
+      carEngineSynth.exhaustPeak.frequency.setTargetAtTime(
+        Math.max(160, Math.min(900, engineHz * 2.4)),
+        now,
+        0.04
+      );
+
+      const voiceVol =
+        (rawSpeed < 0.005 ? 0.34 : 0.62 + 0.24 * Math.min(1.0, rpmNorm) + 0.14 * smoothBoostBlend) *
+        (gearShiftDipTimer > 0 ? 0.72 : 1.0);
+      carEngineSynth.bus.gain.setTargetAtTime(voiceVol, now, 0.028);
+
+      // Turbocharger / Supercharger Spool Whine (scales with RPM & boost)
+      if ((carProfile.turboGain || 0) > 0.001) {
+        const spool = Math.max(0.0, Math.min(1.15, (rpmNorm - 0.22) * 1.25 + smoothBoostBlend * 0.45));
+        const tFreq =
+          carProfile.turboStartHz +
+          (carProfile.turboPeakHz - carProfile.turboStartHz) * Math.min(1.0, spool);
+        carEngineSynth.oscTurbo.frequency.setTargetAtTime(tFreq, now, 0.04);
+        carEngineSynth.turboBandpass.frequency.setTargetAtTime(tFreq, now, 0.04);
+        carEngineSynth.gainTurbo.gain.setTargetAtTime(
+          carProfile.turboGain * spool,
+          now,
+          0.04
+        );
+      } else {
+        carEngineSynth.gainTurbo.gain.setTargetAtTime(0.0001, now, 0.04);
+      }
     }
 
     // --- Formant-Compensating EQ + Hill/Curl Load Timbre Shift ---
@@ -602,27 +1155,82 @@ export function createDeskRacerHybridAudio(options = {}) {
 
     // 4. Subtle Phase-Clean Sub-Bass Sine (<95 Hz) for physical chest weight
     if (rumbleSubOsc && rumbleOutGain) {
-      const subHz = Math.min(82.0, Math.max(40.0, targetF0 * 0.5));
+      const subHz = Math.min(82.0, Math.max(34.0, carProfile.baseHz * 0.72));
       rumbleSubOsc.frequency.setTargetAtTime(subHz, now, 0.03);
       const subGain = Math.min(
-          0.20,
+          0.22,
           0.075 * userRumbleAmount *
               (0.85 + 0.35 * Math.min(1.0, clampedNorm) +
                Math.max(0.0, smoothHillAndCurlLoad) * 0.8));
       rumbleOutGain.gain.setTargetAtTime(subGain, now, 0.04);
     }
 
-    // Tire Drift Scrub & FIA Curb Rumble loops
-    const targetDriftGain =
-        state.isDrifting ? 0.42 * Math.min(1.0, smoothNormSpeed / 0.30) : 0.0;
+    // Per-Car Tire Drift Scrub, Tuned Tire Screech & FIA Curb Rumble loops
+    const driftIntensity = state.isDrifting
+      ? Math.min(
+          1.0,
+          Math.max(
+            0.35,
+            (Math.abs(state.driftAngle || 0.22) / 0.34) *
+              Math.min(1.0, smoothNormSpeed / 0.24)
+          )
+        )
+      : 0.0;
+    const targetDriftGain = state.isDrifting ? 0.30 * driftIntensity : 0.0;
     const targetCurbGain = (state.curbRumble || 0) > 0.05 ?
         Math.min(0.48, state.curbRumble * 0.48) :
         0.0;
 
     if (loopNodes.drift) {
       loopNodes.drift.gain.gain.setTargetAtTime(targetDriftGain, now, 0.04);
-      loopNodes.drift.src.playbackRate.setTargetAtTime(
-          0.92 + 0.18 * smoothNormSpeed, now, 0.05);
+      const driftStemRate = Math.max(
+        0.65,
+        Math.min(1.45, (carProfile.driftFreq1 / 1450) * (0.90 + 0.20 * smoothNormSpeed))
+      );
+      loopNodes.drift.src.playbackRate.setTargetAtTime(driftStemRate, now, 0.05);
+    }
+    if (loopNodes.proceduralScreech) {
+      const baseScreechVol = carProfile.driftVolume || 0.34;
+      const screechVol = state.isDrifting
+        ? Math.min(0.42, baseScreechVol * (0.28 + 0.72 * driftIntensity))
+        : 0.0001;
+      const screechFreq =
+        carProfile.driftFreq1 * (0.86 + 0.24 * driftIntensity + 0.08 * Math.min(1.0, smoothNormSpeed));
+      loopNodes.proceduralScreech.gain.gain.setTargetAtTime(screechVol, now, 0.03);
+      loopNodes.proceduralScreech.bp1.frequency.setTargetAtTime(screechFreq, now, 0.035);
+      loopNodes.proceduralScreech.bp2.frequency.setTargetAtTime(
+        screechFreq * (carProfile.driftFreq2Ratio || 1.52),
+        now,
+        0.035
+      );
+      if (loopNodes.proceduralScreech.scrubGain) {
+        const scrubVol = state.isDrifting
+          ? Math.min(0.38, (carProfile.driftScrubGain || 0.28) * (0.35 + 0.65 * driftIntensity))
+          : 0.0001;
+        loopNodes.proceduralScreech.scrubGain.gain.setTargetAtTime(scrubVol, now, 0.035);
+        loopNodes.proceduralScreech.scrubBp.frequency.setTargetAtTime(
+          carProfile.driftScrubFreq * (0.9 + 0.22 * smoothNormSpeed),
+          now,
+          0.04
+        );
+      }
+    }
+
+    // Step Lookahead Scheduler for Procedural Synthwave Arcade BGM (130 BPM -> 0.1154s per 16th note)
+    if (enabled && !state.raceFinished) {
+      if (!bgmActive) {
+        bgmActive = true;
+        bgmNextStepTime = now + 0.02;
+      }
+      const stepDur = 60.0 / 130.0 / 4.0;
+      if (bgmNextStepTime < now - 0.2) {
+        bgmNextStepTime = now;
+      }
+      while (bgmNextStepTime < now + 0.12) {
+        scheduleBgmStep(bgmNextStepTime, bgmStepIndex);
+        bgmStepIndex = (bgmStepIndex + 1) % 16;
+        bgmNextStepTime += stepDur;
+      }
     }
     if (loopNodes.curb) {
       loopNodes.curb.gain.gain.setTargetAtTime(targetCurbGain, now, 0.03);
@@ -759,32 +1367,37 @@ export function createDeskRacerHybridAudio(options = {}) {
   let lastRocketLaunchMs = 0;
 
   /**
-   * Plays a physical, low-frequency bumper/chassis thud when the car bumps a barrier or rival.
-   * Free of high-pitched sine partials so it never makes a "tui tui" sound.
+   * Plays a punchy metallic Crash / Impact SFX when the car collides with guardrails or AI rivals.
+   * Combines a low-end chassis thud, filtered metallic crunch noise burst, and detuned metallic clank.
    * @param {number=} intensity
    */
   function playRailImpact(intensity = 1.0) {
-    if (!enabled || !ctx || ctx.state !== 'running') return;
+    if (!enabled) return;
+    initAudio();
+    if (!ctx) return;
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
     const nowMs = performance.now();
-    if (nowMs - lastRailImpactMs < 520) return;
+    if (nowMs - lastRailImpactMs < 220) return;
     lastRailImpactMs = nowMs;
 
     const now = ctx.currentTime;
-    const strength = Math.max(0.2, Math.min(1.2, Number(intensity) || 1.0));
-    const pitchJitter = 0.94 + 0.10 * Math.random();
+    const strength = Math.max(0.25, Math.min(1.25, Number(intensity) || 1.0));
+    const pitchJitter = 0.92 + 0.16 * Math.random();
 
     if (misfireDuckGain) {
       misfireDuckGain.gain.cancelScheduledValues(now);
       misfireDuckGain.gain.setValueAtTime(1.0, now);
       misfireDuckGain.gain.linearRampToValueAtTime(
-          Math.max(0.48, 1.0 - 0.35 * strength), now + 0.010);
-      misfireDuckGain.gain.linearRampToValueAtTime(1.0, now + 0.080);
+          Math.max(0.45, 1.0 - 0.35 * strength), now + 0.010);
+      misfireDuckGain.gain.linearRampToValueAtTime(1.0, now + 0.095);
     }
 
-    // Deep low-frequency bumper thud (92 Hz -> 34 Hz sine pitch drop over 0.085s)
-    const thudDur = 0.085;
+    // 1. Deep low-frequency bumper thud (105 Hz -> 32 Hz sine pitch drop over 0.11s)
+    const thudDur = 0.11;
     const thudGain = ctx.createGain();
-    const thudPeak = Math.min(0.34, 0.22 * strength);
+    const thudPeak = Math.min(0.42, 0.28 * strength);
     thudGain.gain.setValueAtTime(0.0001, now);
     thudGain.gain.linearRampToValueAtTime(thudPeak, now + 0.004);
     thudGain.gain.exponentialRampToValueAtTime(0.0001, now + thudDur);
@@ -792,12 +1405,74 @@ export function createDeskRacerHybridAudio(options = {}) {
 
     const thudSine = ctx.createOscillator();
     thudSine.type = 'sine';
-    thudSine.frequency.setValueAtTime(92.0 * pitchJitter, now);
+    thudSine.frequency.setValueAtTime(105.0 * pitchJitter, now);
     thudSine.frequency.exponentialRampToValueAtTime(
-        34.0 * pitchJitter, now + thudDur);
+        32.0 * pitchJitter, now + thudDur);
     thudSine.connect(thudGain);
     thudSine.start(now);
     thudSine.stop(now + thudDur + 0.015);
+
+    // 2. Metallic Crunch Noise Burst (Bandpass-swept impact transient)
+    const noiseLen = Math.floor(ctx.sampleRate * 0.14);
+    const noiseBuf = ctx.createBuffer(1, noiseLen, ctx.sampleRate);
+    const noiseData = noiseBuf.getChannelData(0);
+    for (let i = 0; i < noiseLen; i++) {
+      noiseData[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.042));
+    }
+    const noiseSrc = ctx.createBufferSource();
+    noiseSrc.buffer = noiseBuf;
+
+    const crunchFilter = ctx.createBiquadFilter();
+    crunchFilter.type = 'bandpass';
+    crunchFilter.Q.setValueAtTime(2.4, now);
+    crunchFilter.frequency.setValueAtTime(1520 * pitchJitter, now);
+    crunchFilter.frequency.exponentialRampToValueAtTime(380, now + 0.13);
+
+    const crunchGain = ctx.createGain();
+    crunchGain.gain.setValueAtTime(Math.min(0.36, 0.25 * strength), now);
+    crunchGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.135);
+
+    noiseSrc.connect(crunchFilter);
+    crunchFilter.connect(crunchGain);
+    crunchGain.connect(masterGain);
+    noiseSrc.start(now);
+
+    // 3. Dual Detuned Metallic Body-Panel Clank
+    [285 * pitchJitter, 438 * pitchJitter].forEach((freq, idx) => {
+      const clankOsc = ctx.createOscillator();
+      const clankGain = ctx.createGain();
+      clankOsc.type = idx === 0 ? 'triangle' : 'square';
+      clankOsc.frequency.setValueAtTime(freq, now);
+      clankOsc.frequency.exponentialRampToValueAtTime(freq * 0.58, now + 0.075);
+      clankGain.gain.setValueAtTime(0.0001, now);
+      clankGain.gain.linearRampToValueAtTime((idx === 0 ? 0.14 : 0.08) * strength, now + 0.003);
+      clankGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+      clankOsc.connect(clankGain);
+      clankGain.connect(masterGain);
+      clankOsc.start(now);
+      clankOsc.stop(now + 0.085);
+    });
+  }
+
+  /**
+   * Plays a tactile suspension compression thud when landing from a jump ramp.
+   */
+  function playLandingThud(intensity = 0.8) {
+    if (!enabled || !ctx || ctx.state !== 'running') return;
+    const now = ctx.currentTime;
+    const strength = Math.max(0.3, Math.min(1.0, intensity));
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(78, now);
+    osc.frequency.exponentialRampToValueAtTime(28, now + 0.09);
+    g.gain.setValueAtTime(0.001, now);
+    g.gain.linearRampToValueAtTime(0.24 * strength, now + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.095);
+    osc.connect(g);
+    g.connect(masterGain);
+    osc.start(now);
+    osc.stop(now + 0.10);
   }
 
   /**
@@ -1012,7 +1687,7 @@ export function createDeskRacerHybridAudio(options = {}) {
   }
 
   /**
-   * Plays a turbo afterburner surge sound when NITRO BOOST is triggered.
+   * Plays a visceral Nitro Whoosh + Turbo Afterburner Ignition sound when NITRO BOOST is triggered.
    */
   function playNitroBoost() {
     initAudio();
@@ -1025,22 +1700,50 @@ export function createDeskRacerHybridAudio(options = {}) {
     }
     const now = ctx.currentTime;
     const out = ctx.createGain();
-    out.gain.setValueAtTime(0.28, now);
+    out.gain.setValueAtTime(0.34, now);
     out.connect(ctx.destination);
 
+    // 1. Sub-bass afterburner ignition thump
     const osc = ctx.createOscillator();
     const g = ctx.createGain();
     osc.type = 'sine';
     osc.frequency.setValueAtTime(85, now);
-    osc.frequency.exponentialRampToValueAtTime(260, now + 0.25);
-    osc.frequency.exponentialRampToValueAtTime(115, now + 0.75);
+    osc.frequency.exponentialRampToValueAtTime(280, now + 0.22);
+    osc.frequency.exponentialRampToValueAtTime(110, now + 0.72);
     g.gain.setValueAtTime(0.001, now);
-    g.gain.linearRampToValueAtTime(0.38, now + 0.05);
-    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.8);
+    g.gain.linearRampToValueAtTime(0.42, now + 0.04);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.78);
     osc.connect(g);
     g.connect(out);
     osc.start(now);
-    osc.stop(now + 0.85);
+    osc.stop(now + 0.80);
+
+    // 2. High-velocity filtered white-noise Nitro Whoosh sweep
+    const whooshLen = Math.floor(ctx.sampleRate * 0.72);
+    const whooshBuf = ctx.createBuffer(1, whooshLen, ctx.sampleRate);
+    const whooshData = whooshBuf.getChannelData(0);
+    for (let i = 0; i < whooshLen; i++) {
+      whooshData[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.36));
+    }
+    const whooshSrc = ctx.createBufferSource();
+    whooshSrc.buffer = whooshBuf;
+
+    const whooshFilter = ctx.createBiquadFilter();
+    whooshFilter.type = 'bandpass';
+    whooshFilter.Q.setValueAtTime(2.2, now);
+    whooshFilter.frequency.setValueAtTime(240, now);
+    whooshFilter.frequency.exponentialRampToValueAtTime(2400, now + 0.16);
+    whooshFilter.frequency.exponentialRampToValueAtTime(520, now + 0.68);
+
+    const whooshGain = ctx.createGain();
+    whooshGain.gain.setValueAtTime(0.001, now);
+    whooshGain.gain.linearRampToValueAtTime(0.48, now + 0.05);
+    whooshGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.70);
+
+    whooshSrc.connect(whooshFilter);
+    whooshFilter.connect(whooshGain);
+    whooshGain.connect(out);
+    whooshSrc.start(now);
   }
 
   /**
@@ -1332,11 +2035,15 @@ export function createDeskRacerHybridAudio(options = {}) {
     preload,
     toggle,
     setEnabled,
+    setCarProfile,
+    playCarRevPreview,
+    playDriftBoostPop,
     stopEngine,
     update,
     playLapChime,
     playRaceFinishFanfare,
     playRailImpact,
+    playLandingThud,
     playF1CountdownBeep,
     playSplashImpact,
     playUiClick,

@@ -109,9 +109,9 @@ export function createRivalRacersController(splineData, scene) {
       paintHex: null, // Authentic Police Interceptor
       carId: 'police',
       bodyId: 'police',
-      startGridOffset: -0.024, // Grid position #2 (24mm behind player on left lane)
-      laneOffset: -0.0072,
-      baseSpeed: 0.139,
+      startGridOffset: 0.018, // Ahead of player on left lane
+      laneOffset: -0.0068,
+      baseSpeed: 0.156,
       personality: 'aggressive',
     },
     {
@@ -121,9 +121,9 @@ export function createRivalRacersController(splineData, scene) {
       paintHex: 0xf97316,
       carId: 'kamaro',
       bodyId: 'kamaro',
-      startGridOffset: -0.044, // Grid position #3 (44mm behind player on right lane)
-      laneOffset: 0.0072,
-      baseSpeed: 0.136,
+      startGridOffset: 0.038, // Ahead of player on right lane
+      laneOffset: 0.0068,
+      baseSpeed: 0.160,
       personality: 'speed',
     },
     {
@@ -133,9 +133,9 @@ export function createRivalRacersController(splineData, scene) {
       paintHex: 0xeab308,
       carId: 'ghini',
       bodyId: 'ghini',
-      startGridOffset: -0.064, // Grid position #4 (64mm behind player on left lane)
-      laneOffset: -0.0064,
-      baseSpeed: 0.142,
+      startGridOffset: 0.058, // Pole position pack leader ahead of player
+      laneOffset: -0.0042,
+      baseSpeed: 0.165,
       personality: 'cornering',
     },
   ];
@@ -272,7 +272,9 @@ export function createRivalRacersController(splineData, scene) {
   let gridStartBase = startFinishArc;
 
   function resolveRivalGridSlot(idx, cfg) {
-    const slot = gridSlots[idx + 1];
+    // Place rivals in gridSlots[2], [1], [0] (AHEAD of player at gridSlots[3])!
+    const slotIdx = Math.max(0, 2 - idx);
+    const slot = gridSlots[slotIdx];
     if (slot) {
       return {
         s: slot.s,
@@ -443,6 +445,9 @@ export function createRivalRacersController(splineData, scene) {
       if (rival.boostTimer > 0) {
         rival.boostTimer = Math.max(0.0, rival.boostTimer - dt);
       }
+      if ((rival.spinoutTimer || 0) > 0) {
+        rival.spinoutTimer = Math.max(0.0, rival.spinoutTimer - dt);
+      }
 
       if (rival.hopHeight > 0 || rival.hopVel !== 0) {
         rival.hopHeight += rival.hopVel * dt;
@@ -459,21 +464,17 @@ export function createRivalRacersController(splineData, scene) {
         const safeHalfW = Math.max(0.0125, (currFrame.halfWidth || 0.01705) - 0.0024);
 
         // Dynamic Continuous Rubber-Band AI System (Bumper-to-Bumper Racing, Zero Teleporting):
-        // deltaS > 0 means the AI is behind the player; deltaS < 0 means the AI is ahead of the player.
         const deltaS = playerDist - rival.totalDistanceTraveled;
         let rubberBandMultiplier = 1.0;
 
         if (deltaS > 0.0) {
-          // AI is behind player: scale catch-up speed multiplier smoothly up to 1.25x top speed
           const catchUpT = THREE.MathUtils.clamp(deltaS / 0.26, 0.0, 1.0);
           rubberBandMultiplier = THREE.MathUtils.lerp(1.0, 1.25, catchUpT);
         } else if (deltaS < 0.0) {
-          // AI is ahead of player: apply smooth drag multiplier down to 0.85x so player can reel them in
           const dragT = THREE.MathUtils.clamp(-deltaS / 0.20, 0.0, 1.0);
           rubberBandMultiplier = THREE.MathUtils.lerp(1.0, 0.85, dragT);
         }
 
-        // Combine GameShipKit JSON racingLine target speed profile with player tier scaling & rubber-banding
         const playerTierScale = THREE.MathUtils.lerp(
           1.0,
           playerState.topSpeedMultiplier || 1.0,
@@ -491,13 +492,18 @@ export function createRivalRacersController(splineData, scene) {
           targetSpeed *= 1.15;
         }
 
-        // Progressive acceleration off the starting grid and responsive rubber-band pacing
-        const accelRate = rival.speed < rival.baseSpeed * 0.82 ? 0.95 : 2.25;
-        rival.speed = THREE.MathUtils.lerp(
-          rival.speed,
-          targetSpeed,
-          Math.min(1.0, dt * accelRate)
-        );
+        if ((rival.spinoutTimer || 0) > 0) {
+          // Rival is spinning out after a Player Takedown!
+          rival.speed = Math.max(0.025, rival.speed * Math.exp(-3.2 * dt));
+          rival.headingYaw += 14.0 * dt;
+        } else {
+          const accelRate = rival.speed < rival.baseSpeed * 0.82 ? 0.95 : 2.25;
+          rival.speed = THREE.MathUtils.lerp(
+            rival.speed,
+            targetSpeed,
+            Math.min(1.0, dt * accelRate)
+          );
+        }
 
         const stepDist = rival.speed * dt;
         rival.totalDistanceTraveled += stepDist;
@@ -509,7 +515,6 @@ export function createRivalRacersController(splineData, scene) {
           Math.floor(Math.max(0, rival.totalDistanceTraveled) / totalLength) + 1
         );
 
-        // Navigate using JSON racingLine waypoints + personal lane bias + smart overtaking
         const desiredRacingLane = THREE.MathUtils.clamp(
           (lookAheadFrame.racingLineOffset || 0.0) + (rival.laneBias || 0.0),
           -safeHalfW * 0.78,
@@ -522,13 +527,11 @@ export function createRivalRacersController(splineData, scene) {
           aheadPlayerS < 0.055 &&
           Math.abs(playerState.lateralOffset - rival.lateralOffset) < 0.0056
         ) {
-          // Steer to a wide open lane to overtake or battle the player cleanly
           rival.targetLane = playerState.lateralOffset >= 0 ? -0.0092 : 0.0092;
         } else {
           rival.targetLane = desiredRacingLane;
         }
 
-        // Apply grounded lateral velocity decay + smooth racingLine steering
         const prevLat = rival.lateralOffset;
         if (Math.abs(rival.lateralVel || 0.0) > 0.0002) {
           rival.lateralOffset += rival.lateralVel * dt;
@@ -544,10 +547,11 @@ export function createRivalRacersController(splineData, scene) {
           rival.lateralOffset = THREE.MathUtils.clamp(rival.lateralOffset, -safeHalfW, safeHalfW);
         }
 
-        // Subtle heading yaw aligned with lateral racingLine trajectory
-        const latSteerRate = (rival.lateralOffset - prevLat) / Math.max(1e-4, dt);
-        const targetHeadingYaw = THREE.MathUtils.clamp(-latSteerRate * 1.4, -0.18, 0.18);
-        rival.headingYaw = THREE.MathUtils.lerp(rival.headingYaw, targetHeadingYaw, dt * 8.5);
+        if ((rival.spinoutTimer || 0) <= 0) {
+          const latSteerRate = (rival.lateralOffset - prevLat) / Math.max(1e-4, dt);
+          const targetHeadingYaw = THREE.MathUtils.clamp(-latSteerRate * 1.4, -0.18, 0.18);
+          rival.headingYaw = THREE.MathUtils.lerp(rival.headingYaw, targetHeadingYaw, dt * 8.5);
+        }
 
         // Rival-vs-Rival solid separation so AI cars never overlap each other
         for (let otherIdx = 0; otherIdx < idx; otherIdx++) {
@@ -578,8 +582,7 @@ export function createRivalRacersController(splineData, scene) {
         rival.speed = 0.0;
       }
 
-      // 100% Grounded Solid-Body Vehicle-to-Vehicle Collision: Player vs Rival
-      // Cars NEVER launch into the air or tumble when bumped!
+      // Aerodynamic Slipstream Drafting + Asphalt Takedown & Bumper Physics
       if (isRacing) {
         const signedDS =
           ((playerState.s - rival.s + totalLength * 0.5) % totalLength) - totalLength * 0.5;
@@ -587,6 +590,23 @@ export function createRivalRacersController(splineData, scene) {
         const latDelta = playerState.lateralOffset - rival.lateralOffset;
         const absDLat = Math.abs(latDelta);
         const absDHop = Math.abs((playerState.hopHeight || 0.0) - (rival.hopHeight || 0.0));
+
+        // 1. Aerodynamic Slipstream Draft (when tucked closely behind a rival at high speed)
+        if (
+          signedDS < -0.0135 &&
+          signedDS > -0.068 &&
+          absDLat < 0.0046 &&
+          playerState.speed > 0.085 &&
+          (rival.spinoutTimer || 0) <= 0
+        ) {
+          playerState.slipstreamTimer = 0.25;
+          playerState.boostCharge = Math.min(1.0, (playerState.boostCharge || 0) + dt * 0.28);
+          if (!playerState.actionBanner) {
+            playerState.actionBanner = '💨 SLIPSTREAM DRAFT +NITRO';
+            playerState.actionBannerColor = '#38bdf8';
+            playerState.actionBannerTimer = 0.35;
+          }
+        }
 
         // Solid car bounding box in spline space (~13.2mm length x ~5.4mm width)
         const minDS = 0.0132;
@@ -605,11 +625,10 @@ export function createRivalRacersController(splineData, scene) {
           const isLongitudinalRam = absDLat < 0.0034 && absDS > 0.0048;
 
           if (isLongitudinalRam) {
-            const overlapS = minDS - absDS + 0.0004;
+            const overlapS = minDS - absDS + 0.0006;
             if (signedDS < 0) {
-              // Player bumps rear of Rival -> Grounded forward momentum transfer + smooth lane yield
-              const pushRivalS = overlapS * 0.65;
-              const pushPlayerBackS = overlapS * 0.35;
+              const pushRivalS = overlapS * 0.82;
+              const pushPlayerBackS = overlapS * 0.18;
               rival.totalDistanceTraveled += pushRivalS;
               rival.s = ((gridStartBase + rival.totalDistanceTraveled) % totalLength + totalLength) % totalLength;
 
@@ -617,71 +636,103 @@ export function createRivalRacersController(splineData, scene) {
               playerState.totalDistanceTraveled = Math.max(0.0, (playerState.totalDistanceTraveled || 0.0) - pushPlayerBackS);
               playerState.lapDistanceTraveled = Math.max(0.0, (playerState.lapDistanceTraveled || 0.0) - pushPlayerBackS);
 
-              // Grounded lateral nudge so rival glides smoothly to the open lane (zero hopVel!)
-              rival.lateralVel = -pushDir * 0.016;
+              playerState.knockbackLateralVel = pushDir * 0.018;
+              rival.lateralVel = -pushDir * 0.022;
               rival.targetLane = THREE.MathUtils.clamp(
-                rival.lateralOffset - pushDir * 0.0064,
+                rival.lateralOffset - pushDir * 0.0072,
                 -0.0096,
                 0.0096
               );
-              rival.speed = Math.max(rival.speed, playerState.speed * 1.04);
-              playerState.speed *= 0.96;
+              rival.speed = Math.max(rival.speed, playerState.speed * 1.06);
             } else {
-              // Rival bumps rear of Player -> Grounded forward nudge to player
-              const pushPlayerS = overlapS * 0.65;
-              const pushRivalBackS = overlapS * 0.35;
+              const pushPlayerS = overlapS * 0.75;
+              const pushRivalBackS = overlapS * 0.25;
               playerState.s = (playerState.s + pushPlayerS) % totalLength;
               playerState.totalDistanceTraveled = (playerState.totalDistanceTraveled || 0.0) + pushPlayerS;
               playerState.lapDistanceTraveled = (playerState.lapDistanceTraveled || 0.0) + pushPlayerS;
 
               rival.totalDistanceTraveled -= pushRivalBackS;
               rival.s = ((gridStartBase + rival.totalDistanceTraveled) % totalLength + totalLength) % totalLength;
-              rival.lateralVel = -pushDir * 0.014;
+              playerState.knockbackLateralVel = pushDir * 0.012;
+              rival.lateralVel = -pushDir * 0.018;
               rival.targetLane = -pushDir * 0.0088;
 
-              playerState.speed = Math.max(playerState.speed, rival.speed * 1.03);
-              rival.speed *= 0.90;
+              playerState.speed = Math.max(playerState.speed, rival.speed * 1.04);
+              rival.speed *= 0.94;
             }
           } else {
-            // Side-by-side door-rubbing: clean lateral separation on the asphalt (zero vertical lift!)
-            const overlapLat = minDLat - absDLat + 0.0006;
+            const overlapLat = minDLat - absDLat + 0.0008;
             playerState.lateralOffset = THREE.MathUtils.clamp(
-              playerState.lateralOffset + pushDir * overlapLat * 0.45,
+              playerState.lateralOffset + pushDir * overlapLat * 0.48,
               -0.0148,
               0.0148
             );
             rival.lateralOffset = THREE.MathUtils.clamp(
-              rival.lateralOffset - pushDir * overlapLat * 0.55,
+              rival.lateralOffset - pushDir * overlapLat * 0.52,
               -0.0144,
               0.0144
             );
-            rival.lateralVel = -pushDir * 0.014;
+            playerState.knockbackLateralVel = pushDir * 0.022;
+            rival.lateralVel = -pushDir * 0.025;
             rival.targetLane = THREE.MathUtils.clamp(
-              rival.lateralOffset - pushDir * 0.0044,
+              rival.lateralOffset - pushDir * 0.0056,
               -0.0096,
               0.0096
             );
           }
 
-          // Subtle grounded contact feedback without lifting or tumbling either car
-          playerState.carImpactTimer = 0.16;
-          if (rival.bumpCooldown <= 0) {
-            rival.bumpCooldown = 0.25;
+          // Check for Asphalt TAKEDOWN! (Boosting/Shockwave collision OR slamming rival into outer guardrail)
+          const isBoostAttack =
+            (playerState.boostActive || 0) > 0.05 || (playerState.shockwaveTimer || 0) > 0.0;
+          const isWallSlam = Math.abs(rival.lateralOffset) >= 0.0102;
+          const canTakedown = (isBoostAttack || isWallSlam) && (rival.spinoutTimer || 0) <= 0.0;
+
+          playerState.carImpactTimer = 0.24;
+          if (canTakedown) {
+            rival.spinoutTimer = 1.25;
+            rival.bumpCooldown = 0.65;
+            rival.hopVel = 0.016;
+            rival.lateralVel = -pushDir * 0.032;
+            playerState.boostCharge = Math.min(1.0, (playerState.boostCharge || 0) + 0.50);
+            playerState.boostActive = Math.max(playerState.boostActive || 0, 1.35);
+            playerState.speed = Math.max(playerState.speed, 0.168 * (playerState.topSpeedMultiplier || 1.0));
+            playerState.cameraShake = 0.95;
+            playerState.actionBanner = `💥 TAKEDOWN! (${rival.name}) +50% NITRO`;
+            playerState.actionBannerColor = '#f43f5e';
+            playerState.actionBannerTimer = 1.85;
+            if (
+              playerState.pendingImpacts &&
+              playerState.pendingImpactCount < playerState.pendingImpacts.length
+            ) {
+              const contactFrame = samplePoint(rival.s);
+              _contactPos
+                .copy(rival.position)
+                .addScaledVector(contactFrame.normal, 0.0022);
+              _contactNorm.copy(contactFrame.normal);
+              const slot = playerState.pendingImpacts[playerState.pendingImpactCount++];
+              slot.pos.copy(_contactPos);
+              slot.normal.copy(_contactNorm);
+              slot.severity = 1.0;
+            }
+            if (audioSynth) {
+              if (audioSynth.playExplosion) audioSynth.playExplosion();
+              if (audioSynth.playRailImpact) audioSynth.playRailImpact(1.1);
+            }
+          } else if (rival.bumpCooldown <= 0) {
+            rival.bumpCooldown = 0.24;
             playerState.headingYaw = THREE.MathUtils.clamp(
-              playerState.headingYaw - pushDir * 0.04,
+              playerState.headingYaw - pushDir * 0.035,
               -0.24,
               0.24
             );
             rival.headingYaw = THREE.MathUtils.clamp(
-              rival.headingYaw + pushDir * 0.08,
+              rival.headingYaw + pushDir * 0.085,
               -0.22,
               0.22
             );
-            playerState.cameraShake = Math.max(playerState.cameraShake || 0.0, 0.55);
-            if (!isLongitudinalRam) {
-              playerState.speed *= 0.98;
-              rival.speed *= 0.95;
-            }
+            playerState.cameraShake = Math.max(playerState.cameraShake || 0.0, 0.62);
+            playerState.speed = Math.max(playerState.speed * 0.985, rival.speed * 0.94);
+            rival.speed *= 0.97;
             if (
               playerState.pendingImpacts &&
               playerState.pendingImpactCount < playerState.pendingImpacts.length
@@ -700,10 +751,10 @@ export function createRivalRacersController(splineData, scene) {
               const slot = playerState.pendingImpacts[playerState.pendingImpactCount++];
               slot.pos.copy(_contactPos);
               slot.normal.copy(_contactNorm);
-              slot.severity = isLongitudinalRam ? 0.95 : 0.72;
+              slot.severity = isLongitudinalRam ? 0.95 : 0.82;
             }
             if (audioSynth && audioSynth.playRailImpact) {
-              audioSynth.playRailImpact(0.65);
+              audioSynth.playRailImpact(0.75);
             }
           }
         }

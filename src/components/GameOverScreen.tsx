@@ -1,5 +1,11 @@
 import React from 'react';
-import { BodyKitSpec, MapSpec, RaceFinishResult, formatRaceTime } from '../types/game';
+import {
+  BodyKitSpec,
+  MapSpec,
+  RACE_MODES,
+  RaceFinishResult,
+  formatRaceTime,
+} from '../types/game';
 
 interface GameOverScreenProps {
   result: RaceFinishResult;
@@ -36,39 +42,35 @@ export const GameOverScreen: React.FC<GameOverScreenProps> = ({
 }) => {
   const rank = Math.min(4, Math.max(1, result.finishRank || 1));
   const isNextMapQueued = autoRotateMaps && nextMap.id !== currentMap.id;
+  const modeSpec =
+    RACE_MODES.find((m) => m.id === result.modeId) || RACE_MODES[0];
+  const starsEarned = result.starsEarned ?? (rank === 1 ? 3 : rank === 2 ? 2 : 1);
+  const xpEarned = result.xpEarned ?? (rank === 1 ? 120 : rank === 2 ? 90 : 65);
 
   const statusMeta = [
     {
       posLabel: '1ST',
-      title: 'RACE VICTORY',
-      subtitle: 'CHECKERED FLAG LEADER',
+      title: 'Race Victory',
+      subtitle: 'Checkered Flag Leader',
       accentHex: '#f59e0b',
-      borderClass: 'border-amber-400/80',
-      textClass: 'text-amber-400',
     },
     {
       posLabel: '2ND',
-      title: 'RUNNER-UP FINISH',
-      subtitle: 'FRONT ROW QUALIFIER',
-      accentHex: '#00f0ff',
-      borderClass: 'border-cyan-400/80',
-      textClass: 'text-cyan-300',
+      title: 'Runner-Up Finish',
+      subtitle: 'Front Row Qualifier',
+      accentHex: '#06b6d4',
     },
     {
       posLabel: '3RD',
-      title: 'PODIUM FINISH',
-      subtitle: 'TOP 3 CLASSIFICATION',
+      title: 'Podium Finish',
+      subtitle: 'Top 3 Classification',
       accentHex: '#fb923c',
-      borderClass: 'border-orange-400/80',
-      textClass: 'text-orange-300',
     },
     {
       posLabel: '4TH',
-      title: 'RACE COMPLETED',
-      subtitle: 'OFFICIAL CLASSIFICATION',
+      title: 'Race Completed',
+      subtitle: 'Official Classification',
       accentHex: '#94a3b8',
-      borderClass: 'border-slate-400/70',
-      textClass: 'text-slate-300',
     },
   ][rank - 1];
 
@@ -76,11 +78,10 @@ export const GameOverScreen: React.FC<GameOverScreenProps> = ({
   const lapValues = [0, 1, 2].map((idx) => result.lapTimes[idx] ?? playerTime / 3);
   const fastestLapVal = Math.min(...lapValues);
 
-  // Build 4-Racer Asphalt / NFS Final Standings Leaderboard anchored to the player's actual finishRank & totalTime
   const aiRoster = [
-    { driver: 'VIPER GT', carName: '911 TURBO S', accentHex: '#ef4444', deltaFromSlot: 0.92 },
-    { driver: 'APEX R', carName: '300SL GULLWING', accentHex: '#00f0ff', deltaFromSlot: 2.18 },
-    { driver: 'NOVA X', carName: 'CAMARO SS', accentHex: '#a855f7', deltaFromSlot: 3.64 },
+    { driver: 'VIPER GT', carName: 'BOLT V12', accentHex: '#ef4444' },
+    { driver: 'APEX R', carName: 'REDLINE GT', accentHex: '#06b6d4' },
+    { driver: 'NOVA X', carName: 'BLAZE V8', accentHex: '#f59e0b' },
   ];
 
   const standings: StandingsEntry[] = [];
@@ -101,8 +102,8 @@ export const GameOverScreen: React.FC<GameOverScreenProps> = ({
       const relPos = p - rank;
       const computedTime =
         relPos < 0
-          ? Math.max(10.0, playerTime + relPos * 1.14 - (aiCursor * 0.19))
-          : playerTime + relPos * 1.28 + (aiCursor * 0.23);
+          ? Math.max(10.0, playerTime + relPos * 1.14 - aiCursor * 0.19)
+          : playerTime + relPos * 1.28 + aiCursor * 0.23;
       standings.push({
         pos: p,
         driver: ai.driver,
@@ -125,44 +126,32 @@ export const GameOverScreen: React.FC<GameOverScreenProps> = ({
     }
   }
 
-  const basePurse = rank === 1 ? 650 : rank === 2 ? 450 : rank === 3 ? 320 : 220;
-  const paceBonus = Math.max(0, result.coinsEarned - basePurse);
-
   return (
     <div
-      className="fixed inset-0 z-50 pointer-events-auto flex flex-col justify-between select-none overflow-hidden"
+      className="fixed inset-0 z-50 pointer-events-auto flex flex-col justify-between select-none overflow-hidden font-['Plus_Jakarta_Sans']"
       style={{
         background:
-          'linear-gradient(180deg, rgba(4, 7, 15, 0.90) 0%, rgba(4, 7, 15, 0.28) 28%, rgba(4, 7, 15, 0.42) 64%, rgba(3, 6, 14, 0.96) 100%)',
-        paddingTop: 'max(0.65rem, env(safe-area-inset-top))',
-        paddingBottom: 'max(0.65rem, env(safe-area-inset-bottom))',
-        paddingLeft: 'max(0.75rem, env(safe-area-inset-left))',
-        paddingRight: 'max(0.75rem, env(safe-area-inset-right))',
+          'linear-gradient(180deg, rgba(4, 7, 15, 0.90) 0%, rgba(4, 7, 15, 0.45) 35%, rgba(4, 7, 15, 0.65) 68%, rgba(3, 6, 14, 0.96) 100%)',
+        paddingTop: 'max(0.75rem, env(safe-area-inset-top))',
+        paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))',
+        paddingLeft: 'max(0.85rem, env(safe-area-inset-left))',
+        paddingRight: 'max(0.85rem, env(safe-area-inset-right))',
       }}
     >
-      {/* TOP BAR: ASPHALT / NFS SLANTED POSITION HEADER & CREDITS */}
+      {/* TOP BAR: Result Summary & Rewards */}
       <div className="w-full max-w-xl mx-auto">
-        <div
-          className={`relative bg-[#070b14]/95 border-l-4 border-r border-y border-white/15 px-4 py-2.5 sm:px-5 sm:py-3 shadow-2xl`}
-          style={{
-            borderLeftColor: statusMeta.accentHex,
-          }}
-        >
+        <div className="bg-[#070b14]/95 border border-white/15 rounded-2xl px-4 py-3 sm:px-5 sm:py-3.5 shadow-2xl backdrop-blur-md">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3.5 min-w-0">
-              {/* Slanted Rank Number Block */}
               <div
-                className="px-3 py-1.5 -skew-x-12 border flex flex-col items-center justify-center shrink-0"
-                style={{
-                  borderColor: statusMeta.accentHex,
-                  background: 'rgba(15, 23, 42, 0.92)',
-                }}
+                className="px-3.5 py-2 rounded-xl border flex flex-col items-center justify-center shrink-0 bg-slate-900/90"
+                style={{ borderColor: statusMeta.accentHex }}
               >
-                <span className="skew-x-12 font-['Orbitron'] italic font-black text-xl sm:text-2xl text-white leading-none">
+                <span className="font-['Orbitron'] italic font-black text-xl sm:text-2xl text-white leading-none">
                   {statusMeta.posLabel}
                 </span>
                 <span
-                  className="skew-x-12 font-mono font-bold text-[9px] tracking-widest uppercase leading-none mt-0.5"
+                  className="font-mono font-bold text-[10px] leading-none mt-1"
                   style={{ color: statusMeta.accentHex }}
                 >
                   POS / 04
@@ -170,57 +159,67 @@ export const GameOverScreen: React.FC<GameOverScreenProps> = ({
               </div>
 
               <div className="min-w-0">
-                <div className="flex items-center gap-2 text-[10px] font-['Orbitron'] font-bold tracking-widest uppercase text-slate-400">
+                <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-400">
                   <span style={{ color: currentMap.accentHex }}>{currentMap.name}</span>
-                  <span>·</span>
-                  <span>{statusMeta.subtitle}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>{modeSpec.name}</span>
                 </div>
-                <h1 className="font-['Orbitron'] italic font-black text-xl sm:text-2xl text-white tracking-wider uppercase leading-tight truncate">
+                <h1 className="font-['Orbitron'] italic font-black text-lg sm:text-2xl text-white tracking-wider uppercase leading-tight truncate mt-0.5">
                   {statusMeta.title}
                 </h1>
+                <div className="flex items-center gap-2 mt-1 text-xs">
+                  <span className="tracking-wider">
+                    {[1, 2, 3].map((s) => (
+                      <span
+                        key={s}
+                        className={s <= starsEarned ? 'text-amber-400' : 'text-slate-600'}
+                      >
+                        ★
+                      </span>
+                    ))}
+                  </span>
+                  <span className="text-slate-500" aria-hidden="true">·</span>
+                  <span className="font-mono font-semibold text-cyan-300 tabular-nums">
+                    +{xpEarned} XP
+                  </span>
+                </div>
               </div>
             </div>
 
-            {/* Credits Earned Box */}
-            <div className="px-3 py-1.5 bg-slate-900/95 border border-amber-400/50 text-right shrink-0">
-              <div className="text-[9px] font-['Orbitron'] font-bold text-amber-300/90 tracking-widest uppercase leading-none">
-                CREDITS
+            <div className="px-3.5 py-2 rounded-xl bg-slate-900/90 border border-amber-400/40 text-right shrink-0">
+              <div className="text-[10px] font-semibold text-amber-300 uppercase leading-none">
+                Earned
               </div>
               <div className="font-['Orbitron'] italic font-black text-lg sm:text-xl text-amber-300 tabular-nums leading-none mt-1">
-                +{result.coinsEarned}
+                +{result.coinsEarned} CR
               </div>
-              <div className="text-[9px] font-mono text-slate-400 tabular-nums mt-0.5 leading-none">
-                CR {coins.toLocaleString()}
+              <div className="text-[10px] font-mono text-slate-400 tabular-nums mt-1 leading-none">
+                Total {coins.toLocaleString()}
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* CENTER: 4-RACER ASPHALT / NFS STANDINGS LEADERBOARD */}
+      {/* CENTER: Official Standings Table */}
       <div className="w-full max-w-xl mx-auto my-auto py-2">
-        <div className="bg-[#060a12]/90 border border-white/15 shadow-2xl overflow-hidden">
-          <div className="px-3.5 py-1.5 bg-slate-900/95 border-b border-white/10 flex items-center justify-between text-[9px] font-['Orbitron'] font-bold tracking-widest text-slate-400 uppercase">
-            <span>OFFICIAL STANDINGS</span>
-            <span>TIME / GAP</span>
+        <div className="bg-[#070b14]/92 border border-white/15 rounded-2xl shadow-2xl overflow-hidden backdrop-blur-md">
+          <div className="px-4 py-2 bg-slate-900/90 border-b border-white/10 flex items-center justify-between text-[11px] font-semibold text-slate-400">
+            <span>Official Standings</span>
+            <span>Time / Gap</span>
           </div>
 
           <div className="divide-y divide-white/10">
             {standings.map((row) => (
               <div
                 key={row.pos}
-                className={`px-3.5 py-2 sm:py-2.5 flex items-center justify-between gap-2 transition-colors ${
-                  row.isPlayer ? 'bg-slate-900/95' : 'bg-[#070b14]/80'
+                className={`px-4 py-2.5 flex items-center justify-between gap-2 ${
+                  row.isPlayer ? 'bg-white/[0.06]' : 'bg-transparent'
                 }`}
-                style={{
-                  borderLeft: row.isPlayer
-                    ? `4px solid ${row.accentHex}`
-                    : '4px solid transparent',
-                }}
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <span
-                    className={`w-6 font-['Orbitron'] italic font-black text-sm sm:text-base tabular-nums ${
+                    className={`w-6 font-['Orbitron'] italic font-black text-sm tabular-nums ${
                       row.isPlayer ? 'text-amber-300' : 'text-slate-400'
                     }`}
                   >
@@ -230,22 +229,19 @@ export const GameOverScreen: React.FC<GameOverScreenProps> = ({
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span
-                        className={`font-['Orbitron'] italic font-black text-xs sm:text-sm tracking-wider uppercase truncate ${
+                        className={`font-['Orbitron'] italic font-black text-xs sm:text-sm tracking-wide uppercase truncate ${
                           row.isPlayer ? 'text-white' : 'text-slate-200'
                         }`}
                       >
                         {row.driver}
                       </span>
                       {row.isPlayer && (
-                        <span
-                          className="px-1.5 py-0.5 text-[8px] font-['Orbitron'] font-black uppercase text-slate-950 leading-none"
-                          style={{ backgroundColor: row.accentHex }}
-                        >
-                          PLAYER
+                        <span className="text-[11px] font-semibold text-amber-300">
+                          · Player
                         </span>
                       )}
                     </div>
-                    <div className="text-[10px] font-mono text-slate-400 uppercase truncate">
+                    <div className="text-[11px] text-slate-400 truncate">
                       {row.carName}
                     </div>
                   </div>
@@ -260,8 +256,8 @@ export const GameOverScreen: React.FC<GameOverScreenProps> = ({
                     {formatRaceTime(row.totalTime)}
                   </div>
                   <div
-                    className={`text-[10px] mt-1 leading-none ${
-                      row.pos === 1 ? 'text-emerald-400 font-bold' : 'text-slate-400'
+                    className={`text-[11px] mt-1 leading-none ${
+                      row.pos === 1 ? 'text-emerald-400 font-semibold' : 'text-slate-400'
                     }`}
                   >
                     {row.gapText}
@@ -273,14 +269,13 @@ export const GameOverScreen: React.FC<GameOverScreenProps> = ({
         </div>
       </div>
 
-      {/* BOTTOM DECK: TELEMETRY SPLITS & ACTION BUTTONS */}
+      {/* BOTTOM DECK: Lap Splits & Actions */}
       <div className="w-full max-w-xl mx-auto">
-        <div className="bg-[#070b14]/95 border border-white/15 p-3 sm:p-4 shadow-2xl">
-          {/* Lap Splits & Best Lap Inline Bar */}
-          <div className="grid grid-cols-4 gap-1.5 pb-2.5 mb-3 border-b border-white/10 text-center font-mono tabular-nums">
-            <div className="bg-slate-900/90 border border-cyan-400/40 px-2 py-1.5">
-              <div className="text-[8px] font-['Orbitron'] font-bold text-cyan-300 uppercase leading-none">
-                BEST LAP
+        <div className="bg-[#070b14]/95 border border-white/15 rounded-2xl p-3.5 sm:p-4 shadow-2xl backdrop-blur-md">
+          <div className="grid grid-cols-4 gap-2 pb-3 mb-3 border-b border-white/10 text-center font-mono tabular-nums">
+            <div className="bg-slate-900/90 border border-cyan-400/35 rounded-lg px-2 py-1.5">
+              <div className="text-[10px] font-sans font-semibold text-cyan-300 leading-none">
+                Best Lap
               </div>
               <div className="text-xs sm:text-sm font-bold text-white mt-1 leading-none">
                 {formatRaceTime(result.bestLap)}
@@ -292,12 +287,12 @@ export const GameOverScreen: React.FC<GameOverScreenProps> = ({
               return (
                 <div
                   key={idx}
-                  className={`bg-slate-900/80 border px-2 py-1.5 ${
-                    isBest ? 'border-amber-400/60' : 'border-white/10'
+                  className={`bg-slate-900/80 border rounded-lg px-2 py-1.5 ${
+                    isBest ? 'border-amber-400/50' : 'border-white/10'
                   }`}
                 >
-                  <div className="text-[8px] font-['Orbitron'] font-bold text-slate-400 uppercase leading-none">
-                    LAP {idx + 1} {isBest ? '★' : ''}
+                  <div className="text-[10px] font-sans font-medium text-slate-400 leading-none">
+                    Lap {idx + 1} {isBest ? '★' : ''}
                   </div>
                   <div
                     className={`text-xs sm:text-sm font-bold mt-1 leading-none ${
@@ -311,60 +306,35 @@ export const GameOverScreen: React.FC<GameOverScreenProps> = ({
             })}
           </div>
 
-          {/* Reward Sub-strip */}
-          <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 mb-2.5">
-            <div>
-              PURSE <span className="text-amber-300 font-bold">+{basePurse}</span>
-              {paceBonus > 0 && (
-                <>
-                  {' '}
-                  · PACE BONUS <span className="text-cyan-300 font-bold">+{paceBonus}</span>
-                </>
-              )}
-            </div>
-            <div className="uppercase tracking-wider font-['Orbitron'] text-[9px] text-slate-400">
-              HIGHWAY CRUISE ACTIVE
-            </div>
-          </div>
-
-          {/* Action Row */}
           <div className="grid grid-cols-4 gap-2">
             <button
               type="button"
               onClick={onMainMenu}
               style={{ touchAction: 'manipulation' }}
-              className="col-span-1 py-2.5 px-2 bg-slate-900 hover:bg-slate-800 border border-white/25 font-['Orbitron'] italic font-bold text-xs sm:text-sm text-slate-200 tracking-wider uppercase cursor-pointer transition-transform active:scale-95"
+              className="col-span-1 py-2.5 px-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-white/15 font-['Orbitron'] italic font-bold text-xs text-slate-200 uppercase cursor-pointer active:scale-95 whitespace-nowrap"
             >
-              MENU
+              Lobby
             </button>
 
             <button
               type="button"
               onClick={onOpenGarage}
               style={{ touchAction: 'manipulation' }}
-              className="col-span-1 py-2.5 px-2 bg-amber-500/20 hover:bg-amber-500/35 border-2 border-amber-400/80 font-['Orbitron'] italic font-black text-xs sm:text-sm text-amber-200 tracking-wider uppercase cursor-pointer transition-transform active:scale-95"
+              className="col-span-1 py-2.5 px-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-amber-400/50 font-['Orbitron'] italic font-bold text-xs text-amber-300 uppercase cursor-pointer active:scale-95 whitespace-nowrap"
             >
-              GARAGE
+              Garage
             </button>
 
             <button
               type="button"
               onClick={onRetryRace}
-              style={{
-                touchAction: 'manipulation',
-                borderColor: isNextMapQueued ? nextMap.accentHex : statusMeta.accentHex,
-              }}
-              className="col-span-2 py-2 px-3.5 bg-gradient-to-r from-amber-500/30 via-rose-500/25 to-cyan-500/30 hover:from-amber-500/45 hover:to-cyan-500/45 border-2 font-['Orbitron'] italic font-black text-white tracking-wider uppercase cursor-pointer transition-transform active:scale-95 flex items-center justify-between gap-2"
+              style={{ touchAction: 'manipulation' }}
+              className="col-span-2 py-2.5 px-4 rounded-xl bg-gradient-to-r from-cyan-400 to-amber-400 hover:from-cyan-300 hover:to-amber-300 text-slate-950 font-['Orbitron'] italic font-black text-xs sm:text-sm tracking-wider uppercase cursor-pointer active:scale-95 flex items-center justify-between gap-2 whitespace-nowrap"
             >
-              <div className="text-left min-w-0">
-                <div className="text-xs sm:text-sm leading-tight truncate">
-                  {isNextMapQueued ? `NEXT · ${nextMap.name}` : 'RACE AGAIN'}
-                </div>
-                <div className="text-[9px] font-mono not-italic text-slate-300 tracking-wide truncate leading-none mt-0.5">
-                  {isNextMapQueued ? nextMap.subtitle : currentMap.name}
-                </div>
-              </div>
-              <span className="text-sm sm:text-base shrink-0">→</span>
+              <span className="truncate">
+                {isNextMapQueued ? `Next · ${nextMap.shortName}` : 'Race Again'}
+              </span>
+              <span className="shrink-0">→</span>
             </button>
           </div>
         </div>

@@ -416,15 +416,16 @@ export function buildMicroKart() {
     const lensMesh = new THREE.Mesh(headlightLensGeo, headlightLensMat);
     lensMesh.position.set(hx, 0.0028, 0.0098);
     lensMesh.castShadow = false;
+    lensMesh.visible = false;
     chassisGroup.add(lensMesh);
     headlightLenses.push(lensMesh);
 
     const targetObj = new THREE.Object3D();
-    targetObj.position.set(hx * 1.35, -0.0055, 0.092);
+    targetObj.position.set(hx * 1.15, -0.0012, 0.16);
     chassisGroup.add(targetObj);
 
-    const spot = new THREE.SpotLight(0xf0f9ff, 2.8, 0.24, Math.PI * 0.30, 0.72, 0.0);
-    spot.position.set(hx, 0.0052, 0.0092);
+    const spot = new THREE.SpotLight(0xf0f9ff, 0.42, 0.28, Math.PI * 0.24, 0.92, 1.5);
+    spot.position.set(hx, 0.0046, 0.0092);
     spot.target = targetObj;
     chassisGroup.add(spot);
     headlightSpotLights.push(spot);
@@ -664,24 +665,39 @@ export function buildMicroKart() {
     const tumbleRoll = spinT > 0 ? Math.sin(tumblePhase) * 0.42 * Math.min(1.0, spinT * 1.8) : 0.0;
     const tumblePitch = spinT > 0 ? Math.cos(tumblePhase * 1.3) * 0.28 * Math.min(1.0, spinT * 1.8) : 0.0;
 
-    chassisGroup.rotation.y = THREE.MathUtils.lerp(
-      chassisGroup.rotation.y,
-      state.driftAngle || 0.0,
-      Math.min(1, dt * 14)
-    );
-    chassisGroup.rotation.z = THREE.MathUtils.lerp(
-      chassisGroup.rotation.z,
-      (state.steerInput || 0.0) * 0.09 + tumbleRoll,
-      Math.min(1, dt * 14)
-    );
+    const landingComp = Math.max(0.0, state.landingCompression || 0.0);
+    const landingSquatPitch = Math.sin(landingComp * Math.PI) * 0.065;
+
+    const stuntSpin = state.stuntSpinAngle || 0.0;
+    const stuntRoll = state.stuntRollAngle || 0.0;
+
+    chassisGroup.rotation.y =
+      THREE.MathUtils.lerp(
+        chassisGroup.rotation.y - stuntSpin,
+        state.driftAngle || 0.0,
+        Math.min(1, dt * 14)
+      ) + stuntSpin;
+    chassisGroup.rotation.z =
+      THREE.MathUtils.lerp(
+        chassisGroup.rotation.z - stuntRoll,
+        (state.steerInput || 0.0) * 0.11 + (state.driftAngle || 0.0) * 0.12 + tumbleRoll,
+        Math.min(1, dt * 14)
+      ) + stuntRoll;
     chassisGroup.rotation.x = THREE.MathUtils.lerp(
       chassisGroup.rotation.x,
-      (state.terrainPitch || 0.0) + (state.rampPitch || 0.0) + tumblePitch,
+      (state.terrainPitch || 0.0) + (state.rampPitch || 0.0) + landingSquatPitch + tumblePitch,
       Math.min(1, dt * 18)
     );
     const idleBob =
       Math.abs(state.speed) > 0.005 ? Math.sin(performance.now() * 0.06) * 0.00018 : 0.0;
-    chassisGroup.position.y = idleBob + (state.rumbleLift || 0.0);
+    const landingSquashY = Math.sin(landingComp * Math.PI) * 0.00095;
+    chassisGroup.position.y = idleBob + (state.rumbleLift || 0.0) - landingSquashY;
+    const squashFactor = Math.sin(landingComp * Math.PI);
+    chassisGroup.scale.set(
+      1.0 + squashFactor * 0.055,
+      1.0 - squashFactor * 0.095,
+      1.0 + squashFactor * 0.035
+    );
 
     // Keep radial blob contact shadow flush to the road surface below the car
     const kScaleCurrent = kartRoot.scale.y || 0.56;
@@ -694,6 +710,7 @@ export function buildMicroKart() {
     // 4. Volumetric Twin Nitro Exhaust Flames:
     // Ignite dynamically with cyan/orange flickering afterburners whenever Nitro Boost or a Track Boost Pad is active!
     const isBoosting = state.boostActive > 0;
+    const isShockwave = (state.shockwaveTimer || 0) > 0;
     const isHighSpeed = Math.abs(state.speed) > 0.115 && !state.countdownLocked;
     const showFlames = isBoosting || isHighSpeed;
     const tSec = performance.now() * 0.001;
@@ -707,17 +724,22 @@ export function buildMicroKart() {
         0.82 +
         0.18 * Math.sin(tSec * 58.0 + phase) +
         0.12 * Math.cos(tSec * 93.0 - phase * 1.4);
-      const rScale = (isBoosting ? 1.32 : 0.65) + 0.10 * Math.sin(tSec * 44.0 + phase);
-      const zScale = isBoosting
-        ? Math.max(0.95, 1.35 + 0.40 * crackle)
-        : Math.max(0.28, 0.40 + 0.15 * crackle);
+      const rScale =
+        (isShockwave ? 1.62 : isBoosting ? 1.32 : 0.65) + 0.10 * Math.sin(tSec * 44.0 + phase);
+      const zScale = isShockwave
+        ? Math.max(1.25, 1.75 + 0.50 * crackle)
+        : isBoosting
+          ? Math.max(0.95, 1.35 + 0.40 * crackle)
+          : Math.max(0.28, 0.40 + 0.15 * crackle);
       pGroup.scale.set(rScale, rScale, zScale);
       if (pGroup.userData.jetMat) {
         pGroup.userData.jetMat.uniforms.uTime.value = tSec;
         pGroup.userData.jetMat.uniforms.uBoostMix.value = isBoosting ? 1.0 : 0.12;
-        pGroup.userData.jetMat.uniforms.uIntensity.value = isBoosting
-          ? Math.min(1.55, 1.20 * crackle)
-          : Math.min(0.62, 0.42 * crackle);
+        pGroup.userData.jetMat.uniforms.uIntensity.value = isShockwave
+          ? Math.min(1.85, 1.48 * crackle)
+          : isBoosting
+            ? Math.min(1.55, 1.20 * crackle)
+            : Math.min(0.62, 0.42 * crackle);
       }
     }
 
@@ -730,7 +752,7 @@ export function buildMicroKart() {
     const isEmitting =
       isSpinOrImpact ||
       ((state.isDrifting || isBoosting) && Math.abs(state.speed) > 0.05);
-    const emitCount = isSpinOrImpact ? 5 : isEmitting ? 4 : 0;
+    const emitCount = isShockwave ? 6 : isSpinOrImpact ? 5 : isEmitting ? 4 : 0;
 
     if (driftSmokeMesh.visible) {
       driftSmokeMesh.visible = false;
@@ -775,10 +797,14 @@ export function buildMicroKart() {
         sparkAges[idx] = 0.0;
         sparkMaxAges[idx] = 0.20 + Math.random() * 0.18;
         sparkLifeAttr[idx] = 1.0;
-        sparkSizes[idx] = 0.65 + Math.random() * 1.15;
+        sparkSizes[idx] = (isShockwave ? 0.9 : 0.65) + Math.random() * 1.15;
 
-        // Neon Arcade Spark Palette: electric cyan during boost, fiery amber-gold during drift!
-        if (isBoosting) {
+        // Neon Arcade Spark Palette: electric purple/magenta during Shockwave, cyan during boost, amber-gold during drift!
+        if (isShockwave) {
+          sparkColors[idx * 3 + 0] = 0.92 + Math.random() * 0.08;
+          sparkColors[idx * 3 + 1] = 0.22 + Math.random() * 0.30;
+          sparkColors[idx * 3 + 2] = 1.0;
+        } else if (isBoosting) {
           sparkColors[idx * 3 + 0] = 0.10 + Math.random() * 0.25;
           sparkColors[idx * 3 + 1] = 0.85 + Math.random() * 0.15;
           sparkColors[idx * 3 + 2] = 1.0;
@@ -935,14 +961,16 @@ export function buildMicroKart() {
     }
 
     const showLights = !cockpitRoadOnly && hasAnyCarModel;
+    // Keep procedural box meshes (tailLampMeshes & headlightLenses) hidden whenever a 3D car model is attached
+    // so they never float in front of or behind the sculpted car bumpers!
     for (const lamp of tailLampMeshes) {
-      if (lamp) lamp.visible = showLights;
+      if (lamp) lamp.visible = false;
     }
     for (const plane of tailLightGlowPlanes) {
-      if (plane) plane.visible = showLights;
+      if (plane) plane.visible = false;
     }
     for (const lens of headlightLenses) {
-      if (lens) lens.visible = showLights;
+      if (lens) lens.visible = false;
     }
     for (const spot of headlightSpotLights) {
       if (spot) spot.visible = showLights;
