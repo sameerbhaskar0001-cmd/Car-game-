@@ -1,20 +1,18 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { Ghost, Volume2, VolumeX } from 'lucide-react';
 import {
   BodyKitSpec,
   MapSpec,
+  RaceModeId,
   RaceTelemetry,
-  WEATHER_SPECS,
-  WeatherMode,
   formatRaceTime,
 } from '../types/game';
-import { WeatherIcon } from './WeatherIcon';
 
 interface RaceHUDProps {
   telemetry: RaceTelemetry;
   equippedKit: BodyKitSpec;
   currentMap?: MapSpec;
-  weatherMode?: WeatherMode;
-  onCycleWeather?: () => void;
+  raceMode?: RaceModeId;
   onOpenMenu: () => void;
   onOpenSettings: () => void;
   onTriggerFinishDemo: () => void;
@@ -22,13 +20,12 @@ interface RaceHUDProps {
 
 export const RaceHUD: React.FC<RaceHUDProps> = ({
   telemetry,
-  weatherMode = 'dust',
-  onCycleWeather,
+  currentMap,
+  raceMode,
   onOpenMenu,
   onOpenSettings,
 }) => {
-  const activeWeather =
-    WEATHER_SPECS.find((w) => w.id === weatherMode) || WEATHER_SPECS[0];
+  const activeModeId: RaceModeId = telemetry.modeId || raceMode || 'circuit';
   const [activeControls, setActiveControls] = useState<{
     left: boolean;
     right: boolean;
@@ -76,12 +73,35 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
   const autoGasEnabled = telemetry.autoGas ?? true;
   const isHighSpeed = telemetry.speedKmh >= 85 || isBoosting;
   const driftCharge = telemetry.driftCharge ?? 0;
-  const driftBoostTier = telemetry.driftBoostTier ?? (driftCharge >= 1.55 ? 3 : driftCharge >= 0.90 ? 2 : driftCharge >= 0.36 ? 1 : 0);
-  const driftFillPct = Math.min(100, Math.round((driftCharge / 1.65) * 100));
+  const driftBoostTier =
+    telemetry.driftBoostTier ??
+    (driftCharge >= 0.85 ? 3 : driftCharge >= 0.45 ? 2 : driftCharge >= 0.16 ? 1 : 0);
+  const driftFillPct = Math.min(100, Math.round(driftCharge * 100));
   const nitroPercent = Math.round(Math.min(1, Math.max(0, telemetry.boostCharge)) * 100);
   const shockwaveReady = nitroPercent >= 75;
   const nitroReady = nitroPercent >= 15;
   const rank = telemetry.positionRank || 1;
+  const audioOn = Boolean(telemetry.audioEnabled);
+
+  // Mode-specific live HUD metrics
+  const elimTimer = telemetry.eliminationTimer ?? 20.0;
+  const elimDanger = activeModeId === 'elimination' && elimTimer <= 5.0 && telemetry.countdownStep === 0;
+  const remainingRacers = telemetry.remainingRacers ?? 4;
+  const totalDriftScore = telemetry.driftScore ?? 0;
+  const currentDriftPts = telemetry.currentDriftPoints ?? 0;
+  const driftCombo = telemetry.driftCombo ?? 1;
+  const driftGoldTarget = telemetry.driftTargetGold ?? 5000;
+  const driftGoalPct = Math.min(100, Math.round((totalDriftScore / driftGoldTarget) * 100));
+  const goldTargetSec = currentMap?.goldTargetSec ?? 58;
+  const silverTargetSec = goldTargetSec + 8;
+  const bronzeTargetSec = goldTargetSec + 16;
+  const elapsedTime = telemetry.totalRaceTime || telemetry.currentLapTime || 0;
+  const timeAttackTarget =
+    elapsedTime <= goldTargetSec
+      ? { label: 'GOLD', target: goldTargetSec, colorClass: 'text-amber-300 border-amber-400/60' }
+      : elapsedTime <= silverTargetSec
+        ? { label: 'SILVER', target: silverTargetSec, colorClass: 'text-slate-200 border-slate-300/60' }
+        : { label: 'BRONZE', target: bronzeTargetSec, colorClass: 'text-orange-300 border-orange-400/60' };
 
   const rankBadgeColor =
     rank === 1
@@ -133,6 +153,60 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
         </div>
       )}
 
+      {/* FLOATING 3D-PROJECTED RIVAL NAME & DISTANCE TAGS (VIPER, KIRA, REAPER) */}
+      {activeModeId !== 'time_attack' &&
+        telemetry.countdownStep === 0 &&
+        Array.isArray(telemetry.rivals) &&
+        telemetry.rivals.length > 0 && (
+          <div className="fixed inset-0 pointer-events-none z-10 overflow-hidden">
+            {telemetry.rivals.map((rival) => {
+              if (!rival.onScreen || rival.eliminated) return null;
+              const dist = rival.distMeters ?? 0;
+              const distText = dist >= 0 ? `+${dist}m` : `${dist}m`;
+              return (
+                <div
+                  key={rival.id}
+                  style={{
+                    left: `${rival.screenX}%`,
+                    top: `${rival.screenY}%`,
+                    transform: 'translate(-50%, -100%)',
+                  }}
+                  className="absolute flex flex-col items-center transition-[left,top] duration-75 ease-out"
+                >
+                  <div
+                    className={`flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-950/80 border text-[9px] leading-none shadow-md ${
+                      rival.isLeader
+                        ? 'border-rose-400/90 text-rose-100'
+                        : 'border-white/25 text-slate-100'
+                    }`}
+                  >
+                    {rival.isLeader && (
+                      <span className="px-1 py-[1px] rounded-sm bg-rose-500 text-white font-['Orbitron'] font-black text-[7px] tracking-wider">
+                        1ST
+                      </span>
+                    )}
+                    <span
+                      className="font-['Orbitron'] italic font-black tracking-wider"
+                      style={{ color: rival.isLeader ? '#fda4af' : rival.color }}
+                    >
+                      {rival.name}
+                    </span>
+                    <span className="font-mono font-bold text-[9px] text-slate-300 tabular-nums">
+                      {distText}
+                    </span>
+                  </div>
+                  <div
+                    className="w-0 h-0 border-l-[4px] border-r-[4px] border-t-[4px] border-l-transparent border-r-transparent"
+                    style={{
+                      borderTopColor: rival.isLeader ? '#fb7185' : rival.color,
+                    }}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
+
       {/* TOP BAR: Single-Line Sleek Asphalt HUD (Never wraps or blocks track!) */}
       <header className="flex items-center justify-between gap-2 w-full">
         {/* Top-Left: Compact Menu, Settings, Audio, Auto-Gas Toggle & Position Rank */}
@@ -165,30 +239,24 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
             ⚙
           </button>
 
-          {/* Compact Live Weather Toggle */}
-          {onCycleWeather && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onCycleWeather();
-              }}
-              style={{
-                touchAction: 'manipulation',
-                borderColor: `${activeWeather.accentHex}75`,
-              }}
-              aria-label={`Weather: ${activeWeather.label}. Tap to cycle weather.`}
-              title={`Weather: ${activeWeather.label} (T)`}
-              className="h-8 px-2 rounded-xl bg-slate-950/80 border text-slate-100 flex items-center justify-center gap-1 cursor-pointer shadow-lg active:scale-95 transition-colors whitespace-nowrap shrink-0"
-            >
-              <span style={{ color: activeWeather.accentHex }} className="shrink-0">
-                <WeatherIcon mode={weatherMode} className="w-3.5 h-3.5" />
-              </span>
-              <span className="hidden sm:inline font-['Orbitron'] italic font-extrabold text-[9px] tracking-wider uppercase leading-none">
-                {activeWeather.shortLabel}
-              </span>
-            </button>
-          )}
+          {/* Audio Mute / Unmute Toggle */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              window.__theRaceEngine?.toggleAudio();
+            }}
+            style={{ touchAction: 'manipulation' }}
+            aria-label={audioOn ? 'Mute Audio' : 'Unmute Audio'}
+            title={audioOn ? 'Audio On (Tap to Mute)' : 'Audio Muted (Tap to Unmute)'}
+            className={`w-8 h-8 rounded-xl border flex items-center justify-center cursor-pointer shadow-lg active:scale-95 transition-colors ${
+              audioOn
+                ? 'bg-slate-950/80 border-cyan-400/60 text-cyan-300'
+                : 'bg-slate-950/80 border-rose-400/50 text-rose-300'
+            }`}
+          >
+            {audioOn ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+          </button>
 
           {/* Compact Auto-Gas / Manual Pedal Toggle */}
           <button
@@ -208,16 +276,121 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
             {autoGasEnabled ? 'AUTO' : 'PEDAL'}
           </button>
 
-          {/* DYNAMIC POSITION RANK BADGE */}
-          <div
-            className={`flex items-baseline gap-0.5 px-2.5 py-1 rounded-xl bg-gradient-to-r border font-['Orbitron'] italic font-black shadow-lg ${rankBadgeColor}`}
-          >
-            <span className="text-base sm:text-lg leading-none">{rank}</span>
-            <span className="text-[8px] sm:text-[9px] font-black tracking-widest">
-              {rankSuffix}
-            </span>
-          </div>
+          {/* Optional Personal Best Ghost Car Toggle in Circuit Mode */}
+          {activeModeId === 'circuit' && telemetry.hasGhostPb && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                window.__theRaceEngine?.setGhostEnabled?.(!telemetry.ghostEnabled);
+              }}
+              style={{ touchAction: 'manipulation' }}
+              title="Toggle Personal Best Ghost Car"
+              aria-label="Toggle Personal Best Ghost Car"
+              className={`h-8 px-2 rounded-xl border flex items-center gap-1 cursor-pointer shadow-lg active:scale-95 transition-colors whitespace-nowrap ${
+                telemetry.ghostEnabled
+                  ? 'bg-cyan-950/80 border-cyan-400/70 text-cyan-200'
+                  : 'bg-slate-950/75 border-white/20 text-slate-400'
+              }`}
+            >
+              <Ghost className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden sm:inline font-['Orbitron'] italic font-extrabold text-[9px] tracking-wider">
+                GHOST
+              </span>
+            </button>
+          )}
+
+          {/* DYNAMIC POSITION RANK BADGE (or SOLO badge in Time Attack) */}
+          {activeModeId === 'time_attack' ? (
+            <div className="flex items-center px-2.5 py-1.5 rounded-xl bg-sky-950/85 border border-sky-400/70 font-['Orbitron'] italic font-black text-[10px] sm:text-xs text-sky-200 tracking-wider shadow-lg">
+              SOLO
+            </div>
+          ) : (
+            <div
+              className={`flex items-baseline gap-0.5 px-2.5 py-1 rounded-xl bg-gradient-to-r border font-['Orbitron'] italic font-black shadow-lg ${rankBadgeColor}`}
+            >
+              <span className="text-base sm:text-lg leading-none">{rank}</span>
+              <span className="text-[8px] sm:text-[9px] font-black tracking-widest">
+                {rankSuffix}
+              </span>
+            </div>
+          )}
         </div>
+
+        {/* TOP-CENTER: EVENT MODE OBJECTIVE WIDGET */}
+        {activeModeId === 'elimination' && (
+          <div
+            className={`flex items-center gap-2 px-2.5 sm:px-3 py-1 rounded-xl border shadow-lg backdrop-blur-sm transition-colors ${
+              elimDanger
+                ? 'bg-rose-950/90 border-rose-400 text-rose-100 animate-pulse shadow-[0_0_16px_rgba(244,63,94,0.65)]'
+                : 'bg-slate-950/80 border-orange-400/60 text-orange-200'
+            }`}
+          >
+            <div className="flex flex-col leading-none">
+              <span className="font-['Orbitron'] italic font-black text-[8px] tracking-widest uppercase text-orange-300">
+                ELIMINATION
+              </span>
+              <span className="font-mono font-bold text-[10px] text-slate-300 mt-0.5">
+                {remainingRacers}/4 LEFT
+              </span>
+            </div>
+            <div className="font-['Orbitron'] italic font-black text-base sm:text-lg tabular-nums leading-none text-white border-l border-white/15 pl-2">
+              {telemetry.countdownStep > 0 ? 'READY' : `${elimTimer.toFixed(1)}s`}
+            </div>
+          </div>
+        )}
+
+        {activeModeId === 'drift' && (
+          <div className="flex flex-col items-center justify-center px-3 py-1 rounded-xl bg-slate-950/85 border border-amber-400/60 shadow-lg backdrop-blur-sm min-w-[126px] sm:min-w-[168px]">
+            <div className="w-full flex items-baseline justify-between gap-2 leading-none">
+              <span className="font-['Orbitron'] italic font-black text-[9px] text-amber-300 tracking-wider">
+                DRIFT
+              </span>
+              <div className="flex items-baseline gap-1.5">
+                {currentDriftPts > 0 && (
+                  <span className="font-mono font-bold text-[10px] text-cyan-300 tabular-nums">
+                    +{currentDriftPts}
+                    {driftCombo > 1 ? ` ×${driftCombo}` : ''}
+                  </span>
+                )}
+                <span className="font-['Orbitron'] italic font-black text-xs sm:text-sm text-white tabular-nums">
+                  {totalDriftScore.toLocaleString()}
+                </span>
+                <span className="font-mono text-[9px] text-slate-400 hidden sm:inline">
+                  /{driftGoldTarget.toLocaleString()}
+                </span>
+              </div>
+            </div>
+            <div className="relative w-full h-1.5 rounded-full bg-slate-800/90 overflow-hidden mt-1 border border-white/10">
+              <div
+                className="h-full bg-gradient-to-r from-orange-500 via-amber-400 to-yellow-200 transition-all duration-100"
+                style={{ width: `${driftGoalPct}%` }}
+              />
+              {/* Bronze 30% & Silver 60% target markers */}
+              <div className="absolute inset-y-0 left-[30%] w-[1.5px] bg-white/45" />
+              <div className="absolute inset-y-0 left-[60%] w-[1.5px] bg-white/60" />
+            </div>
+          </div>
+        )}
+
+        {activeModeId === 'time_attack' && (
+          <div
+            className={`flex items-center gap-2 px-3 py-1 rounded-xl bg-slate-950/85 border shadow-lg backdrop-blur-sm ${timeAttackTarget.colorClass}`}
+          >
+            <div className="flex flex-col leading-none">
+              <span className="font-['Orbitron'] italic font-black text-[8px] tracking-widest uppercase">
+                {timeAttackTarget.label} TARGET
+              </span>
+              <span className="font-mono font-bold text-[10px] sm:text-xs text-white tabular-nums mt-0.5">
+                {formatRaceTime(timeAttackTarget.target)}
+              </span>
+            </div>
+            <div className="hidden sm:flex flex-col items-end border-l border-white/15 pl-2 leading-none font-mono text-[9px] text-slate-300 tabular-nums">
+              <span>GOLD {formatRaceTime(goldTargetSec)}</span>
+              <span className="text-slate-400 mt-0.5">SLV {formatRaceTime(silverTargetSec)}</span>
+            </div>
+          </div>
+        )}
 
         {/* Top-Right: Streamlined Speedometer & Lap Counter */}
         <div className="flex items-center gap-2 sm:gap-3 bg-slate-950/75 border border-white/15 rounded-xl px-2.5 py-1 shadow-lg shrink-0">
@@ -249,6 +422,81 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
           </div>
         </div>
       </header>
+
+      {/* SLEEK TRANSLUCENT CORNER CIRCUIT MINI-MAP HUD (Top-Right below Speedometer) */}
+      {Array.isArray(telemetry.minimapPath) && telemetry.minimapPath.length > 4 && (
+        <div className="fixed right-3 sm:right-4 top-14 sm:top-16 z-20 pointer-events-none flex flex-col items-end gap-1">
+          <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-xl bg-slate-950/65 border border-white/15 p-1.5 shadow-lg">
+            <svg viewBox="0 0 100 100" className="w-full h-full overflow-visible">
+              <polygon
+                points={telemetry.minimapPath.map((pt) => `${pt[0]},${pt[1]}`).join(' ')}
+                fill="none"
+                stroke="rgba(148, 163, 184, 0.35)"
+                strokeWidth="7"
+                strokeLinejoin="round"
+              />
+              <polygon
+                points={telemetry.minimapPath.map((pt) => `${pt[0]},${pt[1]}`).join(' ')}
+                fill="none"
+                stroke="rgba(226, 232, 240, 0.72)"
+                strokeWidth="2.5"
+                strokeLinejoin="round"
+              />
+              {/* Personal Best Ghost Car Dot (Cyan) */}
+              {telemetry.ghostMapPos && (
+                <circle
+                  cx={telemetry.ghostMapPos[0]}
+                  cy={telemetry.ghostMapPos[1]}
+                  r="4.2"
+                  fill="#22d3ee"
+                  fillOpacity="0.72"
+                  stroke="#cffafe"
+                  strokeWidth="1.2"
+                />
+              )}
+              {/* Active AI Rival Dots */}
+              {activeModeId !== 'time_attack' &&
+                telemetry.rivals.map((rival) => {
+                  if (
+                    rival.eliminated ||
+                    typeof rival.mapX !== 'number' ||
+                    typeof rival.mapY !== 'number'
+                  ) {
+                    return null;
+                  }
+                  return (
+                    <circle
+                      key={`mm_${rival.id}`}
+                      cx={rival.mapX}
+                      cy={rival.mapY}
+                      r={rival.isLeader ? 4.4 : 3.6}
+                      fill={rival.isLeader ? '#f43f5e' : rival.color}
+                      stroke="#0f172a"
+                      strokeWidth="1.2"
+                    />
+                  );
+                })}
+              {/* Player Dot (High-Contrast Gold/White) */}
+              {telemetry.playerMapPos && (
+                <circle
+                  cx={telemetry.playerMapPos[0]}
+                  cy={telemetry.playerMapPos[1]}
+                  r="5.0"
+                  fill="#fbbf24"
+                  stroke="#ffffff"
+                  strokeWidth="1.8"
+                />
+              )}
+            </svg>
+          </div>
+          {telemetry.ghostMapPos && typeof telemetry.ghostDeltaSec === 'number' && (
+            <div className="px-2 py-0.5 rounded bg-slate-950/75 border border-cyan-400/40 font-mono font-bold text-[9px] tabular-nums text-cyan-200 leading-none">
+              PB {telemetry.ghostDeltaSec <= 0 ? '' : '+'}
+              {telemetry.ghostDeltaSec.toFixed(2)}s
+            </div>
+          )}
+        </div>
+      )}
 
       {/* SLEEK ASPHALT KINETIC ACTION CALLOUT (No overlapping bounce) */}
       {(telemetry.actionBanner || isSlipstreaming) && telemetry.countdownStep === 0 && (
@@ -376,8 +624,8 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
           </button>
         </div>
 
-        {/* BOTTOM-CENTER: COMPACT 3-TIER LIVE AUTO-DRIFT TURBO METER */}
-        {(telemetry.isDrifting || driftCharge > 0.05) && (
+        {/* BOTTOM-CENTER: COMPACT 3-TIER LIVE AUTO-DRIFT TURBO METER (Hidden immediately when not drifting) */}
+        {telemetry.isDrifting && (
           <div className="pointer-events-none flex flex-col items-center mb-1">
             <div
               className={`px-2.5 py-0.5 rounded-full border font-['Orbitron'] italic font-black text-[9px] tracking-wider uppercase shadow-lg ${
@@ -415,7 +663,7 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
           </div>
         )}
 
-        {/* BOTTOM-RIGHT: AUTO-CARVE DRIFT MEANS ZERO DRIFT BUTTON REQUIRED — SLEEK BRAKE + PROMINENT NITRO/SHOCKWAVE */}
+        {/* BOTTOM-RIGHT: AUTO-GAS (BRAKE + SHOCK) OR MANUAL PEDAL (BRAKE left, SHOCK directly ABOVE GAS pedal) */}
         <div
           className="pointer-events-auto flex items-end gap-2 sm:gap-3"
           role="group"
@@ -457,125 +705,132 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
             </span>
           </button>
 
-          {/* NITRO / PURPLE SHOCKWAVE BUTTON */}
-          <button
-            type="button"
-            onTouchStart={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              handleNitroTrigger(true);
-            }}
-            onTouchEnd={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              handleNitroTrigger(false);
-            }}
-            onTouchCancel={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              handleNitroTrigger(false);
-            }}
-            onMouseDown={(e) => {
-              e.preventDefault();
-              handleNitroTrigger(true);
-            }}
-            onMouseUp={() => handleNitroTrigger(false)}
-            onMouseLeave={() => handleNitroTrigger(false)}
-            aria-label="Nitro and Shockwave Boost"
-            className={`relative overflow-hidden w-16 h-16 sm:w-20 sm:h-20 rounded-2xl flex flex-col items-center justify-center border-2 transition-transform select-none touch-none cursor-pointer backdrop-blur-sm ${
-              isShockwave
-                ? 'bg-fuchsia-500/90 border-white text-white scale-95 shadow-[0_0_28px_rgba(232,121,249,0.98)]'
-                : activeControls.nitro || isBoosting
-                  ? 'bg-amber-400/90 border-white text-slate-950 scale-95 shadow-[0_0_24px_rgba(251,191,36,0.95)]'
-                  : shockwaveReady
-                    ? 'bg-fuchsia-950/75 border-fuchsia-400 text-fuchsia-200 shadow-[0_0_18px_rgba(232,121,249,0.6)] animate-pulse'
-                    : nitroReady
-                      ? 'bg-slate-950/55 border-cyan-400/80 text-cyan-300 shadow-[0_0_14px_rgba(34,211,238,0.35)]'
-                      : 'bg-slate-950/45 border-slate-500/50 text-slate-400 shadow-lg'
-            }`}
-          >
-            <div
-              className={`absolute inset-x-0 bottom-0 pointer-events-none transition-all duration-150 ${
-                shockwaveReady || isShockwave
-                  ? 'bg-gradient-to-t from-fuchsia-500/60 via-purple-500/50 to-cyan-400/40'
-                  : 'bg-gradient-to-t from-cyan-500/45 to-amber-400/30'
-              }`}
-              style={{ height: `${nitroPercent}%` }}
-            />
-            <svg
-              className="relative z-10 w-6 h-6 sm:w-7 sm:h-7"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-            >
-              <path d="M13.5 2L5.5 13h5.5l-1.5 9 8.5-11.5h-5.5L13.5 2z" />
-            </svg>
-            <span className="relative z-10 font-['Orbitron'] italic font-black text-[8px] sm:text-[9px] tracking-wider uppercase mt-0.5">
-              {shockwaveReady || isShockwave ? 'SHOCK' : `${nitroPercent}%`}
-            </span>
-          </button>
-
-          {/* OPTIONAL MANUAL GAS PEDAL (ONLY SHOWN WHEN AUTO GAS IS OFF) */}
-          {!autoGasEnabled && (
+          {/* RIGHT COLUMN: In Manual Pedal mode, stack SHOCK directly ABOVE the Gas Pedal */}
+          <div className="flex flex-col items-center gap-2">
+            {/* NITRO / PURPLE SHOCKWAVE BUTTON */}
             <button
               type="button"
               onTouchStart={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                setDirectionState('forward', true);
+                handleNitroTrigger(true);
               }}
               onTouchEnd={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                setDirectionState('forward', false);
+                handleNitroTrigger(false);
               }}
               onTouchCancel={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                setDirectionState('forward', false);
+                handleNitroTrigger(false);
               }}
               onMouseDown={(e) => {
                 e.preventDefault();
-                setDirectionState('forward', true);
+                handleNitroTrigger(true);
               }}
-              onMouseUp={() => setDirectionState('forward', false)}
-              onMouseLeave={() => setDirectionState('forward', false)}
-              aria-label="Accelerate"
-              className={`w-14 h-20 sm:w-18 sm:h-24 rounded-2xl flex items-center justify-center border-2 transition-transform select-none touch-none cursor-pointer backdrop-blur-sm ${
-                activeControls.forward
-                  ? 'bg-emerald-400/55 border-emerald-200 text-white scale-95 shadow-[0_0_24px_rgba(16,185,129,0.9)]'
-                  : 'bg-slate-950/50 border-emerald-400/75 text-emerald-300 shadow-lg'
+              onMouseUp={() => handleNitroTrigger(false)}
+              onMouseLeave={() => handleNitroTrigger(false)}
+              aria-label="Nitro and Shockwave Boost"
+              className={`relative overflow-hidden rounded-2xl flex flex-col items-center justify-center border-2 transition-transform select-none touch-none cursor-pointer backdrop-blur-sm ${
+                autoGasEnabled
+                  ? 'w-16 h-16 sm:w-20 sm:h-20'
+                  : 'w-14 h-14 sm:w-18 sm:h-16'
+              } ${
+                isShockwave
+                  ? 'bg-fuchsia-500/90 border-white text-white scale-95 shadow-[0_0_28px_rgba(232,121,249,0.98)]'
+                  : activeControls.nitro || isBoosting
+                    ? 'bg-amber-400/90 border-white text-slate-950 scale-95 shadow-[0_0_24px_rgba(251,191,36,0.95)]'
+                    : shockwaveReady
+                      ? 'bg-fuchsia-950/75 border-fuchsia-400 text-fuchsia-200 shadow-[0_0_18px_rgba(232,121,249,0.6)] animate-pulse'
+                      : nitroReady
+                        ? 'bg-slate-950/55 border-cyan-400/80 text-cyan-300 shadow-[0_0_14px_rgba(34,211,238,0.35)]'
+                        : 'bg-slate-950/45 border-slate-500/50 text-slate-400 shadow-lg'
               }`}
             >
+              <div
+                className={`absolute inset-x-0 bottom-0 pointer-events-none transition-all duration-150 ${
+                  shockwaveReady || isShockwave
+                    ? 'bg-gradient-to-t from-fuchsia-500/60 via-purple-500/50 to-cyan-400/40'
+                    : 'bg-gradient-to-t from-cyan-500/45 to-amber-400/30'
+                }`}
+                style={{ height: `${nitroPercent}%` }}
+              />
               <svg
-                className="w-8 h-12 sm:w-10 sm:h-16"
-                viewBox="0 0 40 60"
-                fill="none"
+                className="relative z-10 w-5 h-5 sm:w-6 sm:h-6"
+                viewBox="0 0 24 24"
+                fill="currentColor"
               >
-                <path
-                  d="M9 10C9 6.68629 11.6863 4 15 4H27C30.3137 4 33 6.68629 33 10L31 50C31 53.3137 28.3137 56 25 56H13C9.68629 56 7 53.3137 7 50L9 10Z"
-                  stroke="currentColor"
-                  strokeWidth="2.6"
-                  fill="currentColor"
-                  fillOpacity="0.16"
-                />
-                <path
-                  d="M14.5 22L20 15.5L25.5 22"
-                  stroke="currentColor"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-                <path
-                  d="M14.5 31L20 24.5L25.5 31"
-                  stroke="currentColor"
-                  strokeWidth="2.6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  opacity="0.85"
-                />
+                <path d="M13.5 2L5.5 13h5.5l-1.5 9 8.5-11.5h-5.5L13.5 2z" />
               </svg>
+              <span className="relative z-10 font-['Orbitron'] italic font-black text-[8px] sm:text-[9px] tracking-wider uppercase mt-0.5">
+                {shockwaveReady || isShockwave ? 'SHOCK' : `${nitroPercent}%`}
+              </span>
             </button>
-          )}
+
+            {/* OPTIONAL MANUAL GAS PEDAL (DIRECTLY BELOW SHOCK BUTTON WHEN AUTO GAS IS OFF) */}
+            {!autoGasEnabled && (
+              <button
+                type="button"
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setDirectionState('forward', true);
+                }}
+                onTouchEnd={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setDirectionState('forward', false);
+                }}
+                onTouchCancel={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setDirectionState('forward', false);
+                }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  setDirectionState('forward', true);
+                }}
+                onMouseUp={() => setDirectionState('forward', false)}
+                onMouseLeave={() => setDirectionState('forward', false)}
+                aria-label="Accelerate"
+                className={`w-14 h-20 sm:w-18 sm:h-24 rounded-2xl flex items-center justify-center border-2 transition-transform select-none touch-none cursor-pointer backdrop-blur-sm ${
+                  activeControls.forward
+                    ? 'bg-emerald-400/55 border-emerald-200 text-white scale-95 shadow-[0_0_24px_rgba(16,185,129,0.9)]'
+                    : 'bg-slate-950/50 border-emerald-400/75 text-emerald-300 shadow-lg'
+                }`}
+              >
+                <svg
+                  className="w-8 h-12 sm:w-10 sm:h-16"
+                  viewBox="0 0 40 60"
+                  fill="none"
+                >
+                  <path
+                    d="M9 10C9 6.68629 11.6863 4 15 4H27C30.3137 4 33 6.68629 33 10L31 50C31 53.3137 28.3137 56 25 56H13C9.68629 56 7 53.3137 7 50L9 10Z"
+                    stroke="currentColor"
+                    strokeWidth="2.6"
+                    fill="currentColor"
+                    fillOpacity="0.16"
+                  />
+                  <path
+                    d="M14.5 22L20 15.5L25.5 22"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M14.5 31L20 24.5L25.5 31"
+                    stroke="currentColor"
+                    strokeWidth="2.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    opacity="0.85"
+                  />
+                </svg>
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

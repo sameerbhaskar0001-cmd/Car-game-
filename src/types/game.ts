@@ -1,3 +1,7 @@
+import circuitSunsetCoastImg from '../assets/images/circuit_sunset_coast_1795180167058.jpg';
+import circuitNeonCityImg from '../assets/images/circuit_neon_city_1795180030711.jpg';
+import circuitAlpineSnowImg from '../assets/images/circuit_alpine_snow_1795180030553.jpg';
+
 export type GameState =
   | 'SPLASH'
   | 'MENU'
@@ -97,7 +101,7 @@ export const MAP_SPECS: MapSpec[] = [
     skyHorizonHex: '#fb923c',
     fogHex: '#2a2438',
     fogDensity: 0.32,
-    previewImage: '/src/assets/images/circuit_sunset_coast_1795180167058.jpg',
+    previewImage: circuitSunsetCoastImg,
     description: 'Golden-hour wide coastal asphalt circuit with banked turns, elevation climbs, and sunlit ocean curbs.',
   },
   {
@@ -115,7 +119,7 @@ export const MAP_SPECS: MapSpec[] = [
     skyHorizonHex: '#0f172a',
     fogHex: '#080d1d',
     fogDensity: 0.36,
-    previewImage: '/src/assets/images/circuit_neon_city_1795180030711.jpg',
+    previewImage: circuitNeonCityImg,
     description: 'High-speed midnight circuit with glossy wet-asphalt reflections, glowing skyscrapers, and neon barriers.',
   },
   {
@@ -133,7 +137,7 @@ export const MAP_SPECS: MapSpec[] = [
     skyHorizonHex: '#475569',
     fogHex: '#182436',
     fogDensity: 0.34,
-    previewImage: '/src/assets/images/circuit_alpine_snow_1795180030553.jpg',
+    previewImage: circuitAlpineSnowImg,
     description: 'Frost-lined mountain pass featuring sweeping banked corners, rocky cliffs, and twilight floodlights.',
   },
 ];
@@ -323,7 +327,7 @@ export const BODY_KITS: BodyKitSpec[] = [
       accelMultiplier: 1.08,
       handlingMultiplier: 0.96,
     },
-    unlockCost: 50,
+    unlockCost: 35000,
   },
   {
     id: 'ghini',
@@ -350,7 +354,7 @@ export const BODY_KITS: BodyKitSpec[] = [
       accelMultiplier: 1.14,
       handlingMultiplier: 1.08,
     },
-    unlockCost: 100,
+    unlockCost: 150000,
   },
   {
     id: 'fenyr',
@@ -377,7 +381,7 @@ export const BODY_KITS: BodyKitSpec[] = [
       accelMultiplier: 1.18,
       handlingMultiplier: 1.12,
     },
-    unlockCost: 200,
+    unlockCost: 450000,
   },
   {
     id: 'police',
@@ -404,7 +408,7 @@ export const BODY_KITS: BodyKitSpec[] = [
       accelMultiplier: 1.10,
       handlingMultiplier: 1.04,
     },
-    unlockCost: 80,
+    unlockCost: 85000,
   },
   {
     id: 'lamb',
@@ -431,7 +435,7 @@ export const BODY_KITS: BodyKitSpec[] = [
       accelMultiplier: 1.12,
       handlingMultiplier: 1.06,
     },
-    unlockCost: 120,
+    unlockCost: 195000,
   },
   {
     id: 'italia',
@@ -458,7 +462,7 @@ export const BODY_KITS: BodyKitSpec[] = [
       accelMultiplier: 1.15,
       handlingMultiplier: 1.15,
     },
-    unlockCost: 150,
+    unlockCost: 260000,
   },
   {
     id: 'rally',
@@ -485,7 +489,7 @@ export const BODY_KITS: BodyKitSpec[] = [
       accelMultiplier: 1.14,
       handlingMultiplier: 1.18,
     },
-    unlockCost: 60,
+    unlockCost: 48000,
   },
   {
     id: 'jeep',
@@ -512,7 +516,7 @@ export const BODY_KITS: BodyKitSpec[] = [
       accelMultiplier: 1.04,
       handlingMultiplier: 1.05,
     },
-    unlockCost: 60,
+    unlockCost: 55000,
   },
   {
     id: 'armor',
@@ -539,7 +543,7 @@ export const BODY_KITS: BodyKitSpec[] = [
       accelMultiplier: 1.02,
       handlingMultiplier: 0.98,
     },
-    unlockCost: 90,
+    unlockCost: 110000,
   },
   {
     id: 'mobil',
@@ -566,7 +570,7 @@ export const BODY_KITS: BodyKitSpec[] = [
       accelMultiplier: 1.03,
       handlingMultiplier: 1.03,
     },
-    unlockCost: 40,
+    unlockCost: 22000,
   },
   {
     id: 'van',
@@ -593,7 +597,7 @@ export const BODY_KITS: BodyKitSpec[] = [
       accelMultiplier: 1.06,
       handlingMultiplier: 1.0,
     },
-    unlockCost: 60,
+    unlockCost: 62000,
   },
 ];
 
@@ -612,9 +616,28 @@ export interface RivalRacerData {
   name: string;
   color: string;
   rank: number;
+  isLeader?: boolean;
+  eliminated?: boolean;
   speedKmh: number;
   position: [number, number, number];
+  screenX?: number;
+  screenY?: number;
+  onScreen?: boolean;
+  distMeters?: number;
+  mapX?: number;
+  mapY?: number;
 }
+
+export interface DailyStreakState {
+  streakDay: number; // 1..7
+  claimedToday: boolean;
+  todayReward: number;
+  lastClaimDate: string | null;
+}
+
+export const DAILY_STREAK_REWARDS: readonly number[] = [
+  5000, 8000, 12000, 18000, 25000, 40000, 100000,
+];
 
 export type WeatherMode = 'clear' | 'dust' | 'mist' | 'drizzle';
 
@@ -669,6 +692,34 @@ export function getNextWeatherMode(current: WeatherMode): WeatherMode {
   return WEATHER_SPECS[(idx + 1) % WEATHER_SPECS.length].id;
 }
 
+/**
+ * Automatically selects a natural, dynamic track atmosphere for each circuit
+ * so environments evolve seamlessly without manual UI toggles.
+ */
+export function pickAutoWeatherForMap(mapId: MapId, seed = 0): WeatherMode {
+  const mapPools: Record<MapId, WeatherMode[]> = {
+    coast: ['dust', 'clear', 'drizzle'],
+    city: ['drizzle', 'clear'],
+    canyon: ['mist', 'clear', 'drizzle'],
+  };
+  const pool = mapPools[mapId] || mapPools.coast;
+  const idx = Math.abs(Math.floor(seed)) % pool.length;
+  return pool[idx];
+}
+
+export function formatCompactCoins(amount: number): string {
+  const safe = Math.max(0, Math.round(amount || 0));
+  if (safe >= 100000) {
+    const lakhs = safe / 100000;
+    return `${Number.isInteger(lakhs) ? lakhs : lakhs.toFixed(1)}L`;
+  }
+  if (safe >= 1000) {
+    const k = safe / 1000;
+    return `${Number.isInteger(k) ? k : k.toFixed(1)}K`;
+  }
+  return String(safe);
+}
+
 export interface RaceTelemetry {
   speedKmh: number;
   lapCount: number;
@@ -686,12 +737,26 @@ export interface RaceTelemetry {
   isDrifting: boolean;
   driftCharge?: number;
   driftBoostTier?: number;
+  modeId?: RaceModeId;
+  eliminationTimer?: number;
+  remainingRacers?: number;
+  driftScore?: number;
+  currentDriftPoints?: number;
+  driftCombo?: number;
+  driftTargetGold?: number;
   countdownStep: number;
   cameraMode: number;
   autopilot: boolean;
   audioEnabled: boolean;
   positionRank: number; // 1st, 2nd, 3rd, 4th
   rivals: RivalRacerData[];
+  minimapPath?: [number, number][];
+  playerMapPos?: [number, number];
+  ghostMapPos?: [number, number] | null;
+  ghostEnabled?: boolean;
+  hasGhostPb?: boolean;
+  ghostDeltaSec?: number | null;
+  stuntCamActive?: boolean;
 }
 
 export type UpgradePartKey = 'engine' | 'turbo' | 'tires' | 'nitro';
@@ -711,15 +776,15 @@ export const DEFAULT_CAR_UPGRADES: CarUpgradeLevels = {
 };
 
 export const UPGRADE_PART_COSTS: Record<number, number> = {
-  1: 75,
-  2: 140,
-  3: 240,
-  4: 380,
+  1: 4500,
+  2: 9500,
+  3: 18000,
+  4: 32000,
 };
 
 export function getUpgradeCost(currentLevel: number): number | null {
   if (currentLevel >= 5) return null;
-  return UPGRADE_PART_COSTS[currentLevel] ?? 400;
+  return UPGRADE_PART_COSTS[currentLevel] ?? 32000;
 }
 
 export function getEffectiveCarPerformance(
@@ -826,6 +891,7 @@ export interface MissionSpec {
   title: string;
   description: string;
   category: 'Daily' | 'Career';
+  actionTarget?: 'events' | 'garage';
   rewardCoins: number;
   rewardXp: number;
   target: number;
@@ -838,7 +904,8 @@ export const MISSIONS_LIST: MissionSpec[] = [
     title: 'Ignition Start',
     description: 'Complete your first official race on any circuit.',
     category: 'Daily',
-    rewardCoins: 120,
+    actionTarget: 'events',
+    rewardCoins: 8000,
     rewardXp: 100,
     target: 1,
     getProgress: (c) => c.totalRaces,
@@ -848,7 +915,8 @@ export const MISSIONS_LIST: MissionSpec[] = [
     title: 'Checkered Flag',
     description: 'Finish 1st place in any race event.',
     category: 'Daily',
-    rewardCoins: 180,
+    actionTarget: 'events',
+    rewardCoins: 14000,
     rewardXp: 140,
     target: 1,
     getProgress: (c) => c.totalWins,
@@ -858,7 +926,8 @@ export const MISSIONS_LIST: MissionSpec[] = [
     title: 'Garage Tuner',
     description: 'Install 2 performance upgrades in the Garage.',
     category: 'Daily',
-    rewardCoins: 160,
+    actionTarget: 'garage',
+    rewardCoins: 12000,
     rewardXp: 120,
     target: 2,
     getProgress: (c) => c.totalUpgrades,
@@ -868,7 +937,8 @@ export const MISSIONS_LIST: MissionSpec[] = [
     title: 'Midnight Runner',
     description: 'Complete a race at Neon City circuit.',
     category: 'Daily',
-    rewardCoins: 150,
+    actionTarget: 'events',
+    rewardCoins: 10000,
     rewardXp: 120,
     target: 1,
     getProgress: (c) => (c.mapsRaced.includes('city') ? 1 : 0),
@@ -878,7 +948,8 @@ export const MISSIONS_LIST: MissionSpec[] = [
     title: 'Alpine Conqueror',
     description: 'Complete a race at Alpine Snow pass.',
     category: 'Career',
-    rewardCoins: 150,
+    actionTarget: 'events',
+    rewardCoins: 12000,
     rewardXp: 120,
     target: 1,
     getProgress: (c) => (c.mapsRaced.includes('canyon') ? 1 : 0),
@@ -888,7 +959,8 @@ export const MISSIONS_LIST: MissionSpec[] = [
     title: 'Circuit World Tour',
     description: 'Race on all 3 circuits (Sunset Coast, Neon City, Alpine Snow).',
     category: 'Career',
-    rewardCoins: 280,
+    actionTarget: 'events',
+    rewardCoins: 25000,
     rewardXp: 220,
     target: 3,
     getProgress: (c) => c.mapsRaced.length,
@@ -898,7 +970,8 @@ export const MISSIONS_LIST: MissionSpec[] = [
     title: 'Showroom Collector',
     description: 'Own 4 cars in your personal garage.',
     category: 'Career',
-    rewardCoins: 260,
+    actionTarget: 'garage',
+    rewardCoins: 22000,
     rewardXp: 200,
     target: 4,
     getProgress: (_c, unlockedCount) => unlockedCount,
@@ -908,7 +981,8 @@ export const MISSIONS_LIST: MissionSpec[] = [
     title: 'Season Veteran',
     description: 'Complete 5 total race events.',
     category: 'Career',
-    rewardCoins: 350,
+    actionTarget: 'events',
+    rewardCoins: 35000,
     rewardXp: 280,
     target: 5,
     getProgress: (c) => c.totalRaces,
@@ -925,12 +999,16 @@ export interface RaceFinishResult {
   finishRank: number; // 1, 2, 3, or 4
   mapId?: MapId;
   modeId?: RaceModeId;
+  driftScore?: number;
+  eliminated?: boolean;
 }
 
 export interface TheRaceEngineBridge {
   setScreen: (screen: GameState) => void;
   getScreen: () => GameState;
-  startRace: () => void;
+  startRace: (modeId?: RaceModeId) => void;
+  setRaceMode?: (modeId: RaceModeId) => void;
+  getRaceMode?: () => RaceModeId;
   setMap?: (mapId: MapId) => void;
   getMap?: () => MapId;
   setWeather?: (mode: WeatherMode) => WeatherMode;
@@ -964,6 +1042,8 @@ export interface TheRaceEngineBridge {
   triggerNitro: () => boolean;
   setAutoGas?: (val: boolean) => void;
   getAutoGas?: () => boolean;
+  setGhostEnabled?: (val: boolean) => void;
+  getGhostEnabled?: () => boolean;
   setCameraMode: (mode: number) => void;
   getCameraMode: () => number;
   setAutopilot: (val: boolean) => void;
@@ -973,6 +1053,10 @@ export interface TheRaceEngineBridge {
   playSplashImpact: () => void;
   playUiClick: (variant?: 'click' | 'equip') => void;
   playCarRevPreview?: (kitId: BodyKitId) => void;
+  playVictoryVoice?: () => void;
+  playGameOverVoice?: () => void;
+  playEvilLaugh?: () => void;
+  playUnlockOrStuntVoice?: () => void;
   setGraphicsSettings: (settings: {
     bloomStrength?: number;
     dofStrength?: number;
@@ -993,6 +1077,9 @@ export interface TheRaceEngineBridge {
       bestLap: number;
       lapTimes: number[];
       finishRank: number;
+      driftScore?: number;
+      eliminated?: boolean;
+      modeId?: RaceModeId;
     }) => void
   ) => () => void;
 }

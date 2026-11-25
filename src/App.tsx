@@ -5,8 +5,10 @@ import {
   BodyKitId,
   BodyKitSpec,
   CarUpgradeLevels,
+  DAILY_STREAK_REWARDS,
   DEFAULT_CAREER_STATE,
   DEFAULT_CAR_UPGRADES,
+  DailyStreakState,
   GameState,
   MAP_SPECS,
   MISSIONS_LIST,
@@ -26,11 +28,11 @@ import {
   getDriverLevelInfo,
   getEffectiveCarPerformance,
   getNextRotatedMapId,
-  getNextWeatherMode,
   getUpgradeCost,
   normalizeCarId,
   normalizeMapId,
   normalizeWeatherMode,
+  pickAutoWeatherForMap,
 } from './types/game';
 import { SplashScreen } from './components/SplashScreen';
 import { MainMenu } from './components/MainMenu';
@@ -42,6 +44,7 @@ import { GameOverScreen } from './components/GameOverScreen';
 import { SettingsModal } from './components/SettingsModal';
 
 const STORAGE_COINS_KEY = 'the_race_3d_coins_v1';
+const STORAGE_ECONOMY_V2_KEY = 'the_race_3d_economy_v2';
 const STORAGE_KIT_KEY = 'the_race_3d_equipped_kit_v1';
 const STORAGE_RIM_KEY = 'the_race_3d_equipped_rim_v1';
 const STORAGE_SPOILER_KEY = 'the_race_3d_equipped_spoiler_v1';
@@ -53,21 +56,83 @@ const STORAGE_AUTO_ROTATE_KEY = 'the_race_3d_auto_rotate_v1';
 const STORAGE_WEATHER_KEY = 'the_race_3d_weather_v1';
 const STORAGE_UPGRADES_KEY = 'the_race_3d_car_upgrades_v1';
 const STORAGE_CAREER_KEY = 'the_race_3d_career_v1';
+const STORAGE_DAILY_STREAK_KEY = 'the_race_3d_daily_streak_v1';
 
-const DEFAULT_COINS = 500;
+const DEFAULT_COINS = 25000;
+
+function getLocalDateStamp(dateObj: Date = new Date()): string {
+  const y = dateObj.getFullYear();
+  const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const d = String(dateObj.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function getYesterdayDateStamp(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return getLocalDateStamp(d);
+}
+
+function loadDailyStreakState(): DailyStreakState {
+  const today = getLocalDateStamp();
+  const yesterday = getYesterdayDateStamp();
+  try {
+    const raw = window.localStorage.getItem(STORAGE_DAILY_STREAK_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const lastDate = typeof parsed?.lastClaimDate === 'string' ? parsed.lastClaimDate : null;
+      const savedDay = Math.min(7, Math.max(1, Number(parsed?.streakDay) || 1));
+      if (lastDate === today) {
+        return {
+          streakDay: savedDay,
+          claimedToday: true,
+          todayReward: DAILY_STREAK_REWARDS[savedDay - 1] ?? 100,
+          lastClaimDate: lastDate,
+        };
+      }
+      if (lastDate === yesterday) {
+        const nextDay = savedDay >= 7 ? 1 : savedDay + 1;
+        return {
+          streakDay: nextDay,
+          claimedToday: false,
+          todayReward: DAILY_STREAK_REWARDS[nextDay - 1] ?? 100,
+          lastClaimDate: lastDate,
+        };
+      }
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return {
+    streakDay: 1,
+    claimedToday: false,
+    todayReward: DAILY_STREAK_REWARDS[0],
+    lastClaimDate: null,
+  };
+}
 
 export default function App() {
   const [gameState, setGameState] = useState<GameState>('SPLASH');
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
 
-  // Persistent Player Coins (Default 500)
+  // Persistent Player Coins (Default 25,000 + one-time v2 economy migration for legacy small saves)
   const [coins, setCoins] = useState<number>(() => {
     try {
       const saved = window.localStorage.getItem(STORAGE_COINS_KEY);
+      const migrated = window.localStorage.getItem(STORAGE_ECONOMY_V2_KEY);
       if (saved !== null) {
         const parsed = parseInt(saved, 10);
-        if (!Number.isNaN(parsed) && parsed >= 0) return parsed;
+        if (!Number.isNaN(parsed) && parsed >= 0) {
+          if (!migrated) {
+            const upgraded = parsed < 5000 ? Math.max(DEFAULT_COINS, parsed * 50) : parsed;
+            window.localStorage.setItem(STORAGE_ECONOMY_V2_KEY, '1');
+            window.localStorage.setItem(STORAGE_COINS_KEY, String(upgraded));
+            return upgraded;
+          }
+          return parsed;
+        }
       }
+      window.localStorage.setItem(STORAGE_ECONOMY_V2_KEY, '1');
     } catch {
       // ignore storage errors
     }
@@ -130,6 +195,9 @@ export default function App() {
     }
     return DEFAULT_CAREER_STATE;
   });
+
+  // Persistent Day 1–7 Daily Login Streak
+  const [dailyStreak, setDailyStreak] = useState<DailyStreakState>(() => loadDailyStreakState());
 
   // Persistent Equipped Body Kit
   const [equippedKitId, setEquippedKitId] = useState<BodyKitId>(() => {
@@ -215,16 +283,11 @@ export default function App() {
     return true;
   });
 
-  // Persistent Weather Preset
-  const [weatherMode, setWeatherMode] = useState<WeatherMode>(() => {
-    try {
-      const saved = window.localStorage.getItem(STORAGE_WEATHER_KEY);
-      if (saved) return normalizeWeatherMode(saved);
-    } catch {
-      // ignore
-    }
-    return 'dust';
-  });
+  // Automatic Environment / Weather State (dynamically chosen by system per circuit & race)
+  const weatherSeedRef = useRef<number>(Math.floor(Math.random() * 6));
+  const [weatherMode, setWeatherMode] = useState<WeatherMode>(() =>
+    pickAutoWeatherForMap(selectedMapId, weatherSeedRef.current)
+  );
 
   const selectedMapIdRef = useRef<MapId>(selectedMapId);
   const selectedModeIdRef = useRef<RaceModeId>(selectedModeId);
@@ -265,7 +328,7 @@ export default function App() {
     totalTime: 52.45,
     bestLap: 16.82,
     lapTimes: [18.12, 17.51, 16.82],
-    coinsEarned: 250,
+    coinsEarned: 15000,
     xpEarned: 120,
     starsEarned: 3,
     finishRank: 1,
@@ -481,27 +544,108 @@ export default function App() {
       });
 
       unsubscribeFinish = engine.onRaceFinish((finishData) => {
-        const rank = finishData.finishRank || 1;
+        const activeModeId = finishData.modeId || selectedModeIdRef.current;
         const activeMode =
-          RACE_MODES.find((m) => m.id === selectedModeIdRef.current) || RACE_MODES[0];
-        const rankReward = rank === 1 ? 300 : rank === 2 ? 200 : rank === 3 ? 120 : 60;
-        const speedBonus =
-          finishData.totalTime < 55 ? 50 : finishData.totalTime < 70 ? 25 : 10;
-        const totalReward = Math.round(
-          (rankReward + speedBonus) * activeMode.rewardMultiplier
-        );
-        const xpEarned = rank === 1 ? 140 : rank === 2 ? 105 : rank === 3 ? 80 : 55;
+          RACE_MODES.find((m) => m.id === activeModeId) || RACE_MODES[0];
         const completedMapId = normalizeMapId(
           engine.getMap?.() || selectedMapIdRef.current
         );
         const mapSpec =
           MAP_SPECS.find((m) => m.id === completedMapId) || MAP_SPECS[0];
-        const starsEarned =
-          rank === 1 && finishData.totalTime <= mapSpec.goldTargetSec + 10
-            ? 3
-            : rank <= 2
-              ? 2
-              : 1;
+        const driftScore = Math.round(finishData.driftScore || 0);
+        const isEliminated = Boolean(finishData.eliminated);
+
+        let effectiveRank = Math.min(4, Math.max(1, finishData.finishRank || 1));
+        let starsEarned = 1;
+        let isWin = false;
+
+        if (activeMode.id === 'elimination') {
+          if (isEliminated) {
+            effectiveRank = Math.min(4, Math.max(2, finishData.finishRank || 4));
+            starsEarned = effectiveRank === 2 ? 1 : 0;
+            isWin = false;
+          } else {
+            effectiveRank = finishData.finishRank || 1;
+            starsEarned = effectiveRank === 1 ? 3 : effectiveRank === 2 ? 2 : 1;
+            isWin = effectiveRank === 1;
+          }
+        } else if (activeMode.id === 'drift') {
+          if (driftScore >= 5000) {
+            starsEarned = 3;
+            effectiveRank = 1;
+            isWin = true;
+          } else if (driftScore >= 3000) {
+            starsEarned = 2;
+            effectiveRank = 2;
+            isWin = false;
+          } else if (driftScore >= 1500) {
+            starsEarned = 1;
+            effectiveRank = 3;
+            isWin = false;
+          } else {
+            starsEarned = 0;
+            effectiveRank = 4;
+            isWin = false;
+          }
+        } else if (activeMode.id === 'time_attack') {
+          const goldTarget = mapSpec.goldTargetSec;
+          const silverTarget = goldTarget + 8;
+          const bronzeTarget = goldTarget + 16;
+          if (finishData.totalTime <= goldTarget) {
+            starsEarned = 3;
+            effectiveRank = 1;
+            isWin = true;
+          } else if (finishData.totalTime <= silverTarget) {
+            starsEarned = 2;
+            effectiveRank = 2;
+            isWin = false;
+          } else if (finishData.totalTime <= bronzeTarget) {
+            starsEarned = 1;
+            effectiveRank = 3;
+            isWin = false;
+          } else {
+            starsEarned = 0;
+            effectiveRank = 4;
+            isWin = false;
+          }
+        } else {
+          // Circuit Race
+          starsEarned =
+            effectiveRank === 1 && finishData.totalTime <= mapSpec.goldTargetSec + 10
+              ? 3
+              : effectiveRank <= 2
+                ? 2
+                : 1;
+          isWin = effectiveRank === 1;
+        }
+
+        if (isWin) {
+          engine.playVictoryVoice?.();
+        } else if (isEliminated || starsEarned === 0 || effectiveRank >= 4) {
+          engine.playGameOverVoice?.();
+        }
+
+        const rankReward =
+          effectiveRank === 1
+            ? 12000
+            : effectiveRank === 2
+              ? 8000
+              : effectiveRank === 3
+                ? 5000
+                : 2500;
+        const speedBonus =
+          activeMode.id === 'drift'
+            ? Math.min(4500, Math.floor(driftScore * 0.75))
+            : finishData.totalTime < 55
+              ? 3500
+              : finishData.totalTime < 70
+                ? 2000
+                : 1000;
+        const totalReward = Math.round(
+          (rankReward + speedBonus) * activeMode.rewardMultiplier
+        );
+        const xpEarned =
+          effectiveRank === 1 ? 140 : effectiveRank === 2 ? 105 : effectiveRank === 3 ? 80 : 55;
 
         setCoins((prev) => prev + totalReward);
         setCareer((prev) => {
@@ -509,13 +653,17 @@ export default function App() {
             prev.trackRecords[completedMapId] ||
             DEFAULT_CAREER_STATE.trackRecords[completedMapId];
           const nextBestLap =
-            prevRec.bestLap === null
-              ? finishData.bestLap
-              : Math.min(prevRec.bestLap, finishData.bestLap);
+            !isEliminated && finishData.bestLap > 0
+              ? prevRec.bestLap === null
+                ? finishData.bestLap
+                : Math.min(prevRec.bestLap, finishData.bestLap)
+              : prevRec.bestLap;
           const nextBestTotal =
-            prevRec.bestTotalTime === null
-              ? finishData.totalTime
-              : Math.min(prevRec.bestTotalTime, finishData.totalTime);
+            !isEliminated && finishData.totalTime > 0
+              ? prevRec.bestTotalTime === null
+                ? finishData.totalTime
+                : Math.min(prevRec.bestTotalTime, finishData.totalTime)
+              : prevRec.bestTotalTime;
           const nextMapsRaced = prev.mapsRaced.includes(completedMapId)
             ? prev.mapsRaced
             : [...prev.mapsRaced, completedMapId];
@@ -524,12 +672,14 @@ export default function App() {
             ...prev,
             xp: prev.xp + xpEarned,
             totalRaces: prev.totalRaces + 1,
-            totalWins: prev.totalWins + (rank === 1 ? 1 : 0),
+            totalWins: prev.totalWins + (isWin ? 1 : 0),
             mapsRaced: nextMapsRaced,
             bestSingleRaceTime:
-              prev.bestSingleRaceTime === null
-                ? finishData.totalTime
-                : Math.min(prev.bestSingleRaceTime, finishData.totalTime),
+              !isEliminated && finishData.totalTime > 0
+                ? prev.bestSingleRaceTime === null
+                  ? finishData.totalTime
+                  : Math.min(prev.bestSingleRaceTime, finishData.totalTime)
+                : prev.bestSingleRaceTime,
             trackRecords: {
               ...prev.trackRecords,
               [completedMapId]: {
@@ -537,7 +687,7 @@ export default function App() {
                 bestTotalTime: nextBestTotal,
                 bestStars: Math.max(prevRec.bestStars, starsEarned),
                 racesCompleted: prevRec.racesCompleted + 1,
-                wins: prevRec.wins + (rank === 1 ? 1 : 0),
+                wins: prevRec.wins + (isWin ? 1 : 0),
               },
             },
           };
@@ -550,14 +700,18 @@ export default function App() {
           coinsEarned: totalReward,
           xpEarned,
           starsEarned,
-          finishRank: rank,
+          finishRank: effectiveRank,
           mapId: completedMapId,
           modeId: activeMode.id,
+          driftScore,
+          eliminated: isEliminated,
         });
 
         if (autoRotateMapsRef.current) {
           const nextMapId = getNextRotatedMapId(completedMapId);
           setSelectedMapId(nextMapId);
+          weatherSeedRef.current += 1;
+          setWeatherMode(pickAutoWeatherForMap(nextMapId, weatherSeedRef.current));
         }
 
         setGameState('GAMEOVER');
@@ -695,12 +849,16 @@ export default function App() {
     (mapId: MapId) => {
       const normalized = normalizeMapId(mapId);
       setSelectedMapId(normalized);
+      weatherSeedRef.current += 1;
+      const autoWeather = pickAutoWeatherForMap(normalized, weatherSeedRef.current);
+      setWeatherMode(autoWeather);
       const engine = getEngine();
       if (engine) {
         engine.playUiClick('click');
         if (engine.getMap?.() !== normalized) {
           engine.setMap?.(normalized);
         }
+        engine.setWeather?.(autoWeather);
       }
     },
     [getEngine]
@@ -709,7 +867,11 @@ export default function App() {
   const handleSelectMode = useCallback(
     (modeId: RaceModeId) => {
       setSelectedModeId(modeId);
-      getEngine()?.playUiClick('click');
+      const engine = getEngine();
+      if (engine) {
+        engine.playUiClick('click');
+        engine.setRaceMode?.(modeId);
+      }
     },
     [getEngine]
   );
@@ -727,15 +889,20 @@ export default function App() {
       if (targetMapId !== selectedMapId) {
         setSelectedMapId(targetMapId);
       }
+      weatherSeedRef.current += 1;
+      const autoWeather = pickAutoWeatherForMap(targetMapId, weatherSeedRef.current);
+      setWeatherMode(autoWeather);
       if (engine) {
         if (engine.getMap?.() !== targetMapId) {
           engine.setMap?.(targetMapId);
         }
-        engine.startRace();
+        engine.setWeather?.(autoWeather);
+        engine.setRaceMode?.(selectedModeId);
+        engine.startRace(selectedModeId);
       }
       setGameState('RACE');
     },
-    [getEngine, selectedMapId, requestLandscapeMode]
+    [getEngine, selectedMapId, selectedModeId, requestLandscapeMode]
   );
 
   const handleOpenEvents = useCallback(() => {
@@ -786,12 +953,14 @@ export default function App() {
       paintHex?: string | null
     ) => {
       const engine = getEngine();
+      let justUnlockedCar = false;
       if (!unlockedKits.includes(kit.id)) {
         if (coins < kit.unlockCost) {
           return;
         }
         setCoins((prev) => prev - kit.unlockCost);
         setUnlockedKits((prev) => [...prev, kit.id]);
+        justUnlockedCar = true;
       }
       const nextPaint = paintHex !== undefined ? paintHex : null;
       setEquippedKitId(kit.id);
@@ -809,7 +978,11 @@ export default function App() {
           spoilerId,
           paintHex: nextPaint,
         });
-        engine.playCarRevPreview?.(kit.id);
+        if (justUnlockedCar) {
+          engine.playUnlockOrStuntVoice?.();
+        } else {
+          engine.playCarRevPreview?.(kit.id);
+        }
       }
     },
     [coins, unlockedKits, carUpgradesMap, getEngine]
@@ -863,34 +1036,28 @@ export default function App() {
     [career, unlockedKits.length, getEngine]
   );
 
-  const handleSelectWeather = useCallback(
-    (mode: WeatherMode) => {
-      const normalized = normalizeWeatherMode(mode);
-      setWeatherMode(normalized);
-      const engine = getEngine();
-      if (engine) {
-        engine.playUiClick('click');
-        engine.setWeather?.(normalized);
-      }
-    },
-    [getEngine]
-  );
-
-  const handleCycleWeather = useCallback(() => {
-    setWeatherMode((prev) => {
-      const next = getNextWeatherMode(prev);
-      const engine = getEngine();
-      if (engine) {
-        engine.playUiClick('click');
-        engine.setWeather?.(next);
-      }
-      return next;
-    });
-  }, [getEngine]);
-
-  const handleResetCoins = useCallback(() => {
-    setCoins((prev) => Math.max(prev, DEFAULT_COINS));
-  }, []);
+  const handleClaimDailyReward = useCallback(() => {
+    if (dailyStreak.claimedToday) return;
+    const today = getLocalDateStamp();
+    const reward = DAILY_STREAK_REWARDS[dailyStreak.streakDay - 1] ?? 5000;
+    const nextState: DailyStreakState = {
+      streakDay: dailyStreak.streakDay,
+      claimedToday: true,
+      todayReward: reward,
+      lastClaimDate: today,
+    };
+    setDailyStreak(nextState);
+    setCoins((prev) => prev + reward);
+    try {
+      window.localStorage.setItem(
+        STORAGE_DAILY_STREAK_KEY,
+        JSON.stringify({ streakDay: nextState.streakDay, lastClaimDate: today })
+      );
+    } catch {
+      // ignore storage errors
+    }
+    getEngine()?.playUiClick('equip');
+  }, [dailyStreak, getEngine]);
 
   const handleTriggerFinishDemo = useCallback(() => {
     const engine = getEngine();
@@ -912,16 +1079,12 @@ export default function App() {
       {gameState === 'MENU' && (
         <MainMenu
           coins={coins}
-          driverLevel={driverLevel}
-          equippedKit={equippedKit}
-          equippedCarClass={equippedPerformance.carClass}
-          equippedCarPR={equippedPerformance.pr}
           unlockedCount={unlockedKits.length}
           claimableMissionsCount={claimableMissionsCount}
+          dailyStreak={dailyStreak}
+          onClaimDailyReward={handleClaimDailyReward}
           selectedMapId={selectedMapId}
           selectedModeId={selectedModeId}
-          weatherMode={weatherMode}
-          onCycleWeather={handleCycleWeather}
           onStartRace={() => handleStartRace()}
           onOpenEvents={handleOpenEvents}
           onOpenGarage={handleOpenGarage}
@@ -941,7 +1104,6 @@ export default function App() {
           trackRecords={career.trackRecords}
           onSelectMap={handleSelectMap}
           onSelectMode={handleSelectMode}
-          onSelectWeather={handleSelectWeather}
           onToggleAutoRotate={handleToggleAutoRotate}
           onOpenGarage={handleOpenGarage}
           onBackToMenu={() => setGameState('MENU')}
@@ -987,6 +1149,7 @@ export default function App() {
           onClaimMission={handleClaimMission}
           onBackToMenu={() => setGameState('MENU')}
           onOpenEvents={handleOpenEvents}
+          onOpenGarage={handleOpenGarage}
         />
       )}
 
@@ -996,8 +1159,7 @@ export default function App() {
           telemetry={telemetry}
           equippedKit={equippedKit}
           currentMap={activeMapSpec}
-          weatherMode={weatherMode}
-          onCycleWeather={handleCycleWeather}
+          raceMode={selectedModeId}
           onOpenMenu={() => setGameState('MENU')}
           onOpenSettings={() => setSettingsOpen(true)}
           onTriggerFinishDemo={handleTriggerFinishDemo}
@@ -1023,8 +1185,6 @@ export default function App() {
       {settingsOpen && (
         <SettingsModal
           weatherMode={weatherMode}
-          onChangeWeather={handleSelectWeather}
-          onResetCoins={handleResetCoins}
           onBackToMenu={() => {
             setSettingsOpen(false);
             const engine = getEngine();

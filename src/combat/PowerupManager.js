@@ -67,28 +67,28 @@ export function createPowerupManager(initialSplineData, scene) {
     return out;
   }
 
-  // Shared reusable geometries & materials across map swaps
-  const padBaseGeo = new THREE.BoxGeometry(0.0064, 0.00028, 0.016);
+  // Shared reusable geometries & materials across map swaps (embedded skirt so pads sit 100% flush on crowned asphalt)
+  const padBaseGeo = new THREE.BoxGeometry(0.0066, 0.00064, 0.0162);
   const padBaseMat = new THREE.MeshStandardMaterial({
     color: 0x090d16,
     roughness: 0.3,
     metalness: 0.8,
   });
-  const padChevronGeo = new THREE.BoxGeometry(0.0026, 0.00040, 0.00085);
+  const padChevronGeo = new THREE.BoxGeometry(0.0026, 0.00042, 0.00088);
 
-  // Low-profile aerodynamic launch wedge (1.55mm lip height, 13.6mm length, 8.2mm width)
+  // Aerodynamic launch wedge with embedded sub-road foundation skirt (-0.45mm to +1.85mm lip height, 14.2mm length, 8.6mm width)
   const wedgeShape = new THREE.Shape();
-  wedgeShape.moveTo(-0.0068, 0.0);
-  wedgeShape.lineTo(0.0068, 0.0);
-  wedgeShape.lineTo(0.0068, 0.00155);
-  wedgeShape.lineTo(-0.0068, 0.00018);
+  wedgeShape.moveTo(-0.0071, -0.00045);
+  wedgeShape.lineTo(0.0071, -0.00045);
+  wedgeShape.lineTo(0.0071, 0.00185);
+  wedgeShape.lineTo(-0.0071, 0.00005);
   wedgeShape.closePath();
 
   const rampWedgeGeo = new THREE.ExtrudeGeometry(wedgeShape, {
-    depth: 0.0082,
+    depth: 0.0086,
     bevelEnabled: false,
   });
-  rampWedgeGeo.translate(0, 0, -0.0041);
+  rampWedgeGeo.translate(0, 0, -0.0043);
   rampWedgeGeo.rotateY(-Math.PI / 2);
 
   const rampDeckMat = new THREE.MeshStandardMaterial({
@@ -96,7 +96,7 @@ export function createPowerupManager(initialSplineData, scene) {
     roughness: 0.25,
     metalness: 0.75,
   });
-  const rampRailGeo = new THREE.BoxGeometry(0.00055, 0.00065, 0.0136);
+  const rampRailGeo = new THREE.BoxGeometry(0.00055, 0.00065, 0.0142);
   const rampRailMat = new THREE.MeshBasicMaterial({
     color: 0x00f0ff,
     toneMapped: false,
@@ -159,13 +159,14 @@ export function createPowerupManager(initialSplineData, scene) {
         ? splineData.jumpRampConfigs
         : defaultJumpRampConfigs;
 
-    // 1. Build 6 Neon Chevron Track Boost Pads
+    // 1. Build 6 Neon Chevron Track Boost Pads (Flush with roadbed)
     boostPads = activeBoostConfigs.map((cfg, idx) => {
       const padS = cfg.sFrac * totalLength;
       const frame = samplePoint(padS);
       const padGroup = new THREE.Group();
 
       const baseMesh = new THREE.Mesh(padBaseGeo, padBaseMat);
+      baseMesh.position.y = -0.00018;
       padGroup.add(baseMesh);
 
       const chevronPairs = [];
@@ -176,10 +177,10 @@ export function createPowerupManager(initialSplineData, scene) {
           toneMapped: false,
         });
         const leftWing = new THREE.Mesh(padChevronGeo, chevMat);
-        leftWing.position.set(-0.0011, 0.00016, zOff);
+        leftWing.position.set(-0.0011, 0.00018, zOff);
         leftWing.rotation.y = -0.52;
         const rightWing = new THREE.Mesh(padChevronGeo, chevMat);
-        rightWing.position.set(0.0011, 0.00016, zOff);
+        rightWing.position.set(0.0011, 0.00018, zOff);
         rightWing.rotation.y = 0.52;
         padGroup.add(leftWing, rightWing);
         chevronPairs.push(chevMat);
@@ -188,7 +189,7 @@ export function createPowerupManager(initialSplineData, scene) {
       padGroup.position
         .copy(frame.pos)
         .addScaledVector(frame.right, cfg.latOffset)
-        .addScaledVector(frame.normal, 0.00026);
+        .addScaledVector(frame.normal, 0.00004);
 
       const leftVec = new THREE.Vector3().crossVectors(frame.normal, frame.tangent).normalize();
       const rotMat = new THREE.Matrix4().makeBasis(leftVec, frame.normal, frame.tangent);
@@ -205,7 +206,7 @@ export function createPowerupManager(initialSplineData, scene) {
       };
     });
 
-    // 2. Build 2 Low-Profile Straightaway Speed-Jump Ramps
+    // 2. Build 2 Flush Straightaway Speed-Jump Ramps
     jumpRamps = activeRampConfigs.map((cfg, idx) => {
       const rampS = cfg.sFrac * totalLength;
       const frame = samplePoint(rampS);
@@ -215,10 +216,10 @@ export function createPowerupManager(initialSplineData, scene) {
       rampGroup.add(wedgeMesh);
 
       const slopeGroup = new THREE.Group();
-      slopeGroup.position.set(0, 0.00086, 0);
-      slopeGroup.rotation.x = -0.101;
+      slopeGroup.position.set(0, 0.00095, 0);
+      slopeGroup.rotation.x = -0.125;
 
-      for (const rx of [-0.0039, 0.0039]) {
+      for (const rx of [-0.0040, 0.0040]) {
         const rail = new THREE.Mesh(rampRailGeo, rampRailMat);
         rail.position.set(rx, 0.00022, 0);
         slopeGroup.add(rail);
@@ -227,10 +228,10 @@ export function createPowerupManager(initialSplineData, scene) {
       for (let c = 0; c < 3; c++) {
         const zOff = -0.0038 + c * 0.0038;
         const lWing = new THREE.Mesh(rampChevronGeo, c === 2 ? rampLipMat : rampChevronMat);
-        lWing.position.set(-0.0011, 0.00018, zOff);
+        lWing.position.set(-0.0011, 0.00020, zOff);
         lWing.rotation.y = -0.48;
         const rWing = new THREE.Mesh(rampChevronGeo, c === 2 ? rampLipMat : rampChevronMat);
-        rWing.position.set(0.0011, 0.00018, zOff);
+        rWing.position.set(0.0011, 0.00020, zOff);
         rWing.rotation.y = 0.48;
         slopeGroup.add(lWing, rWing);
       }
@@ -240,7 +241,7 @@ export function createPowerupManager(initialSplineData, scene) {
       rampGroup.position
         .copy(frame.pos)
         .addScaledVector(frame.right, cfg.latOffset)
-        .addScaledVector(frame.normal, 0.00012);
+        .addScaledVector(frame.normal, -0.00004);
 
       const leftVec = new THREE.Vector3().crossVectors(frame.normal, frame.tangent).normalize();
       const rotMat = new THREE.Matrix4().makeBasis(leftVec, frame.normal, frame.tangent);
@@ -283,13 +284,13 @@ export function createPowerupManager(initialSplineData, scene) {
           ((playerState.s - pad.s + totalLength * 0.5) % totalLength) - totalLength * 0.5
         );
         const dLat = Math.abs(playerState.lateralOffset - pad.latOffset);
-        if (dS < 0.014 && dLat < 0.0048) {
-          pad.playerCooldown = 1.25;
-          playerState.boostActive = Math.max(playerState.boostActive || 0, 1.35);
-          playerState.boostCharge = Math.min(1.0, (playerState.boostCharge || 0) + 0.35);
+        if (dS < 0.015 && dLat < 0.0052) {
+          pad.playerCooldown = 1.15;
+          playerState.boostActive = Math.max(playerState.boostActive || 0, 1.45);
+          playerState.boostCharge = Math.min(1.0, (playerState.boostCharge || 0) + 0.38);
           playerState.speed = Math.max(
             playerState.speed,
-            0.178 * (playerState.topSpeedMultiplier || 1.0)
+            0.184 * (playerState.topSpeedMultiplier || 1.0)
           );
           if (audioSynth && audioSynth.playNitroBoost) {
             audioSynth.playNitroBoost();
@@ -299,6 +300,7 @@ export function createPowerupManager(initialSplineData, scene) {
 
       for (let rIdx = 0; rIdx < rivalsList.length; rIdx++) {
         const rival = rivalsList[rIdx];
+        if (rival.eliminated) continue;
         const dS = Math.abs(
           ((rival.s - pad.s + totalLength * 0.5) % totalLength) - totalLength * 0.5
         );
@@ -332,38 +334,45 @@ export function createPowerupManager(initialSplineData, scene) {
           ((playerState.s - ramp.s + totalLength * 0.5) % totalLength) - totalLength * 0.5;
         const dLat = Math.abs(playerState.lateralOffset - ramp.latOffset);
 
-        if (signedDS >= -0.0075 && signedDS <= 0.0080 && dLat < 0.0056) {
-          const u = THREE.MathUtils.clamp((signedDS + 0.0068) / 0.0136, 0.0, 1.0);
-          const wedgeH = 0.00018 + u * 0.0016;
+        if (signedDS >= -0.0085 && signedDS <= 0.0095 && dLat < 0.0064) {
+          const u = THREE.MathUtils.clamp((signedDS + 0.0071) / 0.0142, 0.0, 1.0);
+          const wedgeH = 0.00010 + u * 0.00185;
           playerState.onRampSurface = true;
           playerState.rampSurfaceHeight = Math.max(playerState.rampSurfaceHeight || 0.0, wedgeH);
           playerState.hopHeight = Math.max(playerState.hopHeight || 0.0, wedgeH);
-          playerState.rampPitch = -0.15 * u;
+          playerState.rampPitch = -0.18 * u;
 
-          const minLaunchSpeed = 0.175 * (playerState.topSpeedMultiplier || 1.0);
+          const minLaunchSpeed = 0.185 * (playerState.topSpeedMultiplier || 1.0);
           if (playerState.speed < minLaunchSpeed) {
             playerState.speed = minLaunchSpeed;
           }
-          playerState.boostActive = Math.max(playerState.boostActive || 0, 1.25);
+          playerState.boostActive = Math.max(playerState.boostActive || 0, 1.45);
 
-          if (u >= 0.42 && ramp.playerCooldown <= 0) {
-            ramp.playerCooldown = 1.0;
-            playerState.hopVel = Math.max(playerState.hopVel || 0.0, 0.040);
+          if (u >= 0.34 && ramp.playerCooldown <= 0) {
+            ramp.playerCooldown = 1.15;
+            playerState.hopVel = Math.max(playerState.hopVel || 0.0, 0.074);
             playerState.isAirborne = true;
-            playerState.rampPitch = -0.18;
-            playerState.boostCharge = Math.min(1.0, (playerState.boostCharge || 0) + 0.48);
-            playerState.stuntProgress = 0.0;
-            if (playerState.isDrifting || Math.abs(playerState.steerInput || 0) > 0.42) {
+            playerState.onRampSurface = false;
+            playerState.rampPitch = -0.22;
+            playerState.boostCharge = Math.min(1.0, (playerState.boostCharge || 0) + 0.52);
+            playerState.stuntProgress = 0.01;
+            if (
+              playerState.isDrifting ||
+              Math.abs(playerState.steerInput || 0) > 0.25 ||
+              Math.abs(playerState.driftAngle || 0) > 0.15
+            ) {
               playerState.stuntType = 'flatspin';
               playerState.actionBanner = '🌀 360° FLAT SPIN! +NITRO';
               playerState.actionBannerColor = '#38bdf8';
-              playerState.actionBannerTimer = 1.55;
+              playerState.actionBannerTimer = 1.65;
             } else {
               playerState.stuntType = 'barrel';
               playerState.actionBanner = '✈️ BARREL ROLL! +NITRO';
               playerState.actionBannerColor = '#fbbf24';
-              playerState.actionBannerTimer = 1.55;
+              playerState.actionBannerTimer = 1.65;
             }
+            // Bonus Drift Challenge points for mid-air stunts
+            playerState.driftScore = Math.round((playerState.driftScore || 0) + 450);
             if (audioSynth && audioSynth.playNitroBoost) {
               audioSynth.playNitroBoost();
             }
@@ -373,15 +382,16 @@ export function createPowerupManager(initialSplineData, scene) {
 
       for (let rIdx = 0; rIdx < rivalsList.length; rIdx++) {
         const rival = rivalsList[rIdx];
+        if (rival.eliminated) continue;
         const signedRivalDS =
           ((rival.s - ramp.s + totalLength * 0.5) % totalLength) - totalLength * 0.5;
         const dLat = Math.abs(rival.lateralOffset - ramp.latOffset);
         if (signedRivalDS >= -0.0075 && signedRivalDS <= 0.0080 && dLat < 0.0052) {
-          const u = THREE.MathUtils.clamp((signedRivalDS + 0.0068) / 0.0136, 0.0, 1.0);
-          const wedgeH = 0.00018 + u * 0.0016;
+          const u = THREE.MathUtils.clamp((signedRivalDS + 0.0071) / 0.0142, 0.0, 1.0);
+          const wedgeH = 0.00010 + u * 0.00185;
           rival.hopHeight = Math.max(rival.hopHeight || 0.0, wedgeH);
           if (u >= 0.42 && (rival.hopVel || 0) < 0.015) {
-            rival.hopVel = 0.032;
+            rival.hopVel = 0.044;
             rival.boostTimer = 1.1;
           }
         }

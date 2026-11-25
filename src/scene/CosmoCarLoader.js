@@ -68,12 +68,12 @@ function upgradeCosmoMaterial(srcMat, normId = 'coupe') {
       roughnessMap: srcMat.roughnessMap || null,
       metalnessMap: srcMat.metalnessMap || null,
       side: srcMat.side ?? THREE.FrontSide,
-      metalness: 0.48,
-      roughness: 0.14,
-      clearcoat: 1.0,
-      clearcoatRoughness: 0.02,
-      reflectivity: 1.0,
-      envMapIntensity: 1.85,
+      metalness: 0.45,
+      roughness: 0.22,
+      clearcoat: 0.82,
+      clearcoatRoughness: 0.12,
+      reflectivity: 0.85,
+      envMapIntensity: 0.92,
     });
     mat.userData.origMap = srcMat.map || null;
     mat.userData.isStarterCoupe = isStarterCoupe;
@@ -87,11 +87,11 @@ function upgradeCosmoMaterial(srcMat, normId = 'coupe') {
       map: null,
       side: srcMat.side ?? THREE.FrontSide,
       metalness: 0.22,
-      roughness: 0.03,
-      clearcoat: 1.0,
-      clearcoatRoughness: 0.01,
-      reflectivity: 1.0,
-      envMapIntensity: 1.95,
+      roughness: 0.06,
+      clearcoat: 0.85,
+      clearcoatRoughness: 0.08,
+      reflectivity: 0.9,
+      envMapIntensity: 1.05,
     });
   }
 
@@ -102,10 +102,10 @@ function upgradeCosmoMaterial(srcMat, normId = 'coupe') {
       map: srcMat.map || null,
       emissive: new THREE.Color(0xff0a1e),
       emissiveMap: srcMat.map || null,
-      emissiveIntensity: 2.8,
-      roughness: 0.08,
+      emissiveIntensity: 1.35,
+      roughness: 0.12,
       metalness: 0.12,
-      toneMapped: false,
+      toneMapped: true,
     });
   }
 
@@ -118,9 +118,9 @@ function upgradeCosmoMaterial(srcMat, normId = 'coupe') {
     roughnessMap: srcMat.roughnessMap || null,
     metalnessMap: srcMat.metalnessMap || null,
     side: srcMat.side ?? THREE.FrontSide,
-    metalness: 0.38,
-    roughness: 0.36,
-    envMapIntensity: 1.25,
+    metalness: 0.36,
+    roughness: 0.38,
+    envMapIntensity: 0.95,
   });
 }
 
@@ -337,7 +337,7 @@ export async function createCosmoCarInstance(carId = 'coupe', customPaintHex = n
   }
 
   function setBraking(isBraking) {
-    const targetEmissive = isBraking ? 6.2 : 2.8;
+    const targetEmissive = isBraking ? 2.6 : 1.35;
     for (let i = 0; i < lightMaterials.length; i++) {
       const lm = lightMaterials[i];
       lm.emissiveIntensity = targetEmissive;

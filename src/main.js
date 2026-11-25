@@ -27,6 +27,17 @@ import { createWebAudioSynth } from './audio/WebAudioSynth.js';
 import { createPowerupManager } from './combat/PowerupManager.js';
 import { createRivalRacersController } from './combat/RivalRacersController.js';
 import { createVFXManager } from './scene/VFXManager.js';
+import { createGhostCarManager } from './scene/GhostCarManager.js';
+
+function triggerHaptic(pattern) {
+  try {
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+      navigator.vibrate(pattern);
+    }
+  } catch {
+    // Ignore unsupported or blocked haptics
+  }
+}
 
 async function initApp() {
   const container = document.getElementById('canvas-container');
@@ -96,7 +107,7 @@ async function initApp() {
     const horizonRing = new THREE.Mesh(
       horizonGeo,
       new THREE.MeshBasicMaterial({
-        color: new THREE.Color(1.35, 1.48, 1.72),
+        color: new THREE.Color(0.85, 0.95, 1.12),
         side: THREE.BackSide,
       })
     );
@@ -105,19 +116,19 @@ async function initApp() {
 
     const stripGeo = new THREE.BoxGeometry(1, 1, 1);
 
-    // 1. Overhead slender softbox ribbon (draws crisp highlight down hood, glass & roof)
+    // 1. Overhead slender softbox ribbon (draws balanced highlight down hood, glass & roof without white blowout)
     const topStrip = new THREE.Mesh(
       stripGeo,
-      new THREE.MeshBasicMaterial({ color: new THREE.Color(5.2, 5.2, 5.2) })
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(1.75, 1.75, 1.75) })
     );
     topStrip.position.set(0, 12, 0);
-    topStrip.scale.set(2.8, 0.2, 18.0);
+    topStrip.scale.set(2.4, 0.2, 16.0);
     envScene.add(topStrip);
 
     // 2. Front-right cool ice-blue accent strip (sculpts fenders & wheel rims)
     const keyStrip = new THREE.Mesh(
       stripGeo,
-      new THREE.MeshBasicMaterial({ color: new THREE.Color(2.8, 3.4, 4.0) })
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(1.35, 1.55, 1.75) })
     );
     keyStrip.position.set(12, 5.5, 10);
     keyStrip.lookAt(0, 0, 0);
@@ -127,7 +138,7 @@ async function initApp() {
     // 3. Rear-left warm golden rim strip (highlights rear haunches & spoiler silhouette)
     const rimStrip = new THREE.Mesh(
       stripGeo,
-      new THREE.MeshBasicMaterial({ color: new THREE.Color(3.2, 2.6, 1.8) })
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(1.45, 1.25, 0.95) })
     );
     rimStrip.position.set(-12, 6.0, -10);
     rimStrip.lookAt(0, 0, 0);
@@ -253,9 +264,9 @@ async function initApp() {
       Math.max(1, Math.floor(window.innerWidth * 0.5)),
       Math.max(1, Math.floor(window.innerHeight * 0.5))
     ),
-    0.04, // toned-down mobile-friendly bloom strength for smooth 60 FPS
-    0.18, // radius
-    1.20  // threshold
+    0.02, // crisp restrained bloom strength (no showroom white glare)
+    0.16, // radius
+    1.15  // high threshold so only true HDR accents bloom
   );
   composer.addPass(bloomPass);
   composer.addPass(new OutputPass());
@@ -314,7 +325,7 @@ async function initApp() {
     lampIntensity: 1.15,
     trackGlowIntensity: 1.00,
     micGlowIntensity: 0.85,
-    bloomStrength: 0.04,
+    bloomStrength: 0.02,
     dofStrength: 0.0,
     toneMappingExposure: 0.76,
     showDustMotes: false,
@@ -345,6 +356,70 @@ async function initApp() {
   const rivalsController = createRivalRacersController(splineData, scene);
   let vfxManager = createVFXManager(scene);
   vfxManager.setVisible(false);
+  const ghostManager = createGhostCarManager(scene, splineData, currentMapId);
+
+  // Normalized 2D SVG Mini-Map projection (0..100 viewport space)
+  let hudMinimapPath = [];
+  let hudMapBounds = { minX: -1, maxX: 1, minZ: -1, maxZ: 1, scale: 1, padX: 50, padY: 50 };
+
+  function buildHudMinimapData(targetSpline) {
+    const pts = targetSpline?.samples || [];
+    if (pts.length < 4) {
+      hudMinimapPath = [];
+      return;
+    }
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i].position;
+      if (p[0] < minX) minX = p[0];
+      if (p[0] > maxX) maxX = p[0];
+      if (p[2] < minZ) minZ = p[2];
+      if (p[2] > maxZ) maxZ = p[2];
+    }
+    const spanX = Math.max(1e-4, maxX - minX);
+    const spanZ = Math.max(1e-4, maxZ - minZ);
+    const scale = 80 / Math.max(spanX, spanZ);
+    const padX = (100 - spanX * scale) * 0.5;
+    const padY = (100 - spanZ * scale) * 0.5;
+    hudMapBounds = { minX, maxX, minZ, maxZ, scale, padX, padY };
+
+    const out = [];
+    const stride = Math.max(1, Math.floor(pts.length / 72));
+    for (let i = 0; i < pts.length; i += stride) {
+      const p = pts[i].position;
+      out.push([
+        Number((padX + (p[0] - minX) * scale).toFixed(1)),
+        Number((padY + (p[2] - minZ) * scale).toFixed(1)),
+      ]);
+    }
+    hudMinimapPath = out;
+  }
+
+  function projectWorldToHudMap(x, z) {
+    const mx = hudMapBounds.padX + (x - hudMapBounds.minX) * hudMapBounds.scale;
+    const my = hudMapBounds.padY + (z - hudMapBounds.minZ) * hudMapBounds.scale;
+    return [
+      Number(THREE.MathUtils.clamp(mx, 4, 96).toFixed(1)),
+      Number(THREE.MathUtils.clamp(my, 4, 96).toFixed(1)),
+    ];
+  }
+
+  buildHudMinimapData(splineData);
+
+  // Cinematic Ramp Stunt Slow-Mo & Hero Side Camera State
+  const stuntCamState = {
+    active: false,
+    elapsed: 0.0,
+    duration: 0.9,
+    side: 1,
+    cooldown: 0.0,
+  };
+  let chaseFollowDistSmooth = 0.0098;
+  const _rivalProjVec = new THREE.Vector3();
+  const _weatherAnchorVec = new THREE.Vector3();
 
   // -------------------------------------------------------------------------
   // 3B. 3D SHOWROOM TURNTABLE PEDESTAL (FOR 'SPLASH', 'MENU', AND 'GARAGE' STATES)
@@ -421,17 +496,17 @@ async function initApp() {
   showroomCarShadowDisc.position.set(0, 0.00042, 0);
   showroomGroup.add(showroomCarShadowDisc);
 
-  // Outer Glowing Cyan Neon Ring
+  // Outer Glowing Cyan Neon Ring (toneMapped so it stays razor-sharp without white bloom washout)
   const outerRingMat = new THREE.MeshStandardMaterial({
-    color: 0x00f0ff,
-    emissive: new THREE.Color(0x00e5ff),
-    emissiveIntensity: 1.75,
-    roughness: 0.1,
+    color: 0x06b6d4,
+    emissive: new THREE.Color(0x00d4f0),
+    emissiveIntensity: 0.92,
+    roughness: 0.16,
     metalness: 0.2,
-    toneMapped: false,
+    toneMapped: true,
   });
   const outerNeonRing = new THREE.Mesh(
-    new THREE.TorusGeometry(0.0156, 0.00038, 16, 72),
+    new THREE.TorusGeometry(0.0156, 0.00034, 16, 72),
     outerRingMat
   );
   outerNeonRing.rotation.x = Math.PI / 2;
@@ -440,15 +515,15 @@ async function initApp() {
 
   // Inner Glowing Amber/Gold Accent Ring
   const innerRingMat = new THREE.MeshStandardMaterial({
-    color: 0xffb830,
-    emissive: new THREE.Color(0xff9900),
-    emissiveIntensity: 1.35,
-    roughness: 0.15,
+    color: 0xf59e0b,
+    emissive: new THREE.Color(0xf59e0b),
+    emissiveIntensity: 0.82,
+    roughness: 0.18,
     metalness: 0.3,
-    toneMapped: false,
+    toneMapped: true,
   });
   const innerNeonRing = new THREE.Mesh(
-    new THREE.TorusGeometry(0.0114, 0.00024, 16, 64),
+    new THREE.TorusGeometry(0.0114, 0.00022, 16, 64),
     innerRingMat
   );
   innerNeonRing.rotation.x = Math.PI / 2;
@@ -477,7 +552,7 @@ async function initApp() {
   showroomGroup.add(showroomLightTarget);
 
   // 1. Direct Overhead Studio Directional Light + Crisp Contact Shadow Mapping
-  const showroomOverheadDirLight = new THREE.DirectionalLight(0xffffff, 0.38);
+  const showroomOverheadDirLight = new THREE.DirectionalLight(0xffffff, 0.26);
   showroomOverheadDirLight.position.set(0.0, 0.095, 0.002);
   showroomOverheadDirLight.target = showroomLightTarget;
   showroomOverheadDirLight.castShadow = true;
@@ -493,25 +568,25 @@ async function initApp() {
   showroomGroup.add(showroomOverheadDirLight);
 
   // 2. Front-Right Warm Key Light (sculpts 3D hood bevels & side character lines)
-  const showroomKeyLight = new THREE.DirectionalLight(0xfff7ed, 0.58);
+  const showroomKeyLight = new THREE.DirectionalLight(0xfff7ed, 0.46);
   showroomKeyLight.position.set(0.024, 0.036, 0.032);
   showroomKeyLight.target = showroomLightTarget;
   showroomGroup.add(showroomKeyLight);
 
   // 3. Front-Left Cool Sky Fill Light (shadow side stays deeply 3D)
-  const showroomFillLight = new THREE.DirectionalLight(0x93c5fd, 0.18);
+  const showroomFillLight = new THREE.DirectionalLight(0x93c5fd, 0.16);
   showroomFillLight.position.set(-0.026, 0.024, 0.026);
   showroomFillLight.target = showroomLightTarget;
   showroomGroup.add(showroomFillLight);
 
   // 4. Rear-Top Golden Rim Backlight (crisp edge silhouette along roofline & rear spoiler)
-  const showroomRimLight = new THREE.DirectionalLight(0xfde68a, 0.34);
+  const showroomRimLight = new THREE.DirectionalLight(0xfde68a, 0.24);
   showroomRimLight.position.set(0.0, 0.032, -0.030);
   showroomRimLight.target = showroomLightTarget;
   showroomGroup.add(showroomRimLight);
 
-  // 5. Subtle Cyan Bounce Light from glowing turntable ring
-  const showroomUnderFill = new THREE.PointLight(0x38bdf8, 0.07, 0.055, 1.4);
+  // 5. Subtle Cyan Bounce Light from glowing turntable ring (kept low so it never washes out front grille)
+  const showroomUnderFill = new THREE.PointLight(0x38bdf8, 0.025, 0.05, 1.6);
   showroomUnderFill.position.set(0.0, 0.0045, 0.018);
   showroomGroup.add(showroomUnderFill);
 
@@ -995,7 +1070,10 @@ async function initApp() {
     if (audioAutoUnlocked) return;
     audioAutoUnlocked = true;
     if (audioSynth.setEnabled && !audioSynth.isEnabled?.()) {
-      audioSynth.setEnabled(true);
+      audioSynth.setEnabled(true, { userInitiated: false });
+    }
+    if (audioSynth.setScreenContext) {
+      audioSynth.setScreenContext(currentAppScreen);
     }
     window.removeEventListener('pointerdown', unlockAudioOnce, true);
     window.removeEventListener('touchstart', unlockAudioOnce, true);
@@ -1041,6 +1119,9 @@ async function initApp() {
 
   if (microKart.setBodyKit) {
     microKart.setBodyKit(initialSavedKitId, { paintHex: initialSavedPaintHex });
+  }
+  if (ghostManager && ghostManager.setCarId) {
+    ghostManager.setCarId(initialSavedKitId);
   }
   await microKart.attachCosmoCar(initialSavedKitId, initialSavedPaintHex);
   loadedGlbStatus.kart = true;
@@ -1129,6 +1210,9 @@ async function initApp() {
     physics.onRailImpact((severity = 0.7) => {
       if (audioSynth.playRailImpact) {
         audioSynth.playRailImpact(severity);
+      }
+      if (currentAppScreen === 'RACE' && severity >= 0.45) {
+        triggerHaptic([26, 18, 38]);
       }
       camShakeTimer = 0.16;
       camShakeIntensity = THREE.MathUtils.clamp(severity, 0.42, 1.0);
@@ -1595,20 +1679,62 @@ async function initApp() {
       return;
     }
 
+    // Cinematic Ramp Stunt Low Side-Hero Camera (~0.9s slow-mo framing mid-air 360° Spin / Barrel Roll / Big Jump)
+    if (stuntCamState.active && activeCameraMode === 1 && !isScreenshotMode) {
+      const stuntT = THREE.MathUtils.clamp(
+        stuntCamState.elapsed / Math.max(0.1, stuntCamState.duration),
+        0.0,
+        1.0
+      );
+      const orbitAngle = THREE.MathUtils.lerp(-0.42, 0.36, stuntT) * stuntCamState.side;
+      const sideDist = 0.0102 * stuntCamState.side * Math.cos(orbitAngle * 0.45);
+      const backDist = -0.0056 + Math.sin(stuntT * Math.PI) * 0.0022;
+      const lowHeroHeight = 0.0024 + Math.sin(stuntT * Math.PI) * 0.0008;
+
+      _camDesiredPos
+        .copy(st.position)
+        .addScaledVector(camForward, backDist)
+        .addScaledVector(st.right, sideDist)
+        .addScaledVector(st.normal, lowHeroHeight);
+
+      _camDesiredLook
+        .copy(st.position)
+        .addScaledVector(camForward, 0.0022)
+        .addScaledVector(st.normal, 0.0014);
+
+      const stuntFov = THREE.MathUtils.lerp(camera.fov, 54.0, 1.0 - Math.exp(-dt * 8.0));
+      if (Math.abs(camera.fov - stuntFov) > 0.05) {
+        camera.fov = stuntFov;
+        camera.updateProjectionMatrix();
+      }
+
+      camCurrentPos.lerp(_camDesiredPos, 1.0 - Math.exp(-dt * 11.0));
+      camCurrentLookAt.lerp(_camDesiredLook, 1.0 - Math.exp(-dt * 15.0));
+      _camBlendedUp.set(0, 0.94, 0).addScaledVector(st.normal, 0.06).normalize();
+      camCurrentUp.lerp(_camBlendedUp, 1.0 - Math.exp(-dt * 10.0)).normalize();
+
+      camera.up.copy(camCurrentUp);
+      camera.position.copy(camCurrentPos);
+      camera.lookAt(camCurrentLookAt);
+      return;
+    }
+
     if (activeCameraMode === 1) {
-      // Dynamic Sense-of-Speed Arcade Chase Cam:
-      // Tracks st.position (which already includes hopHeight) directly so when the car
-      // climbs a ramp or jumps, the camera rises 1:1 with the car and NEVER clips into the roof/trunk!
+      // Tight, Weighty Arcade Chase Cam:
+      // Keeps the car large and grounded — clamps pull-back at top speed/nitro to <= +1.3m equivalent
+      // (+0.0020 world units) and braking push-in to <= -0.4m equivalent (-0.0007 world units).
+      // Speed & boost sensation come primarily from smooth Dynamic FOV (60° -> 74°–78°), micro shake, & speed lines!
       const maxRefSpeed = 0.142 * (st.topSpeedMultiplier || 1.0);
       const speedNorm = THREE.MathUtils.clamp(Math.abs(st.speed) / maxRefSpeed, 0.0, 1.35);
       const isBoostingNow = (st.boostActive || 0.0) > 0.0;
+      const isBrakingNow = Boolean(st.isBraking);
 
-      // Subtle high-frequency Perlin/composite-sine camera target vibration that intensifies at top speed
+      // Subtle high-frequency micro camera shake that intensifies at top speed & nitro
       let speedShakeRight = 0.0;
       let speedShakeUp = 0.0;
       if (!isScreenshotMode && speedNorm > 0.42) {
         const highSpeedIntensity =
-          THREE.MathUtils.smoothstep(speedNorm, 0.42, 1.15) * (isBoostingNow ? 1.35 : 1.0);
+          THREE.MathUtils.smoothstep(speedNorm, 0.42, 1.15) * (isBoostingNow ? 1.45 : 1.0);
         const noiseX =
           Math.sin(elapsedTime * 67.0) * 0.50 +
           Math.sin(elapsedTime * 113.0 + 1.7) * 0.35 +
@@ -1617,8 +1743,8 @@ async function initApp() {
           Math.cos(elapsedTime * 79.0 + 0.8) * 0.50 +
           Math.sin(elapsedTime * 131.0 + 2.3) * 0.35 +
           Math.sin(elapsedTime * 173.0) * 0.15;
-        speedShakeRight = noiseX * 0.00042 * highSpeedIntensity;
-        speedShakeUp = noiseY * 0.00036 * highSpeedIntensity;
+        speedShakeRight = noiseX * 0.00044 * highSpeedIntensity;
+        speedShakeUp = noiseY * 0.00038 * highSpeedIntensity;
       }
 
       const totalShakeRight = shakeRight + speedShakeRight;
@@ -1626,19 +1752,29 @@ async function initApp() {
 
       const isPortraitCam = camera.aspect < 0.95;
       const isShockwaveNow = (st.shockwaveTimer || 0.0) > 0.0;
-      const portraitPull = isPortraitCam ? -0.0014 : 0.0;
-      const portraitLift = isPortraitCam ? 0.0006 : 0.0;
-      const lookNormalLift = isPortraitCam ? 0.0021 : 0.0018;
-      const boostPullback = isShockwaveNow ? -0.0016 : isBoostingNow ? -0.0009 : 0.0;
-      const followDist = 0.0102 - boostPullback - portraitPull;
-      const camLift = 0.0046 + portraitLift;
+      const baseDist = isPortraitCam ? 0.0110 : 0.0098;
+      const portraitLift = isPortraitCam ? 0.0005 : 0.0;
+      const lookNormalLift = isPortraitCam ? 0.0020 : 0.0017;
 
-      // Asphalt / NFS Dynamic Corner & Drift Lateral Swing:
-      // Smoothly frames the car's angled side profile & sparks without swinging toward guardrails
+      // Clamped pull-back (<= +0.0020 ≈ +1.25m real scale) & gentle brake push-in (<= -0.0007 ≈ -0.4m)
+      const speedPull = THREE.MathUtils.clamp(speedNorm * 0.0008, 0.0, 0.0009);
+      const boostPull = isShockwaveNow ? 0.0011 : isBoostingNow ? 0.0007 : 0.0;
+      const brakePush = isBrakingNow && !isBoostingNow ? -0.0007 : 0.0;
+      const clampedOffset = THREE.MathUtils.clamp(speedPull + boostPull + brakePush, -0.0007, 0.0020);
+      const desiredFollowDist = baseDist + clampedOffset;
+      chaseFollowDistSmooth = THREE.MathUtils.lerp(
+        chaseFollowDistSmooth,
+        desiredFollowDist,
+        isScreenshotMode ? 1.0 : 1.0 - Math.exp(-dt * 9.5)
+      );
+      const followDist = chaseFollowDistSmooth;
+      const camLift = 0.0044 + portraitLift;
+
+      // Dynamic Corner & Drift Lateral Swing:
       const camSwingLat = THREE.MathUtils.clamp(
-        (st.driftAngle || 0.0) * 0.0046 - (st.steerSmooth || 0.0) * 0.0012,
-        -0.0038,
-        0.0038
+        (st.driftAngle || 0.0) * 0.0042 - (st.steerSmooth || 0.0) * 0.0011,
+        -0.0034,
+        0.0034
       );
 
       _camDesiredPos
@@ -1653,7 +1789,7 @@ async function initApp() {
       }
 
       // Corridor safety clamp: prevent the chase camera from ever swinging outside the curved
-      // track guardrails (`Walls`) when the car hugs a wall on tight corners (especially in portrait view).
+      // track guardrails (`Walls`) when the car hugs a wall on tight corners.
       const hopH = Math.max(0.0, st.hopHeight || 0.0);
       if (physics.sampleTrackAtArcLength) {
         physics.sampleTrackAtArcLength(st.s - followDist, _camBehindSample);
@@ -1665,9 +1801,8 @@ async function initApp() {
           const clampedLat = THREE.MathUtils.clamp(latProj, -safeCamMaxLat, safeCamMaxLat);
           _camDesiredPos.addScaledVector(_camBehindSample.right, clampedLat - latProj);
         }
-        // Keep camera safely above the behind-track roadbed normal as well
         const normalProj = _camBehindDelta.dot(_camBehindSample.normal);
-        const minCamHeightAboveBehind = 0.0040 + hopH;
+        const minCamHeightAboveBehind = 0.0038 + hopH;
         if (normalProj < minCamHeightAboveBehind) {
           _camDesiredPos.addScaledVector(
             _camBehindSample.normal,
@@ -1694,32 +1829,32 @@ async function initApp() {
           .addScaledVector(st.normal, lookNormalLift);
       }
 
-      // Apply high-frequency speed vibration directly onto the camera target for visceral 200+ KM/H feel
       if (speedShakeRight !== 0.0 || speedShakeUp !== 0.0) {
         _camDesiredLook
           .addScaledVector(st.right, speedShakeRight)
           .addScaledVector(st.normal, speedShakeUp);
       }
 
-      // Dynamic FOV Sense of Speed: resting FOV of 74°, stretching smoothly during drifts & Shockwave / boost
-      const speedFovGain = THREE.MathUtils.clamp(Math.pow(speedNorm, 1.15) * 20.0, 0.0, 22.0);
-      const boostFovBonus = isShockwaveNow ? 8.5 : isBoostingNow ? 5.5 : 0.0;
-      const driftFovBonus = st.isDrifting ? 2.6 : 0.0;
+      // Smooth Dynamic FOV Sense of Speed: resting 60° -> ~74° at top speed -> ~78° during Nitro/Shockwave
+      const speedFovGain = THREE.MathUtils.clamp(Math.pow(speedNorm, 1.15) * 12.8, 0.0, 14.0);
+      const boostFovBonus = isShockwaveNow ? 4.2 : isBoostingNow ? 2.8 : 0.0;
+      const driftFovBonus = st.isDrifting ? 1.4 : 0.0;
+      const brakeFovTrim = isBrakingNow && !isBoostingNow ? -1.5 : 0.0;
       const targetArcadeFov = THREE.MathUtils.clamp(
-        74.0 + speedFovGain + boostFovBonus + driftFovBonus,
-        74.0,
-        101.5
+        60.0 + speedFovGain + boostFovBonus + driftFovBonus + brakeFovTrim,
+        58.5,
+        78.0
       );
       if (Math.abs(camera.fov - targetArcadeFov) > 0.05) {
-        camera.fov = THREE.MathUtils.lerp(camera.fov, targetArcadeFov, 1.0 - Math.exp(-dt * 8.5));
+        camera.fov = THREE.MathUtils.lerp(camera.fov, targetArcadeFov, 1.0 - Math.exp(-dt * 8.0));
         camera.updateProjectionMatrix();
       }
 
-      // Subtle Asphalt Horizon Roll / Lean into high-speed turns & power slides
+      // Subtle Horizon Roll / Lean into high-speed turns & power slides
       const camBankRoll = THREE.MathUtils.clamp(
-        -(st.steerSmooth || 0.0) * 0.030 + (st.driftAngle || 0.0) * 0.045,
-        -0.055,
-        0.055
+        -(st.steerSmooth || 0.0) * 0.028 + (st.driftAngle || 0.0) * 0.042,
+        -0.052,
+        0.052
       );
       const smoothUp = isScreenshotMode ? 1.0 : 1.0 - Math.exp(-dt * 12.0);
       _camBlendedUp
@@ -1734,10 +1869,10 @@ async function initApp() {
       camCurrentPos.lerp(_camDesiredPos, smoothPos);
       camCurrentLookAt.lerp(_camDesiredLook, smoothLook);
 
-      // Hard Car-Exclusion Sphere: guarantee camera never clips into the roof, trunk, or side mirrors
+      // Hard Car-Exclusion Sphere: guarantee camera never clips into the car under braking
       _camBehindDelta.subVectors(camCurrentPos, st.position);
       const distToCar = _camBehindDelta.length();
-      const minCamCarDist = 0.0102;
+      const minCamCarDist = 0.0091;
       if (distToCar < minCamCarDist) {
         if (distToCar > 1e-5) {
           _camBehindDelta.divideScalar(distToCar);
@@ -2416,49 +2551,91 @@ async function initApp() {
     }
   }
 
-  physics.onLapComplete((lapTime, bestLap, completedLapNum, totalTime, isFinish) => {
-    if (isFinish) {
-      if (audioSynth.stopEngine) {
-        audioSynth.stopEngine();
-      }
+  // Active Event Mode state (Circuit, Elimination, Drift Challenge, Time Attack)
+  let currentRaceMode = 'circuit';
+  const eliminationState = {
+    timer: 20.0,
+    remainingRacers: 4,
+    triggeredFinish: false,
+  };
+
+  function normalizeRaceMode(modeId) {
+    if (modeId === 'elimination' || modeId === 'drift' || modeId === 'time_attack' || modeId === 'circuit') {
+      return modeId;
+    }
+    return 'circuit';
+  }
+
+  function setActiveRaceMode(modeId) {
+    currentRaceMode = normalizeRaceMode(modeId);
+    if (rivalsController && rivalsController.setEnabled) {
+      rivalsController.setEnabled(currentRaceMode !== 'time_attack');
+    }
+    return currentRaceMode;
+  }
+
+  function triggerImmediateModeFinish(payload, playFanfare) {
+    if (audioSynth.stopEngine) {
+      audioSynth.stopEngine();
+    }
+    if (playFanfare) {
       if (audioSynth.playRaceFinishFanfare) {
         audioSynth.playRaceFinishFanfare();
       } else {
         audioSynth.playLapChime();
       }
+    }
+    physics.state.raceFinished = true;
+    physics.state.raceClockActive = false;
+    physics.state.victoryCruise = true;
+    physics.state.finishTotalTime = payload.totalTime;
+    if (!payload.eliminated) {
+      physics.state.boostActive = Math.max(physics.state.boostActive || 0.0, 2.5);
+    }
+
+    if (isScreenshotMode) {
+      if (raceFinishListeners.size === 0) {
+        showFinishOverlay(payload.totalTime, payload.bestLap, false);
+      }
+      for (const cb of raceFinishListeners) {
+        cb(payload);
+      }
+    } else {
+      hideLapSplit();
+      cinematicFinishState.active = true;
+      cinematicFinishState.elapsed = 0.0;
+      cinematicFinishState.duration = payload.eliminated ? 1.35 : 1.85;
+      cinematicFinishState.timeScale = 1.0;
+      cinematicFinishState.sweepSide = physics.state.lateralOffset >= 0 ? -1 : 1;
+      cinematicFinishState.finalTotal = payload.totalTime;
+      cinematicFinishState.bestLap = payload.bestLap;
+      cinematicFinishState.payload = payload;
+    }
+  }
+
+  physics.onLapComplete((lapTime, bestLap, completedLapNum, totalTime, isFinish) => {
+    if (ghostManager && ghostManager.onLapComplete) {
+      ghostManager.onLapComplete(lapTime);
+    }
+    if (isFinish) {
       const finalTotal =
         totalTime ?? physics.state.finishTotalTime ?? physics.state.totalRaceTime ?? lapTime;
-      const rank = rivalsController.getPlayerRank
-        ? rivalsController.getPlayerRank(physics.state)
-        : 1;
+      const rank =
+        currentRaceMode === 'time_attack'
+          ? 1
+          : rivalsController.getPlayerRank
+            ? rivalsController.getPlayerRank(physics.state)
+            : 1;
       const payload = {
         totalTime: finalTotal,
         bestLap: bestLap ?? lapTime,
         lapTimes: physics.state.lapTimes.slice(),
         finishRank: rank,
+        driftScore: Math.round(physics.state.driftScore || 0),
+        eliminated: false,
+        modeId: currentRaceMode,
       };
-
-      // Ignite twin nitro exhaust flames across the line (no cheesy confetti fireworks)
-      physics.state.boostActive = Math.max(physics.state.boostActive || 0.0, 2.5);
-
-      if (isScreenshotMode) {
-        if (raceFinishListeners.size === 0) {
-          showFinishOverlay(finalTotal, bestLap ?? lapTime, false);
-        }
-        for (const cb of raceFinishListeners) {
-          cb(payload);
-        }
-      } else {
-        // Trigger 1.85s Cinematic Slow-Motion Victory Finish sweep before presenting Finish overlay
-        hideLapSplit();
-        cinematicFinishState.active = true;
-        cinematicFinishState.elapsed = 0.0;
-        cinematicFinishState.timeScale = 1.0;
-        cinematicFinishState.sweepSide = physics.state.lateralOffset >= 0 ? -1 : 1;
-        cinematicFinishState.finalTotal = finalTotal;
-        cinematicFinishState.bestLap = bestLap ?? lapTime;
-        cinematicFinishState.payload = payload;
-      }
+      triggerImmediateModeFinish(payload, true);
     } else {
       audioSynth.playLapChime();
       const lapNum = completedLapNum || Math.max(1, (physics.state.lapCount || 2) - 1);
@@ -2516,6 +2693,9 @@ async function initApp() {
     }
     if (audioSynth.playF1CountdownBeep) {
       audioSynth.playF1CountdownBeep(false);
+    }
+    if (audioSynth.playGridEngineRoar) {
+      audioSynth.playGridEngineRoar(false);
     }
     if (elF1Countdown) {
       elF1Countdown.textContent = '5';
@@ -2822,40 +3002,59 @@ async function initApp() {
     const st = physics.state;
     camShakeTimer = 0.0;
     camShakeIntensity = 0.0;
+    stuntCamState.active = false;
+    stuntCamState.elapsed = 0.0;
+    stuntCamState.cooldown = 0.0;
     const isPortraitCam = camera.aspect < 0.95;
+    chaseFollowDistSmooth = isPortraitCam ? 0.0110 : 0.0098;
     if (activeCameraMode === 1) {
-      camera.fov = 74.0;
+      camera.fov = 60.0;
       camera.updateProjectionMatrix();
     }
     camForward.copy(st.tangent).normalize();
     camCurrentUp.set(0, 1, 0);
     camCurrentPos
       .copy(st.position)
-      .addScaledVector(st.tangent, isPortraitCam ? -0.0116 : -0.0102)
-      .addScaledVector(st.normal, isPortraitCam ? 0.0052 : 0.0046);
+      .addScaledVector(st.tangent, -chaseFollowDistSmooth)
+      .addScaledVector(st.normal, isPortraitCam ? 0.0049 : 0.0044);
     camCurrentLookAt
       .copy(st.position)
       .addScaledVector(st.tangent, 0.018)
-      .addScaledVector(st.normal, isPortraitCam ? 0.0021 : 0.0018);
+      .addScaledVector(st.normal, isPortraitCam ? 0.0020 : 0.0017);
     camera.up.copy(camCurrentUp);
     camera.position.copy(camCurrentPos);
     camera.lookAt(camCurrentLookAt);
   }
 
-  function dismissWelcomeAndStartRace() {
+  function dismissWelcomeAndStartRace(modeIdOverride) {
+    if (modeIdOverride) {
+      setActiveRaceMode(modeIdOverride);
+    } else if (rivalsController && rivalsController.setEnabled) {
+      rivalsController.setEnabled(currentRaceMode !== 'time_attack');
+    }
     if (audioSynth.setEnabled && !audioSynth.isEnabled?.()) {
-      const on = audioSynth.setEnabled(true);
+      const on = audioSynth.setEnabled(true, { userInitiated: false });
       updateAudioButtonUI(on);
+    }
+    if (audioSynth.setScreenContext) {
+      audioSynth.setScreenContext('RACE');
     }
     isCircuitReady = true;
     pendingRaceStartAfterWarmup = false;
     cancelCinematicFinish();
+    stuntCamState.active = false;
+    stuntCamState.elapsed = 0.0;
+    stuntCamState.cooldown = 0.0;
     hideWelcomeDialog();
     hideFinishOverlay();
     hideLapSplit();
+    eliminationState.timer = 20.0;
+    eliminationState.remainingRacers = currentRaceMode === 'time_attack' ? 1 : 4;
+    eliminationState.triggeredFinish = false;
     if (vfxManager) vfxManager.reset();
     if (powerupManager) powerupManager.reset();
     if (rivalsController) rivalsController.reset();
+    if (ghostManager) ghostManager.resetRace();
     startF1StartCountdown();
     // Hard-snap chase camera & damping directly onto the start grid so it never interpolates across empty space
     snapChaseCameraToStartGrid();
@@ -3256,7 +3455,11 @@ async function initApp() {
     if (powerupManager && powerupManager.rebuildForSpline) {
       powerupManager.rebuildForSpline(splineData);
     }
+    if (ghostManager && ghostManager.setMap) {
+      ghostManager.setMap(currentMapId, splineData);
+    }
     rebuildMinimapForSpline(splineData);
+    buildHudMinimapData(splineData);
 
     // 4. Hard-snap camera directly onto the new start grid (Home showcase or Race grid)
     if (
@@ -3290,11 +3493,15 @@ async function initApp() {
     setScreen(screen) {
       const prev = currentAppScreen;
       currentAppScreen = screen;
+      if (audioSynth.setScreenContext) {
+        audioSynth.setScreenContext(screen);
+      }
       if (screen === 'RACE' && prev !== 'RACE') {
         showroomGroup.visible = false;
         pitGarage.rootGroup.visible = false;
         if (activeWorldMap) activeWorldMap.rootGroup.visible = true;
         if (vfxManager) vfxManager.setVisible(true);
+        if (microKart.setIdleShowroomMode) microKart.setIdleShowroomMode(false);
         syncKartScaleForCamera(activeCameraMode);
         dismissWelcomeAndStartRace();
       } else if (screen !== 'RACE') {
@@ -3306,6 +3513,9 @@ async function initApp() {
         if (vfxManager) {
           vfxManager.reset();
           vfxManager.setVisible(false);
+        }
+        if (microKart.setIdleShowroomMode) {
+          microKart.setIdleShowroomMode(true);
         }
         physics.setAutopilot(false);
         physics.clearTouchKeys();
@@ -3359,18 +3569,34 @@ async function initApp() {
     cycleWeather() {
       return setActiveWeather(getNextWeatherMode(currentWeather));
     },
-    startRace() {
+    setRaceMode(modeId) {
+      return setActiveRaceMode(modeId);
+    },
+    getRaceMode() {
+      return currentRaceMode;
+    },
+    startRace(modeId) {
+      if (modeId) {
+        setActiveRaceMode(modeId);
+      }
       currentAppScreen = 'RACE';
+      if (audioSynth.setScreenContext) {
+        audioSynth.setScreenContext('RACE');
+      }
       showroomGroup.visible = false;
       pitGarage.rootGroup.visible = false;
       if (activeWorldMap) activeWorldMap.rootGroup.visible = true;
+      if (microKart.setIdleShowroomMode) microKart.setIdleShowroomMode(false);
       setCameraMode(1);
       syncKartScaleForCamera(1);
-      dismissWelcomeAndStartRace();
+      dismissWelcomeAndStartRace(modeId);
     },
     setBodyKit(kitId, stats, customOverrides) {
       if (microKart.setBodyKit) {
         microKart.setBodyKit(kitId, customOverrides);
+      }
+      if (ghostManager && ghostManager.setCarId) {
+        ghostManager.setCarId(kitId);
       }
       if (audioSynth.setCarProfile) {
         audioSynth.setCarProfile(kitId);
@@ -3405,8 +3631,11 @@ async function initApp() {
     triggerNitro() {
       if (physics.triggerNitroBoost) {
         const fired = physics.triggerNitroBoost();
-        if (fired && audioSynth.playNitroBoost) {
-          audioSynth.playNitroBoost();
+        if (fired) {
+          if (audioSynth.playNitroBoost) {
+            audioSynth.playNitroBoost();
+          }
+          triggerHaptic(28);
         }
         return fired;
       }
@@ -3428,6 +3657,14 @@ async function initApp() {
     },
     getAutoGas() {
       return physics.getAutoGas ? physics.getAutoGas() : true;
+    },
+    setGhostEnabled(val) {
+      if (ghostManager) {
+        ghostManager.setEnabled(val);
+      }
+    },
+    getGhostEnabled() {
+      return ghostManager ? ghostManager.isEnabled() : false;
     },
     toggleAudio() {
       const on = audioSynth.toggle();
@@ -3454,13 +3691,33 @@ async function initApp() {
     },
     playCarRevPreview(kitId) {
       if (audioSynth.setEnabled && !audioSynth.isEnabled?.()) {
-        audioSynth.setEnabled(true);
+        audioSynth.setEnabled(true, { userInitiated: false });
       }
       if (audioSynth.setCarProfile && kitId) {
         audioSynth.setCarProfile(kitId);
       }
       if (audioSynth.playCarRevPreview) {
         audioSynth.playCarRevPreview(kitId);
+      }
+    },
+    playVictoryVoice() {
+      if (audioSynth.playVictoryVoice) {
+        audioSynth.playVictoryVoice();
+      }
+    },
+    playGameOverVoice() {
+      if (audioSynth.playGameOverVoice) {
+        audioSynth.playGameOverVoice();
+      }
+    },
+    playEvilLaugh() {
+      if (audioSynth.playEvilLaugh) {
+        audioSynth.playEvilLaugh();
+      }
+    },
+    playUnlockOrStuntVoice() {
+      if (audioSynth.playUnlockOrStuntVoice) {
+        audioSynth.playUnlockOrStuntVoice();
       }
     },
     setGraphicsSettings(newSettings) {
@@ -3473,9 +3730,11 @@ async function initApp() {
         renderer.setPixelRatio(targetDpr);
       }
       if (typeof newSettings.bloomStrength === 'number') {
-        settings.bloomStrength = newSettings.bloomStrength;
-        bloomPass.strength = newSettings.bloomStrength;
-        bloomPass.enabled = newSettings.bloomStrength > 0.005;
+        const clampedBloom = Math.min(Math.max(0, newSettings.bloomStrength), 0.05);
+        settings.bloomStrength = clampedBloom;
+        bloomPass.strength = clampedBloom;
+        bloomPass.threshold = Math.max(bloomPass.threshold, 1.05);
+        bloomPass.enabled = clampedBloom > 0.005;
       }
       if (typeof newSettings.dofStrength === 'number') {
         settings.dofStrength = newSettings.dofStrength;
@@ -3520,6 +3779,9 @@ async function initApp() {
           bestLap: l3,
           lapTimes: [l1, l2, l3],
           finishRank: 1,
+          driftScore: Math.round(physics.state.driftScore || 5400),
+          eliminated: false,
+          modeId: currentRaceMode,
         });
       }
     },
@@ -3553,7 +3815,9 @@ async function initApp() {
 
     if (isGarageMode) {
       // GARAGE BACKGROUND: Indoor Automotive Pit-Lane Workshop Bay & Spinning Turntable
-      scene.environmentIntensity = 0.36;
+      scene.environmentIntensity = 0.28;
+      bloomPass.threshold = 1.35;
+      bloomPass.strength = Math.min(settings.bloomStrength ?? 0.02, 0.02);
       showroomGroup.visible = true;
       pitGarage.rootGroup.visible = true;
       if (activeWorldMap) activeWorldMap.rootGroup.visible = false;
@@ -3574,13 +3838,14 @@ async function initApp() {
       }
       const bounceOffset = Math.sin(showroomPreviewBounce * Math.PI) * 0.0012;
 
+      if (microKart.setIdleShowroomMode) microKart.setIdleShowroomMode(true);
       microKart.setCockpitRoadOnly(false);
       microKart.kartRoot.scale.setScalar(0.94);
       microKart.kartRoot.position.set(0.0, 0.0884 + bounceOffset, 0.22);
       microKart.kartRoot.rotation.set(0, turntableAngle + Math.PI * 0.22, 0);
       microKart.chassisGroup.rotation.set(0, 0, 0);
       microKart.chassisGroup.position.y = Math.sin(elapsedTime * 2.5) * 0.00012;
-      microKart.updateWheels(dt, 0.032, Math.sin(elapsedTime * 1.1) * 0.22);
+      microKart.updateWheels(dt, 0.0, Math.sin(elapsedTime * 1.1) * 0.16);
       if (microKart.sparkPoints) microKart.sparkPoints.visible = false;
       if (microKart.driftSmokeMesh) microKart.driftSmokeMesh.visible = false;
 
@@ -3593,11 +3858,11 @@ async function initApp() {
       }
       if (isPortraitScreen) {
         const portraitPull = THREE.MathUtils.clamp((0.95 - camera.aspect) / 0.55, 0.0, 1.0);
-        _showroomCamTarget.set(0.0, 0.0975, 0.260 + portraitPull * 0.024);
-        _showroomLookTarget.set(0.0, 0.0885, 0.220);
+        _showroomCamTarget.set(0.0, 0.0972, 0.262 + portraitPull * 0.024);
+        _showroomLookTarget.set(0.0, 0.0868, 0.220);
       } else {
-        _showroomCamTarget.set(0.0, 0.0975, 0.250);
-        _showroomLookTarget.set(0.0, 0.0892, 0.220);
+        _showroomCamTarget.set(0.0, 0.0968, 0.252);
+        _showroomLookTarget.set(0.0, 0.0874, 0.220);
       }
 
       if (lastStageMode !== 'GARAGE') {
@@ -3615,6 +3880,8 @@ async function initApp() {
 
       pitGarage.update(elapsedTime);
       weatherSystem.setVisible(false);
+      if (ghostManager) ghostManager.ghostRoot.visible = false;
+      if (audioSynth.setRainAmbience) audioSynth.setRainAmbience(0.0);
       if (atmosphere.applyMapAtmospherePreset) {
         atmosphere.applyMapAtmospherePreset(currentMapId, true, scene, renderer, currentWeather, dt, false);
       }
@@ -3635,13 +3902,15 @@ async function initApp() {
       }
     } else if (isHomeOutdoorMode) {
       // HOME SCREEN BACKGROUND: Live Outdoor Real-World Circuit Start Grid of Selected Map
+      bloomPass.threshold = 1.15;
+      bloomPass.strength = Math.min(settings.bloomStrength ?? 0.02, 0.03);
       showroomGroup.visible = false;
       pitGarage.rootGroup.visible = false;
       if (activeWorldMap) {
         activeWorldMap.rootGroup.visible = true;
         activeWorldMap.update(elapsedTime);
       }
-      if (powerupManager && powerupManager.rootGroup) powerupManager.rootGroup.visible = true;
+      if (powerupManager && powerupManager.rootGroup) powerupManager.rootGroup.visible = false;
       if (rivalsController && rivalsController.rootGroup) rivalsController.rootGroup.visible = false;
       if (vfxManager) vfxManager.setVisible(false);
 
@@ -3651,6 +3920,7 @@ async function initApp() {
       const bounceOffset = Math.sin(showroomPreviewBounce * Math.PI) * 0.0008;
 
       const stHome = physics.state;
+      if (microKart.setIdleShowroomMode) microKart.setIdleShowroomMode(true);
       microKart.setCockpitRoadOnly(false);
       microKart.kartRoot.scale.setScalar(0.49);
       microKart.kartRoot.position.copy(stHome.position).addScaledVector(stHome.normal, bounceOffset);
@@ -3700,11 +3970,24 @@ async function initApp() {
       if (atmosphere.applyMapAtmospherePreset) {
         atmosphere.applyMapAtmospherePreset(currentMapId, false, scene, renderer, currentWeather, dt, false);
       }
+      if (ghostManager) ghostManager.ghostRoot.visible = false;
       weatherSystem.setVisible(true);
       weatherSystem.update(dt, elapsedTime, stHome.position, currentMapId, renderer);
+      const homeRainW = weatherSystem.getRainWeight ? weatherSystem.getRainWeight() : 0.0;
+      if (activeWorldMap && activeWorldMap.setWetness) {
+        activeWorldMap.setWetness(homeRainW);
+      }
+      if (audioSynth.setRainAmbience) {
+        audioSynth.setRainAmbience(homeRainW * 0.4);
+      }
       bokehPass.enabled = false;
     } else {
       lastStageMode = 'RACE';
+      bloomPass.threshold = 1.05;
+      bloomPass.strength = Math.min(settings.bloomStrength ?? 0.045, 0.05);
+      if (microKart.setIdleShowroomMode) {
+        microKart.setIdleShowroomMode(currentAppScreen !== 'RACE');
+      }
       showroomGroup.visible = false;
       pitGarage.rootGroup.visible = false;
       if (activeWorldMap) {
@@ -3712,18 +3995,27 @@ async function initApp() {
         activeWorldMap.update(elapsedTime);
       }
       if (powerupManager && powerupManager.rootGroup) powerupManager.rootGroup.visible = true;
-      if (rivalsController && rivalsController.rootGroup) rivalsController.rootGroup.visible = true;
-      if (vfxManager) vfxManager.setVisible(true);
+      if (rivalsController && rivalsController.rootGroup) {
+        rivalsController.rootGroup.visible = currentRaceMode !== 'time_attack';
+      }
+      if (vfxManager) vfxManager.setVisible(currentAppScreen === 'RACE');
       if (microKart.sparkPoints) {
-        microKart.sparkPoints.visible = true;
+        microKart.sparkPoints.visible = currentAppScreen === 'RACE';
       }
       if (microKart.driftSmokeMesh) {
         microKart.driftSmokeMesh.visible = false;
       }
 
-      // Compute simulation timeScale (1.0 normally, easing smoothly to ~0.3x during Cinematic Victory Finish)
+      // Compute simulation timeScale:
+      // - 0.30x during Cinematic Victory Finish
+      // - 0.45x for ~0.9s during Cinematic Ramp Stunt Slow-Mo (360° Spin / Barrel Roll / Big Jump)
+      if (stuntCamState.cooldown > 0) {
+        stuntCamState.cooldown = Math.max(0.0, stuntCamState.cooldown - dt);
+      }
+
       let simTimeScale = 1.0;
       if (cinematicFinishState.active) {
+        stuntCamState.active = false;
         cinematicFinishState.elapsed += dt;
         const finishProgress = THREE.MathUtils.clamp(
           cinematicFinishState.elapsed / Math.max(0.1, cinematicFinishState.duration),
@@ -3733,6 +4025,16 @@ async function initApp() {
         const slowT = THREE.MathUtils.smoothstep(finishProgress, 0.0, 0.28);
         simTimeScale = THREE.MathUtils.lerp(1.0, 0.30, slowT);
         cinematicFinishState.timeScale = simTimeScale;
+      } else if (stuntCamState.active) {
+        stuntCamState.elapsed += dt;
+        if (stuntCamState.elapsed >= stuntCamState.duration) {
+          stuntCamState.active = false;
+          stuntCamState.cooldown = 1.6;
+        } else {
+          const p = stuntCamState.elapsed / stuntCamState.duration;
+          const rampOut = p > 0.78 ? THREE.MathUtils.smoothstep(p, 0.78, 1.0) : 0.0;
+          simTimeScale = THREE.MathUtils.lerp(0.45, 1.0, rampOut);
+        }
       }
       const simDt = dt * simTimeScale;
 
@@ -3742,19 +4044,175 @@ async function initApp() {
       // 1. Step 60FPS Banked Spline Physics
       const st = physics.stepPhysics(simDt);
 
-      // 1B. Step 3 AI rivals and Track Boost Pads / Ramps
-      const currentRank = rivalsController.update(simDt, st, powerupManager, audioSynth);
-      powerupManager.update(simDt, st, rivalsController.rivals, audioSynth, currentRank);
+      // Subtle mobile haptic on drift entry
+      if (st.justStartedDrift) {
+        st.justStartedDrift = false;
+        if (currentAppScreen === 'RACE') {
+          triggerHaptic(14);
+        }
+      }
+
+      // 1B. Step AI rivals (hidden & inactive in Time Attack solo pace mode) and Track Boost Pads / Ramps
+      const currentRank =
+        currentRaceMode === 'time_attack'
+          ? 1
+          : rivalsController.update(simDt, st, powerupManager, audioSynth);
+      powerupManager.update(
+        simDt,
+        st,
+        currentRaceMode === 'time_attack' ? [] : rivalsController.rivals,
+        audioSynth,
+        currentRank
+      );
 
       // Re-sync 3D world pose & quaternion after rival collisions and jump ramps
       if (physics.syncPoseFromSpline) {
         physics.syncPoseFromSpline();
       }
 
+      // Trigger Cinematic Ramp Stunt Slow-Mo & Hero Camera on major ramp launches / 360° spins / barrel rolls
+      if (
+        currentAppScreen === 'RACE' &&
+        !cinematicFinishState.active &&
+        !st.countdownLocked &&
+        !st.raceFinished &&
+        !stuntCamState.active &&
+        stuntCamState.cooldown <= 0 &&
+        ((st.stuntType && (st.hopHeight || 0) > 0.0018) ||
+          ((st.hopHeight || 0) > 0.0052 && (st.hopVel || 0) > 0.012))
+      ) {
+        stuntCamState.active = true;
+        stuntCamState.elapsed = 0.0;
+        stuntCamState.duration = 0.9;
+        stuntCamState.side = -stuntCamState.side;
+        if (audioSynth.playUnlockOrStuntVoice) {
+          audioSynth.playUnlockOrStuntVoice();
+        }
+      }
+
+      // Touchdown Juice: snap back to 1.0x speed, heavy bass thud, dust/sparks burst, compression & Nitro refill!
+      if (st.justLanded) {
+        const wasBigStunt = Boolean(st.justLandedStunt) || stuntCamState.active;
+        st.justLanded = false;
+        st.justLandedStunt = false;
+        if (stuntCamState.active) {
+          stuntCamState.active = false;
+          stuntCamState.cooldown = 1.6;
+        }
+        st.landingCompression = 1.0;
+        const nitroBonus = wasBigStunt ? 0.35 : 0.16;
+        st.boostCharge = Math.min(1.0, (st.boostCharge || 0.0) + nitroBonus);
+        if (wasBigStunt) {
+          st.actionBanner = 'STUNT LANDING · +NITRO';
+          st.actionBannerColor = '#38bdf8';
+          st.actionBannerTimer = 1.35;
+        }
+        if (audioSynth.playLandingThud) {
+          audioSynth.playLandingThud(wasBigStunt ? 1.15 : 0.85);
+        }
+        if (vfxManager && vfxManager.spawnLandingBurst) {
+          vfxManager.spawnLandingBurst(
+            st.position,
+            st.normal,
+            st.right,
+            microKart.kartRoot.scale.x || 0.49
+          );
+        }
+        camShakeTimer = Math.max(camShakeTimer, wasBigStunt ? 0.24 : 0.14);
+        camShakeIntensity = Math.max(camShakeIntensity, wasBigStunt ? 0.78 : 0.45);
+        if (currentAppScreen === 'RACE') {
+          triggerHaptic(wasBigStunt ? 38 : 20);
+        }
+      }
+
+      // 1C. Elimination Mode Knockout Countdown (20s initial grace period, then every 15s)
+      if (
+        currentAppScreen === 'RACE' &&
+        currentRaceMode === 'elimination' &&
+        !st.countdownLocked &&
+        !st.raceFinished &&
+        !cinematicFinishState.active &&
+        !eliminationState.triggeredFinish
+      ) {
+        eliminationState.timer = Math.max(0.0, eliminationState.timer - simDt);
+        if (eliminationState.timer <= 0.0) {
+          const elimRes = rivalsController.eliminateLastPlace(st);
+          eliminationState.remainingRacers = elimRes.remainingRacers;
+          if (elimRes.playerEliminated) {
+            eliminationState.triggeredFinish = true;
+            st.actionBanner = 'ELIMINATED!';
+            st.actionBannerColor = '#f43f5e';
+            st.actionBannerTimer = 2.4;
+            st.cameraShake = 0.85;
+            triggerHaptic([45, 30, 60]);
+            if (audioSynth.playExplosion) {
+              audioSynth.playExplosion();
+            }
+            if (audioSynth.playEvilLaugh) {
+              audioSynth.playEvilLaugh();
+            }
+            const totalElapsed = Math.max(1.0, st.totalRaceTime || st.currentLapTime || 0);
+            const bestLapNow = st.bestLapTime ?? Math.max(1.0, st.currentLapTime || totalElapsed);
+            triggerImmediateModeFinish(
+              {
+                totalTime: totalElapsed,
+                bestLap: bestLapNow,
+                lapTimes: st.lapTimes.slice(),
+                finishRank: Math.max(2, elimRes.remainingRacers),
+                driftScore: Math.round(st.driftScore || 0),
+                eliminated: true,
+                modeId: 'elimination',
+              },
+              false
+            );
+          } else if (elimRes.eliminatedRivalName) {
+            if (audioSynth.playExplosion) {
+              audioSynth.playExplosion();
+            }
+            st.cameraShake = 0.45;
+            if (elimRes.remainingRacers <= 1) {
+              eliminationState.triggeredFinish = true;
+              st.actionBanner = 'LAST CAR STANDING!';
+              st.actionBannerColor = '#facc15';
+              st.actionBannerTimer = 2.5;
+              const totalElapsed = Math.max(1.0, st.totalRaceTime || st.currentLapTime || 0);
+              const bestLapNow = st.bestLapTime ?? Math.max(1.0, st.currentLapTime || totalElapsed);
+              triggerImmediateModeFinish(
+                {
+                  totalTime: totalElapsed,
+                  bestLap: bestLapNow,
+                  lapTimes: st.lapTimes.slice(),
+                  finishRank: 1,
+                  driftScore: Math.round(st.driftScore || 0),
+                  eliminated: false,
+                  modeId: 'elimination',
+                },
+                true
+              );
+            } else {
+              st.actionBanner = `ELIMINATED: ${elimRes.eliminatedRivalName}!`;
+              st.actionBannerColor = '#f97316';
+              st.actionBannerTimer = 2.2;
+              eliminationState.timer = 15.0;
+            }
+          } else {
+            eliminationState.timer = 15.0;
+          }
+        }
+      }
+
+      // 1D. Personal Best Ghost Car recording & holographic playback
+      const ghostResult = ghostManager
+        ? ghostManager.update(simDt, st, currentAppScreen === 'RACE', currentRaceMode)
+        : { active: false, position: null, deltaSec: null };
+
       // Play distinct drift-exit turbo pop when auto-carve drift releases a boost tier
       if ((st.justFiredDriftBoostTier || 0) > 0) {
         if (audioSynth.playDriftBoostPop) {
           audioSynth.playDriftBoostPop(st.justFiredDriftBoostTier);
+        }
+        if (currentAppScreen === 'RACE') {
+          triggerHaptic(20);
         }
         st.justFiredDriftBoostTier = 0;
       }
@@ -3784,7 +4242,7 @@ async function initApp() {
         st.cameraShake = 0.0;
       }
 
-      // 2. Sync Micro-Kart Transform, Wheels, Exhaust Flames & Pooled Drift/Skid/Spark VFX
+      // 2. Sync Micro-Kart Transform, Wheels, Exhaust Flames & Pooled Drift/Skid/Spark/RainSpray VFX
       if (cinematicFinishState.active) {
         st.boostActive = Math.max(st.boostActive || 0.0, 0.85);
       }
@@ -3792,17 +4250,37 @@ async function initApp() {
       microKart.kartRoot.quaternion.copy(st.quaternion);
       microKart.updateWheels(simDt, st.speed, st.steerAngle);
       microKart.updateKartVisuals(simDt, st);
-      if (vfxManager) {
-        const vfxDt = currentAppScreen === 'GAMEOVER' ? dt : simDt;
-        vfxManager.update(vfxDt, st, microKart.kartRoot, true);
-      }
 
-      // 3. Apply Active Real-World Map Outdoor Atmosphere, Weather Lighting & Particle Effects
+      // 3. Apply Active Real-World Map Outdoor Atmosphere, Storm Wetness, Weather Streaks & Rain Ambience
       if (atmosphere.applyMapAtmospherePreset) {
         atmosphere.applyMapAtmospherePreset(currentMapId, false, scene, renderer, currentWeather, dt, false);
       }
+      // Anchor rain/weather tightly between camera & player car so fast slanted rain streaks whip past the lens
+      _weatherAnchorVec.copy(st.position).lerp(camera.position, 0.42);
       weatherSystem.setVisible(true);
-      weatherSystem.update(dt, elapsedTime, st.position, currentMapId, renderer);
+      weatherSystem.update(dt, elapsedTime, _weatherAnchorVec, currentMapId, renderer);
+      const rainWeight = weatherSystem.getRainWeight ? weatherSystem.getRainWeight() : 0.0;
+
+      if (activeWorldMap && activeWorldMap.setWetness) {
+        activeWorldMap.setWetness(rainWeight);
+      }
+      if (audioSynth.setRainAmbience) {
+        audioSynth.setRainAmbience(currentAppScreen === 'RACE' ? rainWeight : 0.0);
+      }
+
+      if (vfxManager) {
+        const vfxDt = currentAppScreen === 'GAMEOVER' ? dt : simDt;
+        if (rainWeight > 0.16 && vfxManager.emitRainSpray && currentAppScreen === 'RACE') {
+          vfxManager.emitRainSpray(
+            vfxDt,
+            st,
+            currentRaceMode === 'time_attack' ? [] : rivalsController.rivals,
+            microKart.kartRoot.scale.x || 0.49,
+            rainWeight
+          );
+        }
+        vfxManager.update(vfxDt, st, microKart.kartRoot, true);
+      }
 
       // 4. Update Camera (always uses real `dt` so slow-motion hero sweep glides smoothly at 60 FPS)
       updateCamera(dt, elapsedTime, st);
@@ -3891,6 +4369,47 @@ async function initApp() {
           const absSpeed = Math.abs(st.speed);
           const speedKmh = Math.round(absSpeed * 240.0 * 3.6);
 
+          // Project active rivals to screen-space floating tag coordinates + minimap dots
+          camera.updateMatrixWorld();
+          const rawRivals = currentRaceMode === 'time_attack' ? [] : rivalsController.getRivalsData();
+          const projectedRivals = rawRivals.map((r) => {
+            const [mapX, mapY] = projectWorldToHudMap(r.position[0], r.position[2]);
+            let screenX = -50;
+            let screenY = -50;
+            let onScreen = false;
+            const distMeters = Math.round(
+              ((r.totalDistanceTraveled || 0) - (st.totalDistanceTraveled || 0)) * 220
+            );
+            if (!r.eliminated) {
+              _rivalProjVec.set(r.position[0], r.position[1] + 0.0046, r.position[2]);
+              const worldDist = camera.position.distanceTo(_rivalProjVec);
+              _rivalProjVec.project(camera);
+              const inFront = _rivalProjVec.z > -1.0 && _rivalProjVec.z < 1.0;
+              const sx = (_rivalProjVec.x * 0.5 + 0.5) * 100;
+              const sy = (-_rivalProjVec.y * 0.5 + 0.5) * 100;
+              if (inFront && worldDist < 0.24 && sx >= 6 && sx <= 94 && sy >= 12 && sy <= 82) {
+                screenX = Number(sx.toFixed(1));
+                screenY = Number(sy.toFixed(1));
+                onScreen = true;
+              }
+            }
+            return {
+              ...r,
+              screenX,
+              screenY,
+              onScreen,
+              distMeters,
+              mapX,
+              mapY,
+            };
+          });
+
+          const playerMapPos = projectWorldToHudMap(st.position.x, st.position.z);
+          const ghostMapPos =
+            ghostResult.active && ghostResult.position
+              ? projectWorldToHudMap(ghostResult.position.x, ghostResult.position.z)
+              : null;
+
           const payload = {
             speedKmh,
             lapCount: lapNow,
@@ -3904,14 +4423,36 @@ async function initApp() {
             isDrifting: Boolean(st.isDrifting),
             driftCharge: st.driftChargeTimer || 0.0,
             driftBoostTier: st.driftBoostTier || 0,
+            modeId: currentRaceMode,
+            eliminationTimer:
+              currentRaceMode === 'elimination'
+                ? Number(eliminationState.timer.toFixed(1))
+                : undefined,
+            remainingRacers:
+              currentRaceMode === 'elimination'
+                ? eliminationState.remainingRacers
+                : currentRaceMode === 'time_attack'
+                  ? 1
+                  : 4,
+            driftScore: Math.round(st.driftScore || 0),
+            currentDriftPoints: Math.round(st.currentDriftPoints || 0),
+            driftCombo: st.driftCombo || 1,
+            driftTargetGold: 5000,
             countdownStep,
             cameraMode: activeCameraMode,
             autopilot: Boolean(st.autopilot),
             autoGas: Boolean(st.autoGas),
             weather: currentWeather,
             audioEnabled: audioSynth.isEnabled ? audioSynth.isEnabled() : false,
-            positionRank: currentRank,
-            rivals: rivalsController.getRivalsData(),
+            positionRank: currentRaceMode === 'time_attack' ? 1 : currentRank,
+            rivals: projectedRivals,
+            minimapPath: hudMinimapPath,
+            playerMapPos,
+            ghostMapPos,
+            ghostEnabled: ghostManager ? ghostManager.isEnabled() : false,
+            hasGhostPb: ghostManager ? ghostManager.hasPersonalBest() : false,
+            ghostDeltaSec: ghostResult.deltaSec,
+            stuntCamActive: stuntCamState.active,
             actionBanner: st.actionBanner || null,
             actionBannerColor: st.actionBannerColor || '#00f0ff',
           };

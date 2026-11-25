@@ -1043,7 +1043,7 @@ function buildSynchronousFallbackTrack(splineData, safeMapId, roadSurfaceTex, cu
   curbMesh.receiveShadow = true;
   group.add(curbMesh);
 
-  return { group, roadGeo };
+  return { group, roadGeo, roadMat };
 }
 
 export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
@@ -1142,7 +1142,7 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
   const procBarrierWallTex = trackTex(createRacingBarrierWallTexture(safeMapId));
   procBarrierWallTex.repeat.set(1, 1);
 
-  const { group: fallbackTrackGroup, roadGeo } = buildSynchronousFallbackTrack(
+  const { group: fallbackTrackGroup, roadGeo, roadMat } = buildSynchronousFallbackTrack(
     splineData,
     safeMapId,
     procRoadTex,
@@ -2518,6 +2518,62 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
     }
   }
 
+  // Base dry road & sky color snapshots for smooth rain/wetness modulation
+  const baseRoadRoughness = roadMat ? roadMat.roughness : 0.45;
+  const baseRoadMetalness = roadMat ? roadMat.metalness : 0.15;
+  const baseRoadEnvIntensity = roadMat ? (roadMat.envMapIntensity ?? 1.2) : 1.2;
+  const dryRoadColor = new THREE.Color(0xffffff);
+  const wetRoadColor = new THREE.Color(0xb8c7d9);
+  const baseSkyTop = new THREE.Color(skyCfg.top);
+  const baseSkyMid = new THREE.Color(skyCfg.mid);
+  const baseSkyBottom = new THREE.Color(skyCfg.bottom);
+  const baseCloudColor = new THREE.Color(skyCfg.cloudColor);
+  const stormSkyTop = new THREE.Color(0x0b1222);
+  const stormSkyMid = new THREE.Color(0x1b2940);
+  const stormSkyBottom = new THREE.Color(0x2a3b55);
+  const stormCloudColor = new THREE.Color(0x64748b);
+  let lastAppliedWetness = -1;
+
+  function setWetness(wet01 = 0) {
+    const w = THREE.MathUtils.clamp(Number(wet01) || 0, 0, 1);
+    if (Math.abs(w - lastAppliedWetness) < 0.004) return;
+    lastAppliedWetness = w;
+
+    // Subtle wet-road sheen: darker damp tarmac with controlled low roughness & zero blinding glare hotspots
+    if (roadMat) {
+      const targetWetRough = safeMapId === 'city' ? 0.11 : 0.25;
+      const targetWetMetal = safeMapId === 'city' ? 0.44 : 0.26;
+      const targetWetEnv = safeMapId === 'city' ? 1.55 : 0.95;
+      roadMat.roughness = THREE.MathUtils.lerp(baseRoadRoughness, targetWetRough, w);
+      roadMat.metalness = THREE.MathUtils.lerp(baseRoadMetalness, targetWetMetal, w);
+      roadMat.envMapIntensity = THREE.MathUtils.lerp(baseRoadEnvIntensity, targetWetEnv, w);
+      roadMat.color.copy(dryRoadColor).lerp(wetRoadColor, w * 0.85);
+    }
+
+    // Moody darkened storm sky dome with denser overcast cloud deck
+    if (skyMat && skyMat.uniforms) {
+      if (skyMat.uniforms.uTopColor) {
+        skyMat.uniforms.uTopColor.value.copy(baseSkyTop).lerp(stormSkyTop, w * 0.82);
+      }
+      if (skyMat.uniforms.uMidColor) {
+        skyMat.uniforms.uMidColor.value.copy(baseSkyMid).lerp(stormSkyMid, w * 0.84);
+      }
+      if (skyMat.uniforms.uBottomColor) {
+        skyMat.uniforms.uBottomColor.value.copy(baseSkyBottom).lerp(stormSkyBottom, w * 0.82);
+      }
+      if (skyMat.uniforms.uCloudColor) {
+        skyMat.uniforms.uCloudColor.value.copy(baseCloudColor).lerp(stormCloudColor, w * 0.72);
+      }
+      if (skyMat.uniforms.uCloudDensity) {
+        skyMat.uniforms.uCloudDensity.value = THREE.MathUtils.lerp(
+          skyCfg.cloudDensity ?? 0.65,
+          0.95,
+          w
+        );
+      }
+    }
+  }
+
   function dispose() {
     isDisposed = true;
 
@@ -2548,6 +2604,7 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
     skyCfg,
     setF1StartLights,
     attachTrafficLightGlb,
+    setWetness,
     update,
     dispose,
   };

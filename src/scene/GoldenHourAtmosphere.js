@@ -587,9 +587,9 @@ export function buildGoldenHourAtmosphere(scene) {
     }
 
     if (bloomPass) {
-      bloomPass.strength = settings.bloomStrength ?? 0.06;
-      bloomPass.radius = 0.24;
-      bloomPass.threshold = 1.12;
+      bloomPass.strength = Math.min(settings.bloomStrength ?? 0.03, 0.05);
+      bloomPass.radius = 0.18;
+      bloomPass.threshold = 1.15;
     }
   }
 
@@ -639,10 +639,10 @@ export function buildGoldenHourAtmosphere(scene) {
 
       hemiLight.color.setHex(0x94a3b8);
       hemiLight.groundColor.setHex(0x1e293b);
-      hemiLight.intensity = 0.34;
+      hemiLight.intensity = 0.28;
 
       if (targetScene) {
-        targetScene.environmentIntensity = 0.36;
+        targetScene.environmentIntensity = 0.28;
         if (targetScene.background && targetScene.background.isColor) {
           targetScene.background.setHex(0x090e1a);
         }
@@ -652,7 +652,7 @@ export function buildGoldenHourAtmosphere(scene) {
         }
       }
       if (renderer) {
-        renderer.toneMappingExposure = 0.72;
+        renderer.toneMappingExposure = 0.68;
       }
       return;
     }

@@ -11,17 +11,17 @@
   }
 }
 
-/* True Fullscreen Mobile Reset — Eliminates White Borders & Browser Gestures */
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-  user-select: none;
-  -webkit-user-select: none;
-  -webkit-touch-callout: none;
-  -webkit-tap-highlight-color: transparent;
+/* True Fullscreen Mobile Reset — Layered so Tailwind v4 padding/margin utilities are never overridden */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
 }
 
 html,
@@ -47,6 +47,19 @@ canvas {
   background-color: #04070f;
   touch-action: none;
   overscroll-behavior: none;
+}
+
+/* Allow native mobile touch scrolling inside scrollable UI screens and car strips */
+.overflow-y-auto {
+  touch-action: pan-y !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.overflow-x-auto {
+  touch-action: pan-x !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 #canvas-container {

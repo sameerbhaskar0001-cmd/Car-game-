@@ -101,31 +101,31 @@ export const WEATHER_LIGHTING_PRESETS = {
     drizzleWeight: 0.0,
   },
   drizzle: {
-    // Moody cool overcast twilight with sleek cyan rim highlights and fine drifting drizzle
-    sunTint: 0x93c5fd,
-    sunTintMix: 0.65,
-    sunIntensityMult: 0.52,
-    hemiSkyTint: 0x64748b,
-    hemiSkyMix: 0.62,
-    hemiGroundTint: 0x1e293b,
-    hemiGroundMix: 0.65,
-    hemiIntensityMult: 0.92,
+    // Moody storm overcast with crisp cyan rim highlights and fast slanted rain
+    sunTint: 0x7db3f8,
+    sunTintMix: 0.72,
+    sunIntensityMult: 0.44,
+    hemiSkyTint: 0x475569,
+    hemiSkyMix: 0.72,
+    hemiGroundTint: 0x0f172a,
+    hemiGroundMix: 0.74,
+    hemiIntensityMult: 0.86,
     fillTint: 0x38bdf8,
-    fillMix: 0.58,
-    fillIntensityMult: 1.05,
+    fillMix: 0.62,
+    fillIntensityMult: 0.96,
     rimTint: 0x7dd3fc,
-    rimMix: 0.65,
-    rimIntensityMult: 1.32,
-    bgTint: 0x24344d,
-    bgMix: 0.68,
-    fogTint: 0x334863,
-    fogMix: 0.68,
-    fogDensityMult: 1.48,
-    fogDensityAdd: 0.068,
-    envIntensityMult: 0.76,
-    exposureOffset: -0.06,
+    rimMix: 0.70,
+    rimIntensityMult: 1.38,
+    bgTint: 0x162236,
+    bgMix: 0.76,
+    fogTint: 0x22334c,
+    fogMix: 0.74,
+    fogDensityMult: 1.58,
+    fogDensityAdd: 0.082,
+    envIntensityMult: 0.68,
+    exposureOffset: -0.08,
     dustWeight: 0.0,
-    mistWeight: 0.34,
+    mistWeight: 0.36,
     drizzleWeight: 1.0,
   },
 };
@@ -361,9 +361,9 @@ export function buildWeatherSystem(scene) {
   weatherGroup.add(mistPoints);
 
   // ---------------------------------------------------------------------------
-  // 3. FINE TWILIGHT DRIZZLE (240 subtle slanted rain/mist streaks)
+  // 3. WIND-SLANTED FAST RAIN STREAKS (560 dynamic slanted streaks around camera/car)
   // ---------------------------------------------------------------------------
-  const drizzleCount = 240;
+  const drizzleCount = 560;
   const drizzleOffsets = new Float32Array(drizzleCount * 3);
   const drizzlePhases = new Float32Array(drizzleCount);
   const drizzleScales = new Float32Array(drizzleCount);
@@ -373,7 +373,7 @@ export function buildWeatherSystem(scene) {
     drizzleOffsets[i * 3 + 1] = Math.random();
     drizzleOffsets[i * 3 + 2] = Math.random();
     drizzlePhases[i] = Math.random() * Math.PI * 2.0;
-    drizzleScales[i] = 0.7 + Math.random() * 0.85;
+    drizzleScales[i] = 0.8 + Math.random() * 1.1;
   }
 
   const drizzleGeo = new THREE.BufferGeometry();
@@ -384,10 +384,10 @@ export function buildWeatherSystem(scene) {
   const drizzleUniforms = {
     uTime: { value: 0.0 },
     uAnchor: { value: new THREE.Vector3(0, 0.04, 0) },
-    uBoxSize: { value: new THREE.Vector3(0.15, 0.085, 0.15) },
+    uBoxSize: { value: new THREE.Vector3(0.115, 0.068, 0.115) },
     uOpacity: { value: 0.0 },
     uPixelRatio: { value: Math.min(window.devicePixelRatio || 1, 2.0) },
-    uDropColor: { value: new THREE.Color(0xbae6fd) },
+    uDropColor: { value: new THREE.Color(0xcbe8ff) },
   };
 
   const drizzleMat = new THREE.ShaderMaterial({
@@ -406,29 +406,30 @@ export function buildWeatherSystem(scene) {
 
       void main() {
         vec3 base = position * uBoxSize;
-        float speedScale = 0.85 + 0.3 * fract(aPhase * 1.73);
+        float speedScale = 0.88 + 0.36 * fract(aPhase * 1.73);
+        // Fast wind-driven rain velocity slanted across the windshield/chase view
         vec3 fall = vec3(
-          uTime * 0.022 * speedScale,
-          -uTime * 0.115 * speedScale,
-          uTime * 0.012 * speedScale
+          uTime * 0.072 * speedScale,
+          -uTime * 0.255 * speedScale,
+          uTime * 0.036 * speedScale
         );
 
-        vec3 anchorOrigin = uAnchor + vec3(0.0, uBoxSize.y * 0.36, 0.0);
+        vec3 anchorOrigin = uAnchor + vec3(0.0, uBoxSize.y * 0.28, 0.0);
         vec3 localPos = mod(base + fall - anchorOrigin, uBoxSize) - (uBoxSize * 0.5);
         vec3 worldPos = anchorOrigin + localPos;
 
         vec3 edgeDist = 1.0 - abs(localPos) / (uBoxSize * 0.5);
-        float boxFade = smoothstep(0.0, 0.22, min(edgeDist.x, min(edgeDist.y, edgeDist.z)));
+        float boxFade = smoothstep(0.0, 0.20, min(edgeDist.x, min(edgeDist.y, edgeDist.z)));
 
         vec4 mvPosition = modelViewMatrix * vec4(worldPos, 1.0);
         float viewDist = max(0.001, -mvPosition.z);
 
-        float nearFade = smoothstep(0.006, 0.015, viewDist);
-        float farFade = smoothstep(0.105, 0.032, viewDist);
+        float nearFade = smoothstep(0.004, 0.011, viewDist);
+        float farFade = smoothstep(0.095, 0.028, viewDist);
         vAlpha = boxFade * nearFade * farFade;
 
         gl_Position = projectionMatrix * mvPosition;
-        gl_PointSize = clamp((0.26 * aScale * uPixelRatio) / max(0.014, viewDist), 3.0, 14.0 * uPixelRatio);
+        gl_PointSize = clamp((0.36 * aScale * uPixelRatio) / max(0.012, viewDist), 4.5, 22.0 * uPixelRatio);
       }
     `,
     fragmentShader: /* glsl */ `
@@ -437,14 +438,13 @@ export function buildWeatherSystem(scene) {
       varying float vAlpha;
 
       void main() {
-        // Slanted soft rain streak inside gl_PointCoord
+        // Crisp wind-slanted (~19 deg) thin rain streak
         vec2 uv = gl_PointCoord - vec2(0.5);
-        // Rotate slightly (~12 deg) to match diagonal wind fall
-        vec2 r = vec2(uv.x * 0.978 + uv.y * 0.208, -uv.x * 0.208 + uv.y * 0.978);
-        float streakX = smoothstep(0.11, 0.0, abs(r.x));
-        float streakY = smoothstep(0.48, 0.05, abs(r.y));
-        float alpha = streakX * streakY * vAlpha * uOpacity * 0.34;
-        if (alpha < 0.003) discard;
+        vec2 r = vec2(uv.x * 0.945 + uv.y * 0.326, -uv.x * 0.326 + uv.y * 0.945);
+        float streakX = smoothstep(0.075, 0.0, abs(r.x));
+        float streakY = smoothstep(0.49, 0.04, abs(r.y));
+        float alpha = streakX * streakY * vAlpha * uOpacity * 0.52;
+        if (alpha < 0.004) discard;
         gl_FragColor = vec4(uDropColor, alpha);
       }
     `,
@@ -564,6 +564,7 @@ export function buildWeatherSystem(scene) {
     drizzlePoints,
     setWeather,
     getWeather,
+    getRainWeight: () => drizzleAlpha,
     setVisible,
     update,
     dispose,

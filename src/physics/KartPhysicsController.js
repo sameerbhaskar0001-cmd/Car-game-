@@ -275,6 +275,10 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
     stuntProgress: 0.0,
     stuntRollAngle: 0.0,
     stuntSpinAngle: 0.0,
+    driftScore: 0,
+    currentDriftPoints: 0,
+    driftCombo: 1,
+    driftChainTimer: 0.0,
     hopHeight: 0.0,
     hopVel: 0.0,
     rampPitch: 0.0,
@@ -527,6 +531,10 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
     state.wallStuckTimer = 0.0;
     state.angledIntoRail = false;
     state.steeringAway = false;
+    state.driftScore = 0;
+    state.currentDriftPoints = 0;
+    state.driftCombo = 1;
+    state.driftChainTimer = 0.0;
     kbKeys.forward = false;
     kbKeys.backward = false;
     kbKeys.left = false;
@@ -1006,10 +1014,11 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
 
     if (!isAiCruise) {
       // EFFORTLESS AUTO-CARVE POWER DRIFT (No Drift Button Required!)
-      // Steering Left or Right at racing speed automatically kicks the tail out into a silky,
-      // controllable high-angle drift. Counter-steering or releasing snaps straight into a 3-Tier Turbo!
-      const speedFastEnough = state.speed > manualMaxSpeed * 0.34;
-      const inCurve = Math.abs(frame.signedCurvature) > 0.14;
+      // Steering Left or Right at racing speed in curves (or deliberate hold) kicks the tail out into a silky,
+      // controllable high-angle drift. Releasing steering on straightaways immediately straightens out!
+      const speedFastEnough = state.speed > manualMaxSpeed * 0.36;
+      const absCurv = Math.abs(frame.signedCurvature);
+      const inCurve = absCurv > 0.16;
 
       if (turnRight !== 0 && speedFastEnough && !state.countdownLocked && !state.raceFinished) {
         if (Math.sign(turnRight) === state.steerHoldDir) {
@@ -1026,14 +1035,19 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
       const steerAutoTrigger =
         speedFastEnough &&
         turnRight !== 0 &&
-        ((inCurve && state.steerHoldTimer >= 0.075) || state.steerHoldTimer >= 0.155);
+        ((inCurve && state.steerHoldTimer >= 0.085) || state.steerHoldTimer >= 0.24);
+
+      // Immediately release drift on straightaways when steering returns to center (never get stuck DRIFTING on straights!)
+      const onStraightawayCentered =
+        !inCurve && turnRight === 0 && !keys.drift && !keys.backward;
 
       const continueExistingDrift =
         state.isDrifting &&
         speedFastEnough &&
+        !onStraightawayCentered &&
         (turnRight === state.driftDir ||
-          (turnRight === 0 && (state.driftReleaseGrace || 0.0) > 0.0) ||
-          (turnRight === -state.driftDir && (state.driftReleaseGrace || 0.0) > 0.08));
+          (inCurve && turnRight === 0 && (state.driftReleaseGrace || 0.0) > 0.0) ||
+          (turnRight === -state.driftDir && (state.driftReleaseGrace || 0.0) > 0.06));
 
       const wantsDrift = Boolean(
         !state.countdownLocked &&
@@ -1042,43 +1056,49 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
           (manualBrakeToDrift || steerAutoTrigger || continueExistingDrift)
       );
 
+      state.isBraking = Boolean(
+        !state.countdownLocked &&
+          !state.raceFinished &&
+          (keys.backward || keys.drift) &&
+          state.speed > 0.015
+      );
+
       if (wantsDrift) {
         if (!state.isDrifting) {
           state.isDrifting = true;
+          state.justStartedDrift = true;
           state.driftDir =
             Math.sign(turnRight) ||
             Math.sign(frame.signedCurvature) ||
             Math.sign(state.steerInput) ||
             1;
-          state.driftReleaseGrace = 0.18;
+          state.driftReleaseGrace = inCurve ? 0.14 : 0.04;
+          if ((state.driftChainTimer || 0.0) > 0.0) {
+            state.driftCombo = Math.min(5, (state.driftCombo || 1) + 1);
+          } else {
+            state.driftCombo = 1;
+          }
+          state.currentDriftPoints = 0;
         } else if (turnRight === state.driftDir || manualBrakeToDrift) {
-          state.driftReleaseGrace = 0.18;
+          state.driftReleaseGrace = inCurve ? 0.14 : 0.04;
         } else {
-          // Gently drain grace window when feathering straight or counter-steering
-          const drainRate = turnRight === -state.driftDir ? 1.55 : 1.0;
-          state.driftReleaseGrace = Math.max(0.0, (state.driftReleaseGrace || 0.0) - clampedDt * drainRate);
+          // Drain grace rapidly when centered or counter-steering
+          const drainRate = turnRight === -state.driftDir ? 2.4 : inCurve ? 1.25 : 3.5;
+          state.driftReleaseGrace = Math.max(
+            0.0,
+            (state.driftReleaseGrace || 0.0) - clampedDt * drainRate
+          );
         }
-
-        // Dynamic sweeping drift angle: deeper when pushing into the corner, silky when feathering
-        const pushingIntoDrift = turnRight === state.driftDir || manualBrakeToDrift;
-        const counterFeather = turnRight === -state.driftDir;
-        const targetMagnitude = manualBrakeToDrift
-          ? 0.50
-          : pushingIntoDrift
-            ? 0.44
-            : counterFeather
-              ? 0.24
-              : 0.34;
-        const targetSlipAngle = -state.driftDir * targetMagnitude;
-        state.driftAngle = THREE.MathUtils.lerp(
-          state.driftAngle,
-          targetSlipAngle,
-          1.0 - Math.exp(-11.5 * clampedDt)
-        );
+        state.driftChainTimer = 2.4;
 
         // Smooth 3-tier Drift Charge + juicy Nitro generation
+        const pushingIntoDrift = turnRight === state.driftDir || manualBrakeToDrift;
+        const counterFeather = turnRight === -state.driftDir;
         const chargeRate = pushingIntoDrift ? 0.92 : 0.58;
-        state.driftChargeTimer = Math.min(1.0, (state.driftChargeTimer || 0.0) + clampedDt * chargeRate);
+        state.driftChargeTimer = Math.min(
+          1.0,
+          (state.driftChargeTimer || 0.0) + clampedDt * chargeRate
+        );
         state.driftBoostTier =
           state.driftChargeTimer >= 0.92
             ? 3
@@ -1088,9 +1108,36 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
                 ? 1
                 : 0;
         state.boostCharge = Math.min(1.0, state.boostCharge + clampedDt * 0.62);
+
+        // Visibly sideways chassis slip angle: scales up with SUPER DRIFT (Tier 2) and ULTRA DRIFT (Tier 3)!
+        const tierAngleBonus =
+          state.driftBoostTier === 3 ? 0.18 : state.driftBoostTier === 2 ? 0.11 : 0.04;
+        const baseMagnitude = manualBrakeToDrift
+          ? 0.58
+          : pushingIntoDrift
+            ? 0.54
+            : counterFeather
+              ? 0.30
+              : 0.42;
+        const targetMagnitude = Math.min(0.76, baseMagnitude + tierAngleBonus);
+        const targetSlipAngle = -state.driftDir * targetMagnitude;
+        state.driftAngle = THREE.MathUtils.lerp(
+          state.driftAngle,
+          targetSlipAngle,
+          1.0 - Math.exp(-12.5 * clampedDt)
+        );
+
+        // Live Drift Score Accrual (scaled by speed, slip angle, drift tier, and chain combo)
+        const speedFactor = THREE.MathUtils.clamp(state.speed / Math.max(0.08, manualMaxSpeed), 0.35, 1.45);
+        const tierMult = 1.0 + (state.driftBoostTier || 0) * 0.35;
+        const comboMult = state.driftCombo || 1;
+        const ptsDelta = clampedDt * 380.0 * speedFactor * tierMult * comboMult;
+        state.currentDriftPoints = (state.currentDriftPoints || 0) + ptsDelta;
+        state.driftScore = Math.round((state.driftScore || 0) + ptsDelta);
       } else {
         if (state.isDrifting && state.speed > 0.055) {
           const charge = state.driftChargeTimer || 0.0;
+          const comboMult = state.driftCombo || 1;
           if (charge >= 0.92) {
             // Tier 3 — ULTRA DRIFT SURGE!
             state.boostActive = Math.max(state.boostActive, 1.65);
@@ -1099,6 +1146,7 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
             state.boostCharge = Math.min(1.0, state.boostCharge + 0.24);
             state.cameraShake = Math.max(state.cameraShake || 0.0, 0.65);
             state.justFiredDriftBoostTier = 3;
+            state.driftScore = Math.round((state.driftScore || 0) + 350 * comboMult);
             setActionBanner('💥 ULTRA DRIFT BOOST!', '#e879f9', 1.45);
           } else if (charge >= 0.58) {
             // Tier 2 — SUPER DRIFT BOOST!
@@ -1107,6 +1155,7 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
             state.boostCharge = Math.min(1.0, state.boostCharge + 0.14);
             state.cameraShake = Math.max(state.cameraShake || 0.0, 0.48);
             state.justFiredDriftBoostTier = 2;
+            state.driftScore = Math.round((state.driftScore || 0) + 200 * comboMult);
             setActionBanner('🔥 SUPER DRIFT!', '#fbbf24', 1.35);
           } else if (charge >= 0.25) {
             // Tier 1 — MINI DRIFT BOOST!
@@ -1114,6 +1163,7 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
             state.speed = Math.max(state.speed, manualMaxSpeed * 1.13);
             state.cameraShake = Math.max(state.cameraShake || 0.0, 0.30);
             state.justFiredDriftBoostTier = 1;
+            state.driftScore = Math.round((state.driftScore || 0) + 100 * comboMult);
             setActionBanner('⚡ DRIFT BOOST!', '#22d3ee', 1.15);
           }
         }
@@ -1121,12 +1171,22 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
         state.driftDir = 0;
         state.driftBoostTier = 0;
         state.driftReleaseGrace = 0.0;
-        state.driftChargeTimer = Math.max(0.0, (state.driftChargeTimer || 0.0) - clampedDt * 3.4);
+        state.driftChargeTimer = 0.0;
+        state.currentDriftPoints = 0;
+        if ((state.driftChainTimer || 0.0) > 0.0) {
+          state.driftChainTimer = Math.max(0.0, state.driftChainTimer - clampedDt);
+          if (state.driftChainTimer <= 0.0) {
+            state.driftCombo = 1;
+          }
+        }
         state.driftAngle = THREE.MathUtils.lerp(
           state.driftAngle,
           0.0,
-          1.0 - Math.exp(-12.5 * clampedDt)
+          1.0 - Math.exp(-15.5 * clampedDt)
         );
+        if (Math.abs(state.driftAngle) < 0.008) {
+          state.driftAngle = 0.0;
+        }
       }
 
       // Clean Apex Exit Surge: reward carving a curve cleanly without hitting the guardrail
@@ -1227,7 +1287,7 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
         1.0
       );
     } else if (absLat >= railLimitLat) {
-      // Stage 2 — Guardrail Wall Gliding: smooth deflection keeping >90% speed & active boost!
+      // Stage 2 — Guardrail Wall Gliding: smooth deflection keeping ~99% speed & active boost!
       const signLat = Math.sign(state.lateralOffset) || 1;
       state.curbRumble = 1.0;
 
@@ -1237,12 +1297,13 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
 
         if (!state.railImpactActive && state.railHitCooldown <= 0.0) {
           state.railImpactActive = true;
-          state.railHitCooldown = 0.25;
+          state.railHitCooldown = 0.48;
 
-          // Gentle inward nudge away from guardrail while preserving 97% forward speed
-          state.lateralOffset = signLat * (railLimitLat - 0.0008);
-          state.lateralVel = -signLat * 0.008;
-          state.speed *= 0.97;
+          // Ultra-forgiving guardrail graze: sparks & scrapes while preserving 98.8% forward speed!
+          state.lateralOffset = signLat * (railLimitLat - 0.0006);
+          state.lateralVel = -signLat * 0.006;
+          state.speed *= 0.988;
+          state.headingYaw *= 0.35;
 
           _impactPos
             .copy(frame.position)
@@ -1269,7 +1330,7 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
 
         if (steeringAway) {
           state.railImpactActive = false;
-          state.headingYaw = signLat * 0.10;
+          state.headingYaw = signLat * 0.08;
           state.lateralOffset = signLat * (curbStartLat + 0.0004);
           state.wallStuckTimer = 0.0;
         } else {
@@ -1277,7 +1338,7 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
           state.headingYaw = THREE.MathUtils.lerp(
             state.headingYaw,
             0.0,
-            1.0 - Math.exp(-14.0 * clampedDt)
+            1.0 - Math.exp(-20.0 * clampedDt)
           );
         }
       } else {
@@ -1292,8 +1353,8 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
     const prevS = state.s;
     const forwardProjection =
       isAiCruise || state.spinoutTimer > 0
-        ? 0.85
-        : Math.max(0.25, Math.cos(state.headingYaw));
+        ? 0.88
+        : Math.max(0.78, Math.cos(state.headingYaw));
     const ds = (state.speed * forwardProjection * clampedDt) / apexFactor;
     state.s = ((state.s + ds) % totalLength + totalLength) % totalLength;
 
@@ -1406,36 +1467,41 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
       }
     }
 
-    // Vertical hop suspension, dynamic Jump Ramp Air Pitch & Landing Juice
+    // Vertical hop suspension, dynamic Jump Ramp Air Pitch & 360° Mid-Air Stunts
     const wasAirborne = Boolean(state.isAirborne);
     if ((state.landingCompression || 0.0) > 0.0) {
       state.landingCompression = Math.max(0.0, state.landingCompression - clampedDt * 3.8);
     }
 
     if (state.hopHeight > 0 || state.hopVel !== 0) {
-      state.hopHeight = Math.min(0.0135, state.hopHeight + state.hopVel * clampedDt);
-      state.hopVel -= 0.165 * clampedDt;
+      state.hopHeight = Math.min(0.025, state.hopHeight + state.hopVel * clampedDt);
+      state.hopVel -= 0.135 * clampedDt;
       if (state.onRampSurface && state.hopHeight < (state.rampSurfaceHeight || 0)) {
         state.hopHeight = state.rampSurfaceHeight || 0;
       }
-      state.isAirborne = !state.onRampSurface && state.hopHeight > 0.00045;
+      state.isAirborne = !state.onRampSurface && state.hopHeight > 0.00035;
+      if (state.isAirborne) {
+        state.maxAirborneHeight = Math.max(state.maxAirborneHeight || 0.0, state.hopHeight);
+      }
 
       // Smoothly pitch chassis nose upward during ascent (hopVel > 0 -> negative X pitch)
       // and downward during descent (hopVel < 0 -> positive X pitch)
       const targetAirPitch = state.onRampSurface
-        ? -0.15
+        ? -0.18
         : state.hopVel >= 0
-          ? THREE.MathUtils.clamp(-state.hopVel * 6.2, -0.22, -0.04)
-          : THREE.MathUtils.clamp(-state.hopVel * 3.6, 0.02, 0.13);
+          ? THREE.MathUtils.clamp(-state.hopVel * 4.5, -0.24, -0.04)
+          : THREE.MathUtils.clamp(-state.hopVel * 3.0, 0.02, 0.14);
       state.rampPitch = THREE.MathUtils.lerp(
         state.rampPitch || 0.0,
         targetAirPitch,
         Math.min(1, clampedDt * 14)
       );
 
-      if (state.isAirborne && state.stuntType) {
-        state.stuntProgress = Math.min(1.0, (state.stuntProgress || 0.0) + clampedDt * 2.45);
-        const easedStunt = 1.0 - Math.pow(1.0 - state.stuntProgress, 2.2);
+      if (state.stuntType) {
+        state.stuntProgress = Math.min(1.0, (state.stuntProgress || 0.0) + clampedDt * 1.42);
+        // Smooth ease-in-out S-curve for full 360° (2*PI) rotation around Y (flatspin) or Z (barrel)
+        const p = state.stuntProgress;
+        const easedStunt = p < 0.5 ? 2.0 * p * p : 1.0 - Math.pow(-2.0 * p + 2.0, 2.0) / 2.0;
         if (state.stuntType === 'barrel') {
           state.stuntRollAngle = easedStunt * Math.PI * 2.0;
           state.stuntSpinAngle = 0.0;
@@ -1446,6 +1512,7 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
       }
 
       if (state.hopHeight <= 0) {
+        const hadStunt = Boolean(state.stuntType) || (state.maxAirborneHeight || 0.0) > 0.0045;
         state.hopHeight = 0;
         state.hopVel = 0;
         state.rampPitch = 0.08; // Brief nose-down squat on touchdown
@@ -1459,6 +1526,8 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
           state.landingCompression = 1.0;
           state.carImpactTimer = Math.max(state.carImpactTimer || 0.0, 0.28);
           state.justLanded = true;
+          state.justLandedStunt = hadStunt;
+          state.maxAirborneHeight = 0.0;
           _impactPos
             .copy(frame.position)
             .addScaledVector(frame.right, state.lateralOffset)
@@ -1468,7 +1537,7 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
             const slot = state.pendingImpacts[state.pendingImpactCount++];
             slot.pos.copy(_impactPos);
             slot.normal.copy(_impactNormal);
-            slot.severity = 0.85;
+            slot.severity = hadStunt ? 0.98 : 0.82;
           }
         }
       }
@@ -1477,7 +1546,7 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
       state.isAirborne = false;
       state.rampPitch = THREE.MathUtils.lerp(
         state.rampPitch || 0.0,
-        -0.15,
+        -0.18,
         Math.min(1, clampedDt * 16)
       );
     } else {

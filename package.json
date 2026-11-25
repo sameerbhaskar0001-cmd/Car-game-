@@ -15,6 +15,7 @@
     "@capacitor/core": "^8.5.3",
     "@dimforge/rapier3d-compat": "^0.19.3",
     "@tailwindcss/vite": "^4.3.3",
+    "lucide-react": "^1.79.0",
     "openai": "^7.43.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",

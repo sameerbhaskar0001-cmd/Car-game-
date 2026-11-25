@@ -29,18 +29,18 @@ export function buildPitLaneGarage(scene, centerPos = new THREE.Vector3(0.0, 0.0
   rootGroup.add(floorMesh);
 
   // Balanced Overhead Pit-Bay Illumination (keeps pit walls readable without washing out car shadows)
-  const bayCeilingLight = new THREE.PointLight(0xe0f2fe, 0.24, 0.28, 1.6);
+  const bayCeilingLight = new THREE.PointLight(0xe0f2fe, 0.14, 0.28, 1.6);
   bayCeilingLight.position.set(0.0, 0.056, 0.012);
   rootGroup.add(bayCeilingLight);
 
   // Subtle floor safety border strips (Left, Right, and Rear pit bay lines)
   const stripMatCyan = new THREE.MeshBasicMaterial({
-    color: 0x00e5ff,
-    toneMapped: false,
+    color: 0x06b6d4,
+    toneMapped: true,
   });
   const stripMatAmber = new THREE.MeshBasicMaterial({
-    color: 0xf59e0b,
-    toneMapped: false,
+    color: 0xd97706,
+    toneMapped: true,
   });
   const sideStripGeo = new THREE.PlaneGeometry(0.0014, 0.095);
   for (const sx of [-0.032, 0.032]) {
@@ -115,8 +115,8 @@ export function buildPitLaneGarage(scene, centerPos = new THREE.Vector3(0.0, 0.0
   rootGroup.add(ceilingTruss);
 
   const softboxMat = new THREE.MeshBasicMaterial({
-    color: 0xe0f2fe,
-    toneMapped: false,
+    color: 0xcbd5e1,
+    toneMapped: true,
   });
   const softboxGeo = new THREE.BoxGeometry(0.026, 0.0008, 0.0065);
   for (const bz of [-0.032, -0.014, 0.004]) {

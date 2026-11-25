@@ -103,40 +103,40 @@ export function createRivalRacersController(splineData, scene) {
   // -------------------------------------------------------------------------
   const RIVAL_CONFIGS = [
     {
-      id: 'bot_police',
-      name: 'PATROL',
-      color: '#3b82f6',
-      paintHex: null, // Authentic Police Interceptor
-      carId: 'police',
-      bodyId: 'police',
-      startGridOffset: 0.018, // Ahead of player on left lane
-      laneOffset: -0.0068,
-      baseSpeed: 0.156,
-      personality: 'aggressive',
+      id: 'bot_viper',
+      name: 'VIPER',
+      color: '#ef4444',
+      paintHex: 0xef4444,
+      carId: 'ghini',
+      bodyId: 'ghini',
+      startGridOffset: 0.058, // Pole position fierce pack leader
+      laneOffset: -0.0042,
+      baseSpeed: 0.166,
+      personality: 'cornering',
     },
     {
-      id: 'bot_kamaro',
-      name: 'BLAZE',
-      color: '#f97316',
-      paintHex: 0xf97316,
+      id: 'bot_kira',
+      name: 'KIRA',
+      color: '#06b6d4',
+      paintHex: 0x06b6d4,
       carId: 'kamaro',
       bodyId: 'kamaro',
-      startGridOffset: 0.038, // Ahead of player on right lane
+      startGridOffset: 0.038, // Fast aggressive mid-pack hunter
       laneOffset: 0.0068,
-      baseSpeed: 0.160,
+      baseSpeed: 0.161,
       personality: 'speed',
     },
     {
-      id: 'bot_ghini',
-      name: 'BOLT',
-      color: '#eab308',
-      paintHex: 0xeab308,
-      carId: 'ghini',
-      bodyId: 'ghini',
-      startGridOffset: 0.058, // Pole position pack leader ahead of player
-      laneOffset: -0.0042,
-      baseSpeed: 0.165,
-      personality: 'cornering',
+      id: 'bot_reaper',
+      name: 'REAPER',
+      color: '#a855f7',
+      paintHex: 0x9333ea,
+      carId: 'police',
+      bodyId: 'police',
+      startGridOffset: 0.018, // Relentless close-quarters blocker
+      laneOffset: -0.0068,
+      baseSpeed: 0.157,
+      personality: 'aggressive',
     },
   ];
 
@@ -189,15 +189,15 @@ export function createRivalRacersController(splineData, scene) {
   rsCtx.arc(0, 0, 56, 0, Math.PI * 2);
   rsCtx.fill();
   const rivalShadowTex = new THREE.CanvasTexture(rivalShadowCanvas);
-  const rivalShadowGeo = new THREE.PlaneGeometry(0.0165, 0.0235);
+  const rivalShadowGeo = new THREE.PlaneGeometry(0.0112, 0.0198);
   const rivalShadowMat = new THREE.MeshBasicMaterial({
     map: rivalShadowTex,
     transparent: true,
-    opacity: 0.92,
+    opacity: 0.45,
     depthWrite: false,
     polygonOffset: true,
-    polygonOffsetFactor: -6,
-    polygonOffsetUnits: -6,
+    polygonOffsetFactor: -3,
+    polygonOffsetUnits: -3,
   });
 
   function buildFallbackCarMesh(cfg) {
@@ -206,7 +206,8 @@ export function createRivalRacersController(splineData, scene) {
 
     const shadowQuad = new THREE.Mesh(rivalShadowGeo, rivalShadowMat);
     shadowQuad.rotation.x = -Math.PI / 2;
-    shadowQuad.position.set(0, 0.00045, 0);
+    shadowQuad.position.set(0, 0.00028, 0);
+    shadowQuad.renderOrder = 1;
     shadowQuad.castShadow = false;
     shadowQuad.receiveShadow = false;
     carRoot.add(shadowQuad);
@@ -270,6 +271,7 @@ export function createRivalRacersController(splineData, scene) {
 
   let startFinishArc = samples[Math.min(splineData.startFinishIdx ?? 1, N - 1)].arc_length_m;
   let gridStartBase = startFinishArc;
+  let rivalsEnabled = true;
 
   function resolveRivalGridSlot(idx, cfg) {
     // Place rivals in gridSlots[2], [1], [0] (AHEAD of player at gridSlots[3])!
@@ -297,7 +299,7 @@ export function createRivalRacersController(splineData, scene) {
     rootGroup.add(kart);
 
     const gridSlot = resolveRivalGridSlot(idx, cfg);
-    const laneBias = idx === 0 ? -0.0028 : idx === 1 ? 0.0028 : 0.0;
+    const laneBias = idx === 0 ? -0.0038 : idx === 1 ? 0.0038 : 0.0;
 
     return {
       id: cfg.id,
@@ -310,7 +312,7 @@ export function createRivalRacersController(splineData, scene) {
       wheels,
       s64WheelUpdater: null,
       s: gridSlot.s,
-      totalDistanceTraveled: gridSlot.signedOffsetFromStart, // Continuous distance relative to StartLine!
+      totalDistanceTraveled: gridSlot.signedOffsetFromStart,
       lateralOffset: gridSlot.lateralOffset,
       lateralVel: 0.0,
       targetLane: gridSlot.lateralOffset,
@@ -321,6 +323,8 @@ export function createRivalRacersController(splineData, scene) {
       headingYaw: gridSlot.headingYaw,
       lapCount: 1,
       spinoutTimer: 0.0,
+      spinoutDir: 1,
+      takedownSparkTimer: 0.0,
       bumpCooldown: 0.0,
       hopVel: 0.0,
       hopHeight: 0.0,
@@ -328,6 +332,7 @@ export function createRivalRacersController(splineData, scene) {
       itemCooldown: 6.5 + idx * 2.0,
       position: new THREE.Vector3(),
       rank: idx + 2,
+      eliminated: false,
     };
   });
 
@@ -388,31 +393,36 @@ export function createRivalRacersController(splineData, scene) {
   const _rotMat = new THREE.Matrix4();
   const _baseQuat = new THREE.Quaternion();
   const _yawQuat = new THREE.Quaternion();
-  const _tumbleEuler = new THREE.Euler();
+  const _tumbleEuler = new THREE.Euler(0, 0, 0, 'YXZ');
   const _tumbleQuat = new THREE.Quaternion();
   const _contactPos = new THREE.Vector3();
   const _contactNorm = new THREE.Vector3();
-  const _LANES = [-0.0096, -0.0034, 0.0034, 0.0096];
   const _rankEntries = [
-    { isPlayer: true, dist: 0, rival: null },
-    { isPlayer: false, dist: 0, rival: rivals[0] },
-    { isPlayer: false, dist: 0, rival: rivals[1] },
-    { isPlayer: false, dist: 0, rival: rivals[2] },
+    { isPlayer: true, dist: 0, rival: null, eliminated: false },
+    { isPlayer: false, dist: 0, rival: rivals[0], eliminated: false },
+    { isPlayer: false, dist: 0, rival: rivals[1], eliminated: false },
+    { isPlayer: false, dist: 0, rival: rivals[2], eliminated: false },
   ];
 
   /**
-   * Computes exact player rank (1..4) from continuous totalDistanceTraveled
+   * Computes exact player rank (1..4) from continuous totalDistanceTraveled.
+   * Eliminated rivals always sort behind active racers.
    */
   function getPlayerRank(playerState) {
+    if (!rivalsEnabled) {
+      return 1;
+    }
     const playerDist = playerState.totalDistanceTraveled ?? 0.0;
     _rankEntries[0].isPlayer = true;
     _rankEntries[0].dist = playerDist;
     _rankEntries[0].rival = null;
+    _rankEntries[0].eliminated = false;
 
     for (let i = 0; i < rivals.length; i++) {
       _rankEntries[i + 1].isPlayer = false;
-      _rankEntries[i + 1].dist = rivals[i].totalDistanceTraveled;
+      _rankEntries[i + 1].dist = rivals[i].eliminated ? -9999 + i : rivals[i].totalDistanceTraveled;
       _rankEntries[i + 1].rival = rivals[i];
+      _rankEntries[i + 1].eliminated = Boolean(rivals[i].eliminated);
     }
 
     _rankEntries.sort((a, b) => b.dist - a.dist);
@@ -429,15 +439,73 @@ export function createRivalRacersController(splineData, scene) {
     return playerRank;
   }
 
+  function getActiveRacersCount() {
+    if (!rivalsEnabled) return 1;
+    let active = 1; // player
+    for (let i = 0; i < rivals.length; i++) {
+      if (!rivals[i].eliminated) active++;
+    }
+    return active;
+  }
+
   /**
-   * Updates all 3 AI rivals with rubber-banded movement, lane changes, and collisions
+   * Eliminates the last-place active racer in Elimination Mode.
+   * Returns { playerEliminated: boolean, eliminatedRivalName: string | null, remainingRacers: number }
+   */
+  function eliminateLastPlace(playerState) {
+    getPlayerRank(playerState);
+    // Find lowest-ranked active entry
+    for (let i = _rankEntries.length - 1; i >= 0; i--) {
+      const entry = _rankEntries[i];
+      if (entry.eliminated) continue;
+      if (entry.isPlayer) {
+        return {
+          playerEliminated: true,
+          eliminatedRivalName: null,
+          remainingRacers: getActiveRacersCount(),
+        };
+      }
+      if (entry.rival && !entry.rival.eliminated) {
+        entry.rival.eliminated = true;
+        entry.rival.speed = 0.0;
+        entry.rival.mesh.visible = false;
+        return {
+          playerEliminated: false,
+          eliminatedRivalName: entry.rival.name,
+          remainingRacers: getActiveRacersCount(),
+        };
+      }
+    }
+    return {
+      playerEliminated: false,
+      eliminatedRivalName: null,
+      remainingRacers: getActiveRacersCount(),
+    };
+  }
+
+  function setEnabled(val) {
+    rivalsEnabled = Boolean(val);
+    rootGroup.visible = rivalsEnabled;
+  }
+
+  /**
+   * Updates all 3 AI rivals with competitive rubber-banded movement, anti-stacking separation, and Takedown physics
    */
   function update(dt, playerState, powerupManager, audioSynth) {
+    if (!rivalsEnabled) {
+      return 1;
+    }
     const isRacing = !playerState.countdownLocked && !playerState.raceFinished;
     const playerDist = playerState.totalDistanceTraveled ?? 0.0;
+    const tSec = performance.now() * 0.001;
 
     for (let idx = 0; idx < rivals.length; idx++) {
       const rival = rivals[idx];
+      if (rival.eliminated) {
+        rival.mesh.visible = false;
+        continue;
+      }
+      rival.mesh.visible = true;
 
       if (rival.bumpCooldown > 0) {
         rival.bumpCooldown = Math.max(0.0, rival.bumpCooldown - dt);
@@ -448,10 +516,13 @@ export function createRivalRacersController(splineData, scene) {
       if ((rival.spinoutTimer || 0) > 0) {
         rival.spinoutTimer = Math.max(0.0, rival.spinoutTimer - dt);
       }
+      if ((rival.takedownSparkTimer || 0) > 0) {
+        rival.takedownSparkTimer = Math.max(0.0, rival.takedownSparkTimer - dt);
+      }
 
       if (rival.hopHeight > 0 || rival.hopVel !== 0) {
         rival.hopHeight += rival.hopVel * dt;
-        rival.hopVel -= 0.18 * dt;
+        rival.hopVel -= 0.165 * dt;
         if (rival.hopHeight <= 0) {
           rival.hopHeight = 0;
           rival.hopVel = 0;
@@ -463,41 +534,65 @@ export function createRivalRacersController(splineData, scene) {
         const lookAheadFrame = samplePoint(rival.s + 0.028, _lookAheadFrame);
         const safeHalfW = Math.max(0.0125, (currFrame.halfWidth || 0.01705) - 0.0024);
 
-        // Dynamic Continuous Rubber-Band AI System (Bumper-to-Bumper Racing, Zero Teleporting):
+        // Final-Lap Aggressive Push: on Lap 3, rivals push 7.5% harder with tighter rubber-band & catch-up nitro!
+        const isFinalLap = (playerState.lapCount || 1) >= 3 || (rival.lapCount || 1) >= 3;
         const deltaS = playerDist - rival.totalDistanceTraveled;
         let rubberBandMultiplier = 1.0;
 
         if (deltaS > 0.0) {
-          const catchUpT = THREE.MathUtils.clamp(deltaS / 0.26, 0.0, 1.0);
-          rubberBandMultiplier = THREE.MathUtils.lerp(1.0, 1.25, catchUpT);
+          // Rival is behind player: aggressive catch-up up to 1.48x (1.55x final lap)
+          const catchUpT = THREE.MathUtils.clamp(deltaS / (isFinalLap ? 0.15 : 0.19), 0.0, 1.0);
+          rubberBandMultiplier = THREE.MathUtils.lerp(1.04, isFinalLap ? 1.54 : 1.45, catchUpT);
+          const nitroTriggerDist = isFinalLap ? 0.10 : 0.15;
+          if (deltaS > nitroTriggerDist && rival.boostTimer <= 0 && (rival.spinoutTimer || 0) <= 0) {
+            rival.boostTimer = isFinalLap ? 1.05 : 0.85;
+          }
         } else if (deltaS < 0.0) {
-          const dragT = THREE.MathUtils.clamp(-deltaS / 0.20, 0.0, 1.0);
-          rubberBandMultiplier = THREE.MathUtils.lerp(1.0, 0.85, dragT);
+          // Rival is ahead of player: pace check down to 0.85x (0.90x final lap so player must earn the pass!)
+          const dragT = THREE.MathUtils.clamp(-deltaS / 0.15, 0.0, 1.0);
+          rubberBandMultiplier = THREE.MathUtils.lerp(1.0, isFinalLap ? 0.90 : 0.83, dragT);
         }
 
         const playerTierScale = THREE.MathUtils.lerp(
           1.0,
           playerState.topSpeedMultiplier || 1.0,
-          0.75
+          0.94
         );
         const racingLineSpeedScale = THREE.MathUtils.lerp(
           1.0,
           currFrame.racingLineSpeedFactor || 1.0,
-          0.52
+          0.45
         );
+        const finalLapMult = isFinalLap ? 1.075 : 1.0;
         let targetSpeed =
-          rival.baseSpeed * playerTierScale * racingLineSpeedScale * rubberBandMultiplier;
+          rival.baseSpeed * 1.06 * finalLapMult * playerTierScale * racingLineSpeedScale * rubberBandMultiplier;
 
         if (rival.boostTimer > 0) {
-          targetSpeed *= 1.15;
+          targetSpeed *= 1.18;
         }
 
         if ((rival.spinoutTimer || 0) > 0) {
-          // Rival is spinning out after a Player Takedown!
-          rival.speed = Math.max(0.025, rival.speed * Math.exp(-3.2 * dt));
-          rival.headingYaw += 14.0 * dt;
+          // Rival is violently spinning & tumbling sideways after a Player Takedown!
+          rival.speed = Math.max(0.018, rival.speed * Math.exp(-4.8 * dt));
+          rival.headingYaw += (rival.spinoutDir || 1) * 16.5 * dt;
+
+          // Emit continuous scraping sparks during takedown spinout
+          if (
+            (rival.takedownSparkTimer || 0) > 0 &&
+            playerState.pendingImpacts &&
+            playerState.pendingImpactCount < playerState.pendingImpacts.length
+          ) {
+            _contactPos
+              .copy(rival.position)
+              .addScaledVector(currFrame.normal, 0.0014);
+            _contactNorm.copy(currFrame.normal);
+            const slot = playerState.pendingImpacts[playerState.pendingImpactCount++];
+            slot.pos.copy(_contactPos);
+            slot.normal.copy(_contactNorm);
+            slot.severity = 0.85;
+          }
         } else {
-          const accelRate = rival.speed < rival.baseSpeed * 0.82 ? 0.95 : 2.25;
+          const accelRate = rival.speed < rival.baseSpeed * 0.82 ? 1.45 : 2.85;
           rival.speed = THREE.MathUtils.lerp(
             rival.speed,
             targetSpeed,
@@ -515,19 +610,37 @@ export function createRivalRacersController(splineData, scene) {
           Math.floor(Math.max(0, rival.totalDistanceTraveled) / totalLength) + 1
         );
 
+        // Distinct per-rival lane weave + active lane defense when player closes in behind!
+        const laneWeave = Math.sin(tSec * (1.1 + idx * 0.35) + idx * 2.1) * 0.0020;
         const desiredRacingLane = THREE.MathUtils.clamp(
-          (lookAheadFrame.racingLineOffset || 0.0) + (rival.laneBias || 0.0),
-          -safeHalfW * 0.78,
-          safeHalfW * 0.78
+          (lookAheadFrame.racingLineOffset || 0.0) * 0.65 + (rival.laneBias || 0.0) + laneWeave,
+          -safeHalfW * 0.82,
+          safeHalfW * 0.82
         );
 
         const aheadPlayerS = ((playerState.s - rival.s) % totalLength + totalLength) % totalLength;
+        const behindPlayerS = ((rival.s - playerState.s) % totalLength + totalLength) % totalLength;
+
         if (
           aheadPlayerS > 0.005 &&
           aheadPlayerS < 0.055 &&
-          Math.abs(playerState.lateralOffset - rival.lateralOffset) < 0.0056
+          Math.abs(playerState.lateralOffset - rival.lateralOffset) < 0.0058
         ) {
+          // Player is directly ahead -> slip around cleanly to overtake
           rival.targetLane = playerState.lateralOffset >= 0 ? -0.0092 : 0.0092;
+        } else if (
+          behindPlayerS > 0.009 &&
+          behindPlayerS < 0.044 &&
+          Math.abs(playerState.lateralOffset - rival.lateralOffset) < 0.0095 &&
+          (isFinalLap || rival.rank === 1 || rival.personality === 'aggressive')
+        ) {
+          // Active Lane Defense: smoothly cover the inside/player passing line without swerving wildly
+          const defendLane = THREE.MathUtils.lerp(
+            desiredRacingLane,
+            playerState.lateralOffset,
+            isFinalLap ? 0.68 : 0.45
+          );
+          rival.targetLane = THREE.MathUtils.clamp(defendLane, -safeHalfW * 0.78, safeHalfW * 0.78);
         } else {
           rival.targetLane = desiredRacingLane;
         }
@@ -535,14 +648,14 @@ export function createRivalRacersController(splineData, scene) {
         const prevLat = rival.lateralOffset;
         if (Math.abs(rival.lateralVel || 0.0) > 0.0002) {
           rival.lateralOffset += rival.lateralVel * dt;
-          rival.lateralVel *= Math.exp(-9.5 * dt);
+          rival.lateralVel *= Math.exp(-5.8 * dt);
           rival.lateralOffset = THREE.MathUtils.clamp(rival.lateralOffset, -safeHalfW, safeHalfW);
         } else {
           rival.lateralVel = 0.0;
           rival.lateralOffset = THREE.MathUtils.lerp(
             rival.lateralOffset,
             rival.targetLane,
-            dt * 3.2
+            dt * 3.4
           );
           rival.lateralOffset = THREE.MathUtils.clamp(rival.lateralOffset, -safeHalfW, safeHalfW);
         }
@@ -552,37 +665,85 @@ export function createRivalRacersController(splineData, scene) {
           const targetHeadingYaw = THREE.MathUtils.clamp(-latSteerRate * 1.4, -0.18, 0.18);
           rival.headingYaw = THREE.MathUtils.lerp(rival.headingYaw, targetHeadingYaw, dt * 8.5);
         }
-
-        // Rival-vs-Rival solid separation so AI cars never overlap each other
-        for (let otherIdx = 0; otherIdx < idx; otherIdx++) {
-          const other = rivals[otherIdx];
-          const dS = Math.abs(
-            ((rival.s - other.s + totalLength * 0.5) % totalLength) - totalLength * 0.5
-          );
-          const dLat = rival.lateralOffset - other.lateralOffset;
-          if (dS < 0.012 && Math.abs(dLat) < 0.0056) {
-            const sepSign = dLat >= 0 ? 1 : -1;
-            const sepPush = (0.0056 - Math.abs(dLat)) * 0.55;
-            rival.lateralOffset = THREE.MathUtils.clamp(
-              rival.lateralOffset + sepSign * sepPush,
-              -safeHalfW,
-              safeHalfW
-            );
-            other.lateralOffset = THREE.MathUtils.clamp(
-              other.lateralOffset - sepSign * sepPush,
-              -safeHalfW,
-              safeHalfW
-            );
-          }
-        }
       } else if (playerState.victoryCruise) {
         rival.speed = Math.max(0.0, rival.speed * Math.exp(-0.9 * dt));
         rival.s = ((rival.s + rival.speed * dt) % totalLength + totalLength) % totalLength;
       } else {
         rival.speed = 0.0;
       }
+    }
 
-      // Aerodynamic Slipstream Drafting + Asphalt Takedown & Bumper Physics
+    // -----------------------------------------------------------------------
+    // PAIRWISE RIVAL-TO-RIVAL ANTI-STACKING SEPARATION PASS (Lateral + Longitudinal!)
+    // Ensures AI cars NEVER stack inside each other even when squeezed against outer walls
+    // -----------------------------------------------------------------------
+    if (isRacing) {
+      const minRivalDS = 0.0175;
+      const minRivalDLat = 0.0068;
+      for (let pass = 0; pass < 2; pass++) {
+        for (let i = 0; i < rivals.length; i++) {
+          const rA = rivals[i];
+          if (rA.eliminated) continue;
+          const frameA = samplePoint(rA.s, _sampleFrame);
+          const safeHalfW = Math.max(0.0122, (frameA.halfWidth || 0.01705) - 0.0024);
+
+          for (let j = i + 1; j < rivals.length; j++) {
+            const rB = rivals[j];
+            if (rB.eliminated) continue;
+
+            const signedDS = rA.totalDistanceTraveled - rB.totalDistanceTraveled;
+            const absDS = Math.abs(signedDS);
+            const dLat = rA.lateralOffset - rB.lateralOffset;
+            const absDLat = Math.abs(dLat);
+
+            if (absDS < minRivalDS && absDLat < minRivalDLat) {
+              // 1. Push apart laterally first
+              const latSign =
+                absDLat > 0.0003
+                  ? Math.sign(dLat)
+                  : rA.lateralOffset <= 0
+                    ? 1
+                    : -1;
+              const latOverlap = minRivalDLat - absDLat;
+              rA.lateralOffset = THREE.MathUtils.clamp(
+                rA.lateralOffset + latSign * latOverlap * 0.58,
+                -safeHalfW,
+                safeHalfW
+              );
+              rB.lateralOffset = THREE.MathUtils.clamp(
+                rB.lateralOffset - latSign * latOverlap * 0.58,
+                -safeHalfW,
+                safeHalfW
+              );
+
+              // 2. If still overlapping laterally (e.g. both near track wall), separate longitudinally!
+              const newAbsDLat = Math.abs(rA.lateralOffset - rB.lateralOffset);
+              if (newAbsDLat < minRivalDLat * 0.85) {
+                const sSign = signedDS >= 0 ? 1 : -1;
+                const sOverlap = (minRivalDS - absDS) * 0.55;
+                rA.totalDistanceTraveled += sSign * sOverlap;
+                rB.totalDistanceTraveled -= sSign * sOverlap;
+                rA.s = ((gridStartBase + rA.totalDistanceTraveled) % totalLength + totalLength) % totalLength;
+                rB.s = ((gridStartBase + rB.totalDistanceTraveled) % totalLength + totalLength) % totalLength;
+                if (sSign > 0) {
+                  rB.speed = Math.min(rB.speed, rA.speed * 0.96);
+                } else {
+                  rA.speed = Math.min(rA.speed, rB.speed * 0.96);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // PLAYER-VS-RIVAL COLLISIONS, SLIPSTREAM DRAFTING & REAL TAKEDOWN PHYSICS
+    // -----------------------------------------------------------------------
+    for (let idx = 0; idx < rivals.length; idx++) {
+      const rival = rivals[idx];
+      if (rival.eliminated) continue;
+
       if (isRacing) {
         const signedDS =
           ((playerState.s - rival.s + totalLength * 0.5) % totalLength) - totalLength * 0.5;
@@ -590,6 +751,27 @@ export function createRivalRacersController(splineData, scene) {
         const latDelta = playerState.lateralOffset - rival.lateralOffset;
         const absDLat = Math.abs(latDelta);
         const absDHop = Math.abs((playerState.hopHeight || 0.0) - (rival.hopHeight || 0.0));
+
+        if ((rival.nearMissCooldown || 0) > 0) {
+          rival.nearMissCooldown = Math.max(0, rival.nearMissCooldown - dt);
+        }
+
+        // 0. Detect Final-Lap Rival Hard Overtake (Evil Laugh Taunt!)
+        const isAheadNow = signedDS < -0.004;
+        const wasBehind = rival.wasAheadOfPlayer === false;
+        const isFinalLap = (playerState.lapCount || 1) >= 3;
+        if (
+          isFinalLap &&
+          wasBehind &&
+          isAheadNow &&
+          absDS < 0.025 &&
+          (rival.spinoutTimer || 0) <= 0 &&
+          audioSynth &&
+          audioSynth.playEvilLaugh
+        ) {
+          audioSynth.playEvilLaugh();
+        }
+        rival.wasAheadOfPlayer = isAheadNow;
 
         // 1. Aerodynamic Slipstream Draft (when tucked closely behind a rival at high speed)
         if (
@@ -612,6 +794,27 @@ export function createRivalRacersController(splineData, scene) {
         const minDS = 0.0132;
         const minDLat = 0.0054;
 
+        // 1B. Close Near-Miss High-Speed Overtake Flyby Whoosh (`pass1`/`pass2` MP3)!
+        if (
+          absDS < 0.0145 &&
+          absDLat >= minDLat &&
+          absDLat < 0.0112 &&
+          absDHop < 0.0045 &&
+          playerState.speed > 0.105 &&
+          (rival.nearMissCooldown || 0) <= 0 &&
+          (rival.spinoutTimer || 0) <= 0
+        ) {
+          rival.nearMissCooldown = 2.4;
+          playerState.boostCharge = Math.min(1.0, (playerState.boostCharge || 0) + 0.09);
+          playerState.driftScore = Math.round((playerState.driftScore || 0) + 150);
+          playerState.actionBanner = `⚡ NEAR MISS! (${rival.name}) +NITRO`;
+          playerState.actionBannerColor = '#38bdf8';
+          playerState.actionBannerTimer = 1.15;
+          if (audioSynth && audioSynth.playNearMissWhoosh) {
+            audioSynth.playNearMissWhoosh(Math.sign(latDelta) || 1);
+          }
+        }
+
         if (absDS < minDS && absDLat < minDLat && absDHop < 0.0040) {
           const pushDir =
             Math.abs(latDelta) > 0.0004
@@ -622,145 +825,173 @@ export function createRivalRacersController(splineData, scene) {
                   ? 1
                   : -1;
 
-          const isLongitudinalRam = absDLat < 0.0034 && absDS > 0.0048;
-
-          if (isLongitudinalRam) {
-            const overlapS = minDS - absDS + 0.0006;
-            if (signedDS < 0) {
-              const pushRivalS = overlapS * 0.82;
-              const pushPlayerBackS = overlapS * 0.18;
-              rival.totalDistanceTraveled += pushRivalS;
-              rival.s = ((gridStartBase + rival.totalDistanceTraveled) % totalLength + totalLength) % totalLength;
-
-              playerState.s = ((playerState.s - pushPlayerBackS) % totalLength + totalLength) % totalLength;
-              playerState.totalDistanceTraveled = Math.max(0.0, (playerState.totalDistanceTraveled || 0.0) - pushPlayerBackS);
-              playerState.lapDistanceTraveled = Math.max(0.0, (playerState.lapDistanceTraveled || 0.0) - pushPlayerBackS);
-
-              playerState.knockbackLateralVel = pushDir * 0.018;
-              rival.lateralVel = -pushDir * 0.022;
-              rival.targetLane = THREE.MathUtils.clamp(
-                rival.lateralOffset - pushDir * 0.0072,
-                -0.0096,
-                0.0096
-              );
-              rival.speed = Math.max(rival.speed, playerState.speed * 1.06);
-            } else {
-              const pushPlayerS = overlapS * 0.75;
-              const pushRivalBackS = overlapS * 0.25;
-              playerState.s = (playerState.s + pushPlayerS) % totalLength;
-              playerState.totalDistanceTraveled = (playerState.totalDistanceTraveled || 0.0) + pushPlayerS;
-              playerState.lapDistanceTraveled = (playerState.lapDistanceTraveled || 0.0) + pushPlayerS;
-
-              rival.totalDistanceTraveled -= pushRivalBackS;
-              rival.s = ((gridStartBase + rival.totalDistanceTraveled) % totalLength + totalLength) % totalLength;
-              playerState.knockbackLateralVel = pushDir * 0.012;
-              rival.lateralVel = -pushDir * 0.018;
-              rival.targetLane = -pushDir * 0.0088;
-
-              playerState.speed = Math.max(playerState.speed, rival.speed * 1.04);
-              rival.speed *= 0.94;
-            }
-          } else {
-            const overlapLat = minDLat - absDLat + 0.0008;
-            playerState.lateralOffset = THREE.MathUtils.clamp(
-              playerState.lateralOffset + pushDir * overlapLat * 0.48,
-              -0.0148,
-              0.0148
-            );
-            rival.lateralOffset = THREE.MathUtils.clamp(
-              rival.lateralOffset - pushDir * overlapLat * 0.52,
-              -0.0144,
-              0.0144
-            );
-            playerState.knockbackLateralVel = pushDir * 0.022;
-            rival.lateralVel = -pushDir * 0.025;
-            rival.targetLane = THREE.MathUtils.clamp(
-              rival.lateralOffset - pushDir * 0.0056,
-              -0.0096,
-              0.0096
-            );
-          }
-
-          // Check for Asphalt TAKEDOWN! (Boosting/Shockwave collision OR slamming rival into outer guardrail)
+          // Check for Asphalt TAKEDOWN! (Boosting/Shockwave collision, drifting slam, OR slamming rival into outer guardrail)
           const isBoostAttack =
-            (playerState.boostActive || 0) > 0.05 || (playerState.shockwaveTimer || 0) > 0.0;
-          const isWallSlam = Math.abs(rival.lateralOffset) >= 0.0102;
+            (playerState.boostActive || 0) > 0.05 ||
+            (playerState.shockwaveTimer || 0) > 0.0 ||
+            (playerState.isDrifting && playerState.speed > 0.13);
+          const isWallSlam = Math.abs(rival.lateralOffset) >= 0.0092;
           const canTakedown = (isBoostAttack || isWallSlam) && (rival.spinoutTimer || 0) <= 0.0;
 
-          playerState.carImpactTimer = 0.24;
           if (canTakedown) {
-            rival.spinoutTimer = 1.25;
-            rival.bumpCooldown = 0.65;
-            rival.hopVel = 0.016;
-            rival.lateralVel = -pushDir * 0.032;
+            // REAL TAKEDOWN PHYSICS: Violently knock & spin rival sideways with hop, sparks, and 65% slowdown!
+            rival.spinoutTimer = 1.65;
+            rival.spinoutDir = -pushDir || 1;
+            rival.takedownSparkTimer = 0.55;
+            rival.bumpCooldown = 0.85;
+            rival.hopVel = 0.032;
+            rival.lateralVel = -pushDir * 0.058;
+            rival.speed = Math.max(0.025, rival.speed * 0.34);
+            rival.totalDistanceTraveled -= 0.008;
+            rival.s = ((gridStartBase + rival.totalDistanceTraveled) % totalLength + totalLength) % totalLength;
+
+            playerState.carImpactTimer = 0.35;
             playerState.boostCharge = Math.min(1.0, (playerState.boostCharge || 0) + 0.50);
-            playerState.boostActive = Math.max(playerState.boostActive || 0, 1.35);
-            playerState.speed = Math.max(playerState.speed, 0.168 * (playerState.topSpeedMultiplier || 1.0));
+            playerState.boostActive = Math.max(playerState.boostActive || 0, 1.45);
+            playerState.speed = Math.max(
+              playerState.speed,
+              0.175 * (playerState.topSpeedMultiplier || 1.0)
+            );
+            playerState.driftScore = Math.round((playerState.driftScore || 0) + 500);
             playerState.cameraShake = 0.95;
             playerState.actionBanner = `💥 TAKEDOWN! (${rival.name}) +50% NITRO`;
             playerState.actionBannerColor = '#f43f5e';
             playerState.actionBannerTimer = 1.85;
-            if (
-              playerState.pendingImpacts &&
-              playerState.pendingImpactCount < playerState.pendingImpacts.length
-            ) {
+
+            if (playerState.pendingImpacts) {
               const contactFrame = samplePoint(rival.s);
-              _contactPos
-                .copy(rival.position)
-                .addScaledVector(contactFrame.normal, 0.0022);
-              _contactNorm.copy(contactFrame.normal);
-              const slot = playerState.pendingImpacts[playerState.pendingImpactCount++];
-              slot.pos.copy(_contactPos);
-              slot.normal.copy(_contactNorm);
-              slot.severity = 1.0;
+              for (let sIdx = 0; sIdx < 2; sIdx++) {
+                if (playerState.pendingImpactCount < playerState.pendingImpacts.length) {
+                  _contactPos
+                    .copy(rival.position)
+                    .addScaledVector(contactFrame.normal, 0.0020);
+                  _contactNorm
+                    .copy(contactFrame.right)
+                    .multiplyScalar(-pushDir)
+                    .addScaledVector(contactFrame.normal, 0.5)
+                    .normalize();
+                  const slot = playerState.pendingImpacts[playerState.pendingImpactCount++];
+                  slot.pos.copy(_contactPos);
+                  slot.normal.copy(_contactNorm);
+                  slot.severity = 1.25;
+                }
+              }
             }
             if (audioSynth) {
-              if (audioSynth.playExplosion) audioSynth.playExplosion();
-              if (audioSynth.playRailImpact) audioSynth.playRailImpact(1.1);
+              if (audioSynth.playExplosion) {
+                audioSynth.playExplosion();
+              } else if (audioSynth.playRailImpact) {
+                audioSynth.playRailImpact(1.2);
+              }
             }
-          } else if (rival.bumpCooldown <= 0) {
-            rival.bumpCooldown = 0.24;
-            playerState.headingYaw = THREE.MathUtils.clamp(
-              playerState.headingYaw - pushDir * 0.035,
-              -0.24,
-              0.24
-            );
-            rival.headingYaw = THREE.MathUtils.clamp(
-              rival.headingYaw + pushDir * 0.085,
-              -0.22,
-              0.22
-            );
-            playerState.cameraShake = Math.max(playerState.cameraShake || 0.0, 0.62);
-            playerState.speed = Math.max(playerState.speed * 0.985, rival.speed * 0.94);
-            rival.speed *= 0.97;
-            if (
-              playerState.pendingImpacts &&
-              playerState.pendingImpactCount < playerState.pendingImpacts.length
-            ) {
-              const contactFrame = samplePoint(rival.s);
-              _contactPos
-                .copy(playerState.position)
-                .add(rival.position)
-                .multiplyScalar(0.5)
-                .addScaledVector(contactFrame.normal, 0.0018);
-              _contactNorm
-                .copy(contactFrame.right)
-                .multiplyScalar(pushDir)
-                .addScaledVector(contactFrame.normal, 0.45)
-                .normalize();
-              const slot = playerState.pendingImpacts[playerState.pendingImpactCount++];
-              slot.pos.copy(_contactPos);
-              slot.normal.copy(_contactNorm);
-              slot.severity = isLongitudinalRam ? 0.95 : 0.82;
+          } else {
+            const isLongitudinalRam = absDLat < 0.0034 && absDS > 0.0048;
+
+            if (isLongitudinalRam) {
+              const overlapS = minDS - absDS + 0.0006;
+              if (signedDS < 0) {
+                const pushRivalS = overlapS * 0.82;
+                const pushPlayerBackS = overlapS * 0.18;
+                rival.totalDistanceTraveled += pushRivalS;
+                rival.s = ((gridStartBase + rival.totalDistanceTraveled) % totalLength + totalLength) % totalLength;
+
+                playerState.s = ((playerState.s - pushPlayerBackS) % totalLength + totalLength) % totalLength;
+                playerState.totalDistanceTraveled = Math.max(0.0, (playerState.totalDistanceTraveled || 0.0) - pushPlayerBackS);
+                playerState.lapDistanceTraveled = Math.max(0.0, (playerState.lapDistanceTraveled || 0.0) - pushPlayerBackS);
+
+                playerState.knockbackLateralVel = pushDir * 0.016;
+                rival.lateralVel = -pushDir * 0.028;
+                rival.targetLane = THREE.MathUtils.clamp(
+                  rival.lateralOffset - pushDir * 0.0072,
+                  -0.0096,
+                  0.0096
+                );
+                rival.speed = Math.max(rival.speed, playerState.speed * 1.04);
+              } else {
+                const pushPlayerS = overlapS * 0.75;
+                const pushRivalBackS = overlapS * 0.25;
+                playerState.s = (playerState.s + pushPlayerS) % totalLength;
+                playerState.totalDistanceTraveled = (playerState.totalDistanceTraveled || 0.0) + pushPlayerS;
+                playerState.lapDistanceTraveled = (playerState.lapDistanceTraveled || 0.0) + pushPlayerS;
+
+                rival.totalDistanceTraveled -= pushRivalBackS;
+                rival.s = ((gridStartBase + rival.totalDistanceTraveled) % totalLength + totalLength) % totalLength;
+                playerState.knockbackLateralVel = pushDir * 0.012;
+                rival.lateralVel = -pushDir * 0.022;
+                rival.targetLane = -pushDir * 0.0088;
+
+                playerState.speed = Math.max(playerState.speed, rival.speed * 1.04);
+                rival.speed *= 0.94;
+              }
+            } else {
+              const overlapLat = minDLat - absDLat + 0.0008;
+              playerState.lateralOffset = THREE.MathUtils.clamp(
+                playerState.lateralOffset + pushDir * overlapLat * 0.42,
+                -0.0148,
+                0.0148
+              );
+              rival.lateralOffset = THREE.MathUtils.clamp(
+                rival.lateralOffset - pushDir * overlapLat * 0.58,
+                -0.0144,
+                0.0144
+              );
+              playerState.knockbackLateralVel = pushDir * 0.018;
+              rival.lateralVel = -pushDir * 0.032;
+              rival.targetLane = THREE.MathUtils.clamp(
+                rival.lateralOffset - pushDir * 0.0064,
+                -0.0096,
+                0.0096
+              );
             }
-            if (audioSynth && audioSynth.playRailImpact) {
-              audioSynth.playRailImpact(0.75);
+
+            playerState.carImpactTimer = 0.24;
+            if (rival.bumpCooldown <= 0) {
+              rival.bumpCooldown = 0.24;
+              playerState.headingYaw = THREE.MathUtils.clamp(
+                playerState.headingYaw - pushDir * 0.030,
+                -0.22,
+                0.22
+              );
+              rival.headingYaw = THREE.MathUtils.clamp(
+                rival.headingYaw + pushDir * 0.12,
+                -0.28,
+                0.28
+              );
+              playerState.cameraShake = Math.max(playerState.cameraShake || 0.0, 0.58);
+              playerState.speed = Math.max(playerState.speed * 0.99, rival.speed * 0.95);
+              rival.speed *= 0.94;
+              if (
+                playerState.pendingImpacts &&
+                playerState.pendingImpactCount < playerState.pendingImpacts.length
+              ) {
+                const contactFrame = samplePoint(rival.s);
+                _contactPos
+                  .copy(playerState.position)
+                  .add(rival.position)
+                  .multiplyScalar(0.5)
+                  .addScaledVector(contactFrame.normal, 0.0018);
+                _contactNorm
+                  .copy(contactFrame.right)
+                  .multiplyScalar(pushDir)
+                  .addScaledVector(contactFrame.normal, 0.45)
+                  .normalize();
+                const slot = playerState.pendingImpacts[playerState.pendingImpactCount++];
+                slot.pos.copy(_contactPos);
+                slot.normal.copy(_contactNorm);
+                slot.severity = isLongitudinalRam ? 0.95 : 0.82;
+              }
+              if (audioSynth && audioSynth.playRailImpact) {
+                audioSynth.playRailImpact(0.75);
+              }
+              if (isFinalLap && audioSynth && audioSynth.playEvilLaugh) {
+                audioSynth.playEvilLaugh();
+              }
             }
           }
         }
       }
 
-      // Update 3D World Transform on the track spline (using resolved collision coordinates)
+      // Update 3D World Transform on the track spline (with 3D roll/pitch tumble during Takedowns!)
       const frame = samplePoint(rival.s);
       rival.position
         .copy(frame.pos)
@@ -774,6 +1005,15 @@ export function createRivalRacersController(splineData, scene) {
       _baseQuat.setFromRotationMatrix(_rotMat);
       _yawQuat.setFromAxisAngle(frame.normal, rival.headingYaw);
       rival.mesh.quaternion.copy(_yawQuat.multiply(_baseQuat));
+
+      if ((rival.spinoutTimer || 0) > 0) {
+        const spinFrac = Math.min(1.0, rival.spinoutTimer / 1.2);
+        const tumbleRoll = Math.sin(tSec * 22.0 + idx) * 0.38 * spinFrac;
+        const tumblePitch = Math.cos(tSec * 18.0 + idx) * 0.22 * spinFrac;
+        _tumbleEuler.set(tumblePitch, 0, tumbleRoll, 'YXZ');
+        _tumbleQuat.setFromEuler(_tumbleEuler);
+        rival.mesh.quaternion.multiply(_tumbleQuat);
+      }
 
       // Spin wheels & update AI exhaust flames
       if (rival.cosmoCar) {
@@ -806,6 +1046,8 @@ export function createRivalRacersController(splineData, scene) {
       rival.headingYaw = gridSlot.headingYaw || 0.0;
       rival.lapCount = 1;
       rival.spinoutTimer = 0.0;
+      rival.spinoutDir = 1;
+      rival.takedownSparkTimer = 0.0;
       rival.bumpCooldown = 0.0;
       rival.boostTimer = 0.0;
       rival.hopHeight = 0.0;
@@ -813,6 +1055,8 @@ export function createRivalRacersController(splineData, scene) {
       rival.heldItem = null;
       rival.itemCooldown = 6.5 + idx * 2.0;
       rival.rank = idx + 2;
+      rival.eliminated = false;
+      rival.mesh.visible = rivalsEnabled;
 
       const frame = samplePoint(rival.s);
       rival.position
@@ -852,12 +1096,18 @@ export function createRivalRacersController(splineData, scene) {
     attachS64RivalModels,
     attachCosmoRivalModels,
     getPlayerRank,
+    getActiveRacersCount,
+    eliminateLastPlace,
+    setEnabled,
     getRivalsData: () =>
       rivals.map((r) => ({
         id: r.id,
         name: r.name,
         color: r.color,
         rank: r.rank,
+        isLeader: r.rank === 1 && !r.eliminated,
+        eliminated: Boolean(r.eliminated),
+        totalDistanceTraveled: r.totalDistanceTraveled || 0,
         speedKmh: Math.round(Math.abs(r.speed) * 240.0 * 3.6),
         position: [r.position.x, r.position.y, r.position.z],
       })),

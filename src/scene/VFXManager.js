@@ -117,7 +117,7 @@ export function createVFXManager(scene) {
   // 2. FLUSH ROAD SKID-MARK RING BUFFER (InstancedMesh, 360 segments)
   // =========================================================================
   const MAX_SKIDS = 360;
-  const skidGeo = new THREE.PlaneGeometry(0.00135, 1.0);
+  const skidGeo = new THREE.PlaneGeometry(0.00072, 1.0);
   skidGeo.rotateX(-Math.PI / 2);
 
   const skidAlphaArr = new Float32Array(MAX_SKIDS);
@@ -126,14 +126,14 @@ export function createVFXManager(scene) {
   skidGeo.setAttribute('aInstanceAlpha', skidAlphaAttr);
 
   const skidMat = new THREE.MeshBasicMaterial({
-    color: 0x0b0d12,
+    color: 0x11151e,
     transparent: true,
     opacity: 1.0,
     depthWrite: false,
     side: THREE.DoubleSide,
     polygonOffset: true,
-    polygonOffsetFactor: -7,
-    polygonOffsetUnits: -7,
+    polygonOffsetFactor: -4,
+    polygonOffsetUnits: -4,
   });
   skidMat.onBeforeCompile = smokeMat.onBeforeCompile;
   skidMat.customProgramCacheKey = () => 'vfx-instanced-alpha-v1';
@@ -141,12 +141,13 @@ export function createVFXManager(scene) {
   const skidMesh = new THREE.InstancedMesh(skidGeo, skidMat, MAX_SKIDS);
   skidMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   skidMesh.frustumCulled = false;
+  skidMesh.renderOrder = 2;
   skidMesh.name = 'VFXSkidMarkRingBuffer';
   rootGroup.add(skidMesh);
 
   const skidAge = new Float32Array(MAX_SKIDS);
   const skidActive = new Uint8Array(MAX_SKIDS);
-  const SKID_MAX_LIFETIME = 7.5;
+  const SKID_MAX_LIFETIME = 4.2;
   let skidCursor = 0;
 
   let hasPrevSkid = false;
@@ -170,7 +171,7 @@ export function createVFXManager(scene) {
   function stampSkidSegment(pA, pB, trackNormal, widthScale = 1.0) {
     _dir.subVectors(pB, pA);
     const segLen = _dir.length();
-    if (segLen < 0.0004 || segLen > 0.025) return;
+    if (segLen < 0.00035 || segLen > 0.0095) return;
     _dir.divideScalar(segLen);
 
     const idx = skidCursor;
@@ -185,13 +186,13 @@ export function createVFXManager(scene) {
     _v2.copy(pA).add(pB).multiplyScalar(0.5);
     _dummy.position.copy(_v2);
     _dummy.quaternion.setFromRotationMatrix(_rotMat);
-    _dummy.scale.set(widthScale, 1.0, segLen * 1.15);
+    _dummy.scale.set(widthScale, 1.0, segLen * 1.06);
     _dummy.updateMatrix();
 
     skidMesh.setMatrixAt(idx, _dummy.matrix);
     skidAge[idx] = 0.0;
     skidActive[idx] = 1;
-    skidAlphaArr[idx] = 0.62;
+    skidAlphaArr[idx] = 0.32;
   }
 
   // =========================================================================
@@ -418,21 +419,31 @@ export function createVFXManager(scene) {
     // A. Compute Rear Tire Ground Contact Points & Stamp Skid Marks + Smoke
     // ---------------------------------------------------------------------
     if (isDriftingActive) {
-      const tireHalfW = 0.00275 * kScale;
-      const rearWheelZ = 0.0052 * kScale;
-      const tireRadiusY = 0.00038;
+      const tireHalfW = 0.00265 * kScale;
+      const rearWheelZ = 0.0050 * kScale;
+      const tireRadiusY = 0.00054;
+      const slipYaw = (state.driftAngle || 0.0) * 0.65;
+      const cosSlip = Math.cos(slipYaw);
+      const sinSlip = Math.sin(slipYaw);
 
       _v0
         .copy(state.position)
-        .addScaledVector(state.tangent, -rearWheelZ)
+        .addScaledVector(state.tangent, -rearWheelZ * cosSlip)
+        .addScaledVector(state.right, -rearWheelZ * sinSlip)
         .addScaledVector(state.normal, tireRadiusY);
 
-      currLeftTirePos.copy(_v0).addScaledVector(state.right, -tireHalfW);
-      currRightTirePos.copy(_v0).addScaledVector(state.right, tireHalfW);
+      currLeftTirePos
+        .copy(_v0)
+        .addScaledVector(state.right, -tireHalfW * cosSlip)
+        .addScaledVector(state.tangent, tireHalfW * sinSlip);
+      currRightTirePos
+        .copy(_v0)
+        .addScaledVector(state.right, tireHalfW * cosSlip)
+        .addScaledVector(state.tangent, -tireHalfW * sinSlip);
 
       if (hasPrevSkid) {
-        stampSkidSegment(prevLeftTirePos, currLeftTirePos, state.normal, kScale * 1.12);
-        stampSkidSegment(prevRightTirePos, currRightTirePos, state.normal, kScale * 1.12);
+        stampSkidSegment(prevLeftTirePos, currLeftTirePos, state.normal, kScale * 0.95);
+        stampSkidSegment(prevRightTirePos, currRightTirePos, state.normal, kScale * 0.95);
       }
       prevLeftTirePos.copy(currLeftTirePos);
       prevRightTirePos.copy(currRightTirePos);
@@ -561,7 +572,7 @@ export function createVFXManager(scene) {
           const lifeFrac = skidAge[i] / SKID_MAX_LIFETIME;
           // Hold crisp dark tread for first 45% of life, then fade smoothly to 0
           const fade = lifeFrac < 0.45 ? 1.0 : 1.0 - (lifeFrac - 0.45) / 0.55;
-          skidAlphaArr[i] = 0.62 * fade;
+          skidAlphaArr[i] = 0.32 * fade;
         }
       }
     }
@@ -627,10 +638,109 @@ export function createVFXManager(scene) {
     }
   }
 
+  let rainSprayAccum = 0.0;
+  const _sprayRight = new THREE.Vector3();
+  const _sprayBack = new THREE.Vector3();
+
+  /**
+   * Emits crisp white water-spray mist plumes behind both player and AI rival rear wheels
+   * when Drizzle/Rain weather is active. Reuses the zero-GC pooled smoke instances.
+   */
+  function emitRainSpray(dt, state, rivals, kScale = 0.49, rainWeight = 0.0) {
+    if (!rootGroup.visible || rainWeight < 0.16 || !state) return;
+    const clampedDt = Math.min(dt, 0.05);
+    rainSprayAccum += clampedDt;
+    if (rainSprayAccum < 0.036) return;
+    rainSprayAccum = 0.0;
+
+    // 1. Player rear wheels water spray
+    const playerSpeed = Math.abs(state.speed || 0.0);
+    if (playerSpeed > 0.025 && (state.hopHeight || 0.0) < 0.0012 && !state.countdownLocked) {
+      const tireHalfW = 0.0029 * kScale;
+      const rearDist = 0.0044 * kScale;
+      const sprayScale = kScale * THREE.MathUtils.clamp(0.45 + playerSpeed * 3.6, 0.5, 1.05) * rainWeight;
+      for (let side = -1; side <= 1; side += 2) {
+        _v0
+          .copy(state.position)
+          .addScaledVector(state.right, side * tireHalfW)
+          .addScaledVector(state.tangent, -rearDist)
+          .addScaledVector(state.normal, 0.00055);
+        spawnSmokePuff(
+          _v0.x,
+          _v0.y,
+          _v0.z,
+          -state.tangent.x * playerSpeed * 0.22 + state.right.x * side * 0.009 + (Math.random() - 0.5) * 0.006,
+          0.011 + playerSpeed * 0.045 + Math.random() * 0.005,
+          -state.tangent.z * playerSpeed * 0.22 + state.right.z * side * 0.009 + (Math.random() - 0.5) * 0.006,
+          sprayScale
+        );
+      }
+    }
+
+    // 2. Active AI rival rear wheels water spray
+    if (Array.isArray(rivals)) {
+      for (let i = 0; i < rivals.length; i++) {
+        const r = rivals[i];
+        if (!r || r.eliminated || !r.mesh || !r.mesh.visible) continue;
+        const rSpeed = Math.abs(r.speed || 0.0);
+        if (rSpeed < 0.03 || (r.hopHeight || 0.0) > 0.0012) continue;
+
+        // Extract rival backward & right directions from its quaternion without allocations
+        _sprayBack.set(0, 0, -1).applyQuaternion(r.mesh.quaternion);
+        _sprayRight.set(1, 0, 0).applyQuaternion(r.mesh.quaternion);
+        const rScale = 0.44 * rainWeight;
+        for (let side = -1; side <= 1; side += 2) {
+          _v0
+            .copy(r.position)
+            .addScaledVector(_sprayRight, side * 0.0016)
+            .addScaledVector(_sprayBack, 0.0024);
+          _v0.y += 0.00055;
+          spawnSmokePuff(
+            _v0.x,
+            _v0.y,
+            _v0.z,
+            _sprayBack.x * rSpeed * 0.18 + _sprayRight.x * side * 0.007,
+            0.010 + rSpeed * 0.035,
+            _sprayBack.z * rSpeed * 0.18 + _sprayRight.z * side * 0.007,
+            rScale
+          );
+        }
+      }
+    }
+  }
+
+  /**
+   * Dramatic stunt/jump touchdown burst: dust plume ring + undercarriage sparks!
+   */
+  function spawnLandingBurst(pos, normal, right, kScale = 0.49) {
+    if (!pos || !normal || !right) return;
+    const tireHalfW = 0.0032 * kScale;
+    for (let side = -1; side <= 1; side += 2) {
+      for (let p = 0; p < 3; p++) {
+        _v0
+          .copy(pos)
+          .addScaledVector(right, side * tireHalfW)
+          .addScaledVector(normal, 0.0006);
+        spawnSmokePuff(
+          _v0.x,
+          _v0.y,
+          _v0.z,
+          right.x * side * (0.022 + p * 0.008) + (Math.random() - 0.5) * 0.016,
+          0.012 + Math.random() * 0.012,
+          right.z * side * (0.022 + p * 0.008) + (Math.random() - 0.5) * 0.016,
+          kScale * 1.1
+        );
+      }
+    }
+    _v0.copy(pos).addScaledVector(normal, 0.0009);
+    spawnCollisionSparks(_v0, normal, 24, 0.95);
+  }
+
   function reset() {
     hasPrevSkid = false;
     smokeEmitAccum = 0;
     nitroEmitAccum = 0;
+    rainSprayAccum = 0;
 
     for (let i = 0; i < MAX_SMOKE; i++) {
       smokeAge[i] = 999.0;
@@ -684,6 +794,8 @@ export function createVFXManager(scene) {
   return {
     rootGroup,
     spawnCollisionSparks,
+    spawnLandingBurst,
+    emitRainSpray,
     update,
     reset,
     setVisible,

@@ -375,17 +375,17 @@ export function buildMicroKart() {
     tailLightGlowPlanes.push(tailGlowPlane);
   }
 
-  // Rear red PointLight for braking illumination on wet/dark asphalt behind the car
-  const brakeTailLight = new THREE.PointLight(0xff1024, 0.25, 0.055, 0.0);
+  // Subtle rear red PointLight with quadratic decay (no bright light blobs washing out the asphalt)
+  const brakeTailLight = new THREE.PointLight(0xff1024, 0.0, 0.022, 2.0);
   brakeTailLight.position.set(0, 0.0032, -0.0108);
   chassisGroup.add(brakeTailLight);
 
-  // Warm flickering fire light under rear exhaust/tires when sparks emit
-  const sparkFireLight = new THREE.PointLight(0xff6818, 0.0, 0.045, 0.0);
+  // Subtle warm ember light under rear exhaust when sparks emit (quadratic decay)
+  const sparkFireLight = new THREE.PointLight(0xff6818, 0.0, 0.018, 2.0);
   sparkFireLight.position.set(0, 0.0028, -0.009);
   chassisGroup.add(sparkFireLight);
 
-  let fireLightMultiplier = 0.12;
+  let fireLightMultiplier = 0.06;
   let fireLightPreviewTimer = 0.0;
   function setFireLightMultiplier(val, triggerPreview = true) {
     fireLightMultiplier = Math.max(0.0, Number(val) || 0.0);
@@ -405,7 +405,7 @@ export function buildMicroKart() {
   const headlightLensMat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     emissive: new THREE.Color(0xe0f2fe),
-    emissiveIntensity: 3.2,
+    emissiveIntensity: 2.2,
     roughness: 0.08,
     toneMapped: false,
   });
@@ -421,10 +421,10 @@ export function buildMicroKart() {
     headlightLenses.push(lensMesh);
 
     const targetObj = new THREE.Object3D();
-    targetObj.position.set(hx * 1.15, -0.0012, 0.16);
+    targetObj.position.set(hx * 1.15, 0.0018, 0.22);
     chassisGroup.add(targetObj);
 
-    const spot = new THREE.SpotLight(0xf0f9ff, 0.42, 0.28, Math.PI * 0.24, 0.92, 1.5);
+    const spot = new THREE.SpotLight(0xf0f9ff, 0.14, 0.24, Math.PI * 0.22, 0.98, 2.0);
     spot.position.set(hx, 0.0046, 0.0092);
     spot.target = targetObj;
     chassisGroup.add(spot);
@@ -604,6 +604,10 @@ export function buildMicroKart() {
   let nextSparkIdx = 0;
   let hadActiveSparks = false;
   let brakeVisualLerp = 0.0;
+  let smoothDriftYaw = 0.0;
+  let smoothBodyRoll = 0.0;
+  let smoothChassisPitch = 0.0;
+  chassisGroup.rotation.order = 'YXZ';
   const _worldPos = new THREE.Vector3();
   const _backDir = new THREE.Vector3();
   const _spawnPos = new THREE.Vector3();
@@ -646,20 +650,20 @@ export function buildMicroKart() {
       isBraking ? 1.0 : 0.0,
       Math.min(1.0, dt * 18.0)
     );
-    tailLampMat.emissiveIntensity = THREE.MathUtils.lerp(1.4, 5.4, brakeVisualLerp);
-    tailGlowMat.opacity = THREE.MathUtils.lerp(0.45, 0.98, brakeVisualLerp);
-    const haloScale = THREE.MathUtils.lerp(1.0, 1.42, brakeVisualLerp);
+    tailLampMat.emissiveIntensity = THREE.MathUtils.lerp(1.2, 3.6, brakeVisualLerp);
+    tailGlowMat.opacity = THREE.MathUtils.lerp(0.32, 0.85, brakeVisualLerp);
+    const haloScale = THREE.MathUtils.lerp(1.0, 1.32, brakeVisualLerp);
     for (let i = 0; i < tailLightGlowPlanes.length; i++) {
       tailLightGlowPlanes[i].scale.set(haloScale, haloScale, 1.0);
     }
     brakeTailLight.intensity = cockpitRoadOnly
       ? 0.0
-      : THREE.MathUtils.lerp(0.22, 2.25, brakeVisualLerp);
+      : THREE.MathUtils.lerp(0.0, 0.06, brakeVisualLerp);
     if (attachedCosmoCar && attachedCosmoCar.setBraking) {
       attachedCosmoCar.setBraking(isBraking);
     }
 
-    // 3. Apply drift slip-angle yaw + suspension roll/hop + terrain pitch + weapon-hit 3D tumble to chassisGroup
+    // 3. Apply drift slip-angle yaw + suspension roll/hop + terrain pitch + 360° Mid-Air Stunt Rotations to chassisGroup
     const spinT = state.spinoutTimer || 0.0;
     const tumblePhase = performance.now() * 0.024;
     const tumbleRoll = spinT > 0 ? Math.sin(tumblePhase) * 0.42 * Math.min(1.0, spinT * 1.8) : 0.0;
@@ -671,23 +675,26 @@ export function buildMicroKart() {
     const stuntSpin = state.stuntSpinAngle || 0.0;
     const stuntRoll = state.stuntRollAngle || 0.0;
 
-    chassisGroup.rotation.y =
-      THREE.MathUtils.lerp(
-        chassisGroup.rotation.y - stuntSpin,
-        state.driftAngle || 0.0,
-        Math.min(1, dt * 14)
-      ) + stuntSpin;
-    chassisGroup.rotation.z =
-      THREE.MathUtils.lerp(
-        chassisGroup.rotation.z - stuntRoll,
-        (state.steerInput || 0.0) * 0.11 + (state.driftAngle || 0.0) * 0.12 + tumbleRoll,
-        Math.min(1, dt * 14)
-      ) + stuntRoll;
-    chassisGroup.rotation.x = THREE.MathUtils.lerp(
-      chassisGroup.rotation.x,
+    smoothDriftYaw = THREE.MathUtils.lerp(
+      smoothDriftYaw,
+      state.driftAngle || 0.0,
+      Math.min(1, dt * 14)
+    );
+    smoothBodyRoll = THREE.MathUtils.lerp(
+      smoothBodyRoll,
+      (state.steerInput || 0.0) * 0.11 + (state.driftAngle || 0.0) * 0.13 + tumbleRoll,
+      Math.min(1, dt * 14)
+    );
+    smoothChassisPitch = THREE.MathUtils.lerp(
+      smoothChassisPitch,
       (state.terrainPitch || 0.0) + (state.rampPitch || 0.0) + landingSquatPitch + tumblePitch,
       Math.min(1, dt * 18)
     );
+
+    chassisGroup.rotation.y = smoothDriftYaw + stuntSpin;
+    chassisGroup.rotation.z = smoothBodyRoll + stuntRoll;
+    chassisGroup.rotation.x = smoothChassisPitch;
+
     const idleBob =
       Math.abs(state.speed) > 0.005 ? Math.sin(performance.now() * 0.06) * 0.00018 : 0.0;
     const landingSquashY = Math.sin(landingComp * Math.PI) * 0.00095;
@@ -699,20 +706,23 @@ export function buildMicroKart() {
       1.0 + squashFactor * 0.035
     );
 
-    // Keep radial blob contact shadow flush to the road surface below the car
+    // Keep radial contact shadow aligned with car yaw and fade out cleanly when airborne
     const kScaleCurrent = kartRoot.scale.y || 0.56;
     const hopH = Math.max(0.0, state.hopHeight || 0.0);
-    kartShadowQuad.position.y = 0.00048 - hopH / kScaleCurrent;
+    kartShadowQuad.position.y = 0.00028 - hopH / kScaleCurrent;
+    kartShadowQuad.rotation.z = -smoothDriftYaw;
     if (kartShadowQuad.material) {
-      kartShadowQuad.material.opacity = Math.max(0.24, 0.95 - hopH * 55.0);
+      kartShadowQuad.material.opacity = Math.max(0.0, 0.48 - hopH * 95.0);
     }
 
     // 4. Volumetric Twin Nitro Exhaust Flames:
-    // Ignite dynamically with cyan/orange flickering afterburners whenever Nitro Boost or a Track Boost Pad is active!
-    const isBoosting = state.boostActive > 0;
-    const isShockwave = (state.shockwaveTimer || 0) > 0;
-    const isHighSpeed = Math.abs(state.speed) > 0.115 && !state.countdownLocked;
-    const showFlames = isBoosting || isHighSpeed;
+    // Ignite dynamically with cyan/orange flickering afterburners ONLY while actively moving in RACE (never at 0 KM/H or idle showroom!)
+    const absSpeed = Math.abs(state.speed || 0);
+    const isMoving = absSpeed > 0.015 && !state.countdownLocked;
+    const isBoosting = !isIdleShowroom && isMoving && state.boostActive > 0;
+    const isShockwave = !isIdleShowroom && isMoving && (state.shockwaveTimer || 0) > 0;
+    const isHighSpeed = !isIdleShowroom && absSpeed > 0.115 && !state.countdownLocked;
+    const showFlames = !isIdleShowroom && isMoving && (isBoosting || isHighSpeed);
     const tSec = performance.now() * 0.001;
 
     for (const pGroup of flameCones) {
@@ -748,10 +758,12 @@ export function buildMicroKart() {
     const kScale = kartRoot.scale.x || 0.58;
     sparkMat.uniforms.uSparkScale.value = kScale;
 
-    const isSpinOrImpact = (state.carImpactTimer || 0) > 0;
+    const isSpinOrImpact = !isIdleShowroom && (state.carImpactTimer || 0) > 0;
     const isEmitting =
-      isSpinOrImpact ||
-      ((state.isDrifting || isBoosting) && Math.abs(state.speed) > 0.05);
+      !isIdleShowroom &&
+      !state.countdownLocked &&
+      (isSpinOrImpact ||
+        ((state.isDrifting || isBoosting) && absSpeed > 0.05));
     const emitCount = isShockwave ? 6 : isSpinOrImpact ? 5 : isEmitting ? 4 : 0;
 
     if (driftSmokeMesh.visible) {
@@ -764,7 +776,7 @@ export function buildMicroKart() {
       fireLightPreviewTimer = Math.max(0.0, fireLightPreviewTimer - dt);
     }
     const showFireLight = isEmitting || fireLightPreviewTimer > 0;
-    const baseFireIntensity = 0.35 + Math.random() * 0.20;
+    const baseFireIntensity = 0.05 + Math.random() * 0.03;
     sparkFireLight.intensity = showFireLight
       ? baseFireIntensity * fireLightMultiplier
       : THREE.MathUtils.lerp(sparkFireLight.intensity, 0.0, Math.min(1, dt * 12));
@@ -860,6 +872,7 @@ export function buildMicroKart() {
   let attachedGlbScene = null;
   let attachedS64Car = null;
   let cockpitRoadOnly = false;
+  let isIdleShowroom = true;
 
   const KIT_DEFAULT_PARTS = {
     kit1: { bodyId: 'kit1', rimId: 'rim0', spoilerId: 'spoiler0' },
@@ -960,7 +973,7 @@ export function buildMicroKart() {
       placeholderGroup.visible = false;
     }
 
-    const showLights = !cockpitRoadOnly && hasAnyCarModel;
+    const showLights = !cockpitRoadOnly && hasAnyCarModel && !isIdleShowroom;
     // Keep procedural box meshes (tailLampMeshes & headlightLenses) hidden whenever a 3D car model is attached
     // so they never float in front of or behind the sculpted car bumpers!
     for (const lamp of tailLampMeshes) {
@@ -974,6 +987,43 @@ export function buildMicroKart() {
     }
     for (const spot of headlightSpotLights) {
       if (spot) spot.visible = showLights;
+    }
+  }
+
+  function setIdleShowroomMode(idle) {
+    const nextIdle = Boolean(idle);
+    const changed = nextIdle !== isIdleShowroom;
+    isIdleShowroom = nextIdle;
+
+    if (nextIdle) {
+      for (const pGroup of flameCones) {
+        if (pGroup) pGroup.visible = false;
+      }
+      sparkFireLight.intensity = 0.0;
+      brakeTailLight.intensity = 0.0;
+      driftSmokeMesh.visible = false;
+      if (hadActiveSparks || sparkPoints.visible) {
+        sparkLifeAttr.fill(0.0);
+        for (let i = 0; i < sparkCount; i++) {
+          sparkAges[i] = 999;
+          sparkPositions[i * 3 + 1] = -10.0;
+        }
+        sparkGeo.attributes.position.needsUpdate = true;
+        sparkGeo.attributes.aLife.needsUpdate = true;
+        hadActiveSparks = false;
+      }
+      sparkPoints.visible = false;
+      if (attachedCosmoCar && attachedCosmoCar.setBraking) {
+        attachedCosmoCar.setBraking(false);
+      }
+    }
+
+    if (changed || nextIdle) {
+      const hasAnyCarModel = Boolean(attachedCosmoCar || attachedS64Car || attachedGlbScene);
+      const showLights = !cockpitRoadOnly && hasAnyCarModel && !isIdleShowroom;
+      for (const spot of headlightSpotLights) {
+        if (spot) spot.visible = showLights;
+      }
     }
   }
 
@@ -1303,6 +1353,7 @@ export function buildMicroKart() {
     sparkFireLight,
     setFireLightMultiplier,
     setCockpitRoadOnly,
+    setIdleShowroomMode,
     setBodyKit,
     setCustomParts,
     setS64LazyLoader,
