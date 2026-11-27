@@ -159,6 +159,7 @@ export function getNextRotatedMapId(currentId: MapId): MapId {
 }
 
 export type BodyKitId =
+  | 'ferrari'
   | 's64'
   | 'coupe'
   | 'kamaro'
@@ -248,6 +249,33 @@ export interface BodyKitSpec {
 }
 
 export const BODY_KITS: BodyKitSpec[] = [
+  {
+    id: 'ferrari',
+    name: 'F458 GT',
+    subtitle: 'V8 Italian Supercar',
+    fullLabel: 'F458 GT',
+    tag: 'AAA SHOWCASE',
+    category: 'SUPERCAR',
+    description: 'High-poly V8 exotic coupe with sculpted cockpit interior, carbon aero, glowing brake discs, and dual-clearcoat metallic paint.',
+    modelFile: '/models/supercars/ferrari.glb',
+    primaryColor: '#d90429',
+    accentColor: '#111827',
+    badgeColor: '#ef4444',
+    defaultRimId: 'rim2',
+    defaultSpoilerId: 'spoiler0',
+    stats: {
+      speed: 96,
+      acceleration: 95,
+      handling: 94,
+      drift: 95,
+    },
+    physics: {
+      topSpeedMultiplier: 1.07,
+      accelMultiplier: 1.09,
+      handlingMultiplier: 1.08,
+    },
+    unlockCost: 0,
+  },
   {
     id: 'coupe',
     name: 'SWIFT',
@@ -603,12 +631,12 @@ export const BODY_KITS: BodyKitSpec[] = [
 
 // Helper to normalize any legacy kit IDs ('kit1', 'kit2', 'kit3') to the car IDs
 export function normalizeCarId(id: string | undefined | null): BodyKitId {
-  if (!id) return 'coupe';
+  if (!id) return 'ferrari';
   if (id === 'kit1') return 'coupe';
   if (id === 'kit2') return 'kamaro';
   if (id === 'kit3') return 'ghini';
   const found = BODY_KITS.find((k) => k.id === id);
-  return found ? found.id : 'coupe';
+  return found ? found.id : 'ferrari';
 }
 
 export interface RivalRacerData {

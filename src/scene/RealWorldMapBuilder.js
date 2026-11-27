@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
   WORLD_TRACK_SCALE,
@@ -7,21 +6,75 @@ import {
   resolveTrackThemeKey,
   getTrackAssetDescriptor,
 } from './WorldTrackRegistry.js';
+import {
+  getSharedGltfLoader,
+  getRoadPbrPackForMap,
+  loadPhotogrammetryPropTemplate,
+} from './PbrAssetManager.js';
 
 /**
- * Custom 3D GameShipKit Track & AAA Multi-Layered 3D Environment Builder
- * - Dynamically locates and loads `track_asphalt.glb`, `track_neon.glb`, and `track_snow.glb`.
- * - Fixes downward-pointing GLB normals (`-Y`) & inverted winding so Road, Curbs, Walls,
- *   Pillar, Ground, and StartLine render crisply with upward-facing PBR shading.
- * - Replaces flat 2D planes & crude cones with:
- *   1) Procedural atmospheric sky dome with glowing Sun/Moon halo & drifting 3D FBM clouds.
- *   2) 112x112 vertex-sculpted 3D terrain mesh with biome vertex colors & carved under-bridge valleys.
- *   3) Multi-part merged 3D InstancedMesh props (arched-frond palm trees, terraced resort villas,
- *      4-tier snow-dusted alpine spruces, wooden ski chalets, stepped cyberpunk skyscrapers,
- *      guardrail posts, corner chevrons, and tiered spectator grandstands) staged in depth layers.
+ * Custom 3D Track & AAA Multi-Layered 3D Environment Builder
+ * - Uses shared Draco-enabled GLTFLoader for track GLBs and Poly Haven photogrammetry props.
+ * - Upgrades road surfaces with Poly Haven 1K photoscanned PBR normal/roughness maps and a
+ *   single-pass wet-puddle roughness sheen shader (zero double-render mirror cost -> 60 FPS!).
+ * - Scatters real 3D-scanned photogrammetry boulders & concrete road barriers via InstancedMesh.
  */
 
-const sharedGltfLoader = new GLTFLoader();
+const sharedGltfLoader = getSharedGltfLoader();
+
+/**
+ * Attaches a lightweight single-pass Asphalt-style wet puddle modulation to any road PBR material.
+ * Modulates roughness smoothly in world space so damp patches catch rich 360° HDRI reflections
+ * without double-rendering the scene (60 FPS safe on mobile WebGL).
+ */
+function attachWetPuddleSheenShader(mat, wetnessUniform, cacheKey) {
+  mat.customProgramCacheKey = () => cacheKey;
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uRoadWetness = wetnessUniform;
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        varying vec3 vRoadWorldPos;`
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        vRoadWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        uniform float uRoadWetness;
+        varying vec3 vRoadWorldPos;
+        float roadPuddleHash(vec2 p) {
+          return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+        }
+        float roadPuddleNoise(vec2 p) {
+          vec2 i = floor(p);
+          vec2 f = fract(p);
+          vec2 u = f * f * (3.0 - 2.0 * f);
+          return mix(
+            mix(roadPuddleHash(i), roadPuddleHash(i + vec2(1.0, 0.0)), u.x),
+            mix(roadPuddleHash(i + vec2(0.0, 1.0)), roadPuddleHash(i + vec2(1.0, 1.0)), u.x),
+            u.y
+          );
+        }`
+      )
+      .replace(
+        '#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>
+        if (uRoadWetness > 0.01) {
+          float pN1 = roadPuddleNoise(vRoadWorldPos.xz * 26.0);
+          float pN2 = roadPuddleNoise(vRoadWorldPos.xz * 62.0 + vec2(4.2, -2.7));
+          float puddleMask = smoothstep(0.46, 0.72, pN1 * 0.68 + pN2 * 0.32) * uRoadWetness;
+          roughnessFactor = mix(roughnessFactor, 0.14, puddleMask * 0.72);
+        }`
+      );
+  };
+  mat.needsUpdate = true;
+}
 
 function normalizeGeometryForMerge(geo) {
   const g = geo.index ? geo.toNonIndexed() : geo.clone();
@@ -1001,20 +1054,20 @@ function buildSynchronousFallbackTrack(splineData, safeMapId, roadSurfaceTex, cu
       ? new THREE.MeshPhysicalMaterial({
           color: 0xffffff,
           map: roadSurfaceTex,
-          roughness: 0.14,
-          metalness: 0.38,
-          clearcoat: 0.92,
-          clearcoatRoughness: 0.06,
-          reflectivity: 0.96,
-          envMapIntensity: 1.85,
+          roughness: 0.34,
+          metalness: 0.22,
+          clearcoat: 0.32,
+          clearcoatRoughness: 0.36,
+          reflectivity: 0.55,
+          envMapIntensity: 0.72,
           side: THREE.DoubleSide,
         })
       : new THREE.MeshStandardMaterial({
           color: 0xffffff,
           map: roadSurfaceTex,
-          roughness: safeMapId === 'canyon' ? 0.42 : 0.5,
+          roughness: safeMapId === 'canyon' ? 0.42 : 0.48,
           metalness: 0.15,
-          envMapIntensity: 1.25,
+          envMapIntensity: 0.68,
           side: THREE.DoubleSide,
         })
   );
@@ -1135,9 +1188,10 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
   );
   rootGroup.add(sculptedTerrain);
 
-  // High-res PBR road textures, micro normal map & metallic Armco barrier texture
+  // High-res PBR road textures: sharp racing lanes + Poly Haven 1K photoscanned Normal/ARM depth
   const procRoadTex = trackTex(createHighResRoadTexture(safeMapId));
-  const roadMicroNormalTex = trackTex(createRoadMicroNormalTexture(4, 140));
+  const roadPbrPack = getRoadPbrPackForMap(safeMapId);
+  const roadWetnessUniform = { value: safeMapId === 'city' ? 0.55 : 0.0 };
   const procCurbTex = trackTex(createCurbStripeTexture(safeMapId));
   const procBarrierWallTex = trackTex(createRacingBarrierWallTexture(safeMapId));
   procBarrierWallTex.repeat.set(1, 1);
@@ -1150,7 +1204,14 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
     trackGeo,
     trackMat
   );
+  if (roadMat) {
+    roadMat.normalMap = roadPbrPack.normalMap;
+    roadMat.normalScale = new THREE.Vector2(0.45, 0.45);
+    roadMat.roughnessMap = roadPbrPack.armMap;
+    attachWetPuddleSheenShader(roadMat, roadWetnessUniform, `road_puddle_fallback_${safeMapId}`);
+  }
   rootGroup.add(fallbackTrackGroup);
+  let glbRoadMat = null;
 
   // -------------------------------------------------------------------------
   // 3. SLEEK OPEN-TRUSS F1 START / FINISH GANTRY ARCH OVER `StartLine`
@@ -1176,7 +1237,7 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
   );
 
   // Raised & sleek open-truss F1 arch so it frames the sky and track cleanly on mobile portrait screens
-  const gantryHalfSpan = 0.0235;
+  const gantryHalfSpan = 0.0315;
   const gantryHeight = 0.0265;
 
   const gantryMetalMat = trackMat(
@@ -1315,6 +1376,74 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
 
       if (!child.isMesh) return;
 
+      // Widen loaded GLB road, curbs, walls, and startline laterally by +40% along the nearest spline right vector
+      // so the visual 3D track matches the +40% widened physics bounds seamlessly.
+      if (
+        (lowerName === 'road' ||
+          lowerName === 'curbs' ||
+          lowerName === 'walls' ||
+          lowerName === 'startline') &&
+        child.geometry &&
+        child.geometry.attributes.position &&
+        !child.geometry.userData._widened40
+      ) {
+        child.geometry.userData._widened40 = true;
+        const posAttr = child.geometry.attributes.position;
+        const vCount = posAttr.count;
+        const invScale = 1.0 / WORLD_TRACK_SCALE;
+        for (let vi = 0; vi < vCount; vi++) {
+          const rx = posAttr.getX(vi);
+          const rz = posAttr.getZ(vi);
+          const wx = rx * WORLD_TRACK_SCALE;
+          const wz = rz * WORLD_TRACK_SCALE;
+
+          // Coarse + fine search for closest spline sample
+          let bestIdx = 0;
+          let bestDistSq = Infinity;
+          for (let si = 0; si < N; si += 10) {
+            const sp = samples[si].position;
+            const dx = wx - sp[0];
+            const dz = wz - sp[2];
+            const dSq = dx * dx + dz * dz;
+            if (dSq < bestDistSq) {
+              bestDistSq = dSq;
+              bestIdx = si;
+            }
+          }
+          const searchCenter = bestIdx;
+          for (let offset = -10; offset <= 10; offset++) {
+            const si = (searchCenter + offset + N) % N;
+            const sp = samples[si].position;
+            const dx = wx - sp[0];
+            const dz = wz - sp[2];
+            const dSq = dx * dx + dz * dz;
+            if (dSq < bestDistSq) {
+              bestDistSq = dSq;
+              bestIdx = si;
+            }
+          }
+
+          const sNear = samples[bestIdx];
+          const sp = sNear.position;
+          const sr = sNear.right;
+          const dx = wx - sp[0];
+          const dy = (BASE_GROUND_Y + posAttr.getY(vi) * WORLD_TRACK_SCALE) - sp[1];
+          const dz = wz - sp[2];
+          const latDot = dx * sr[0] + dy * sr[1] + dz * sr[2];
+          // Expand lateral distance from centerline by +40% (delta = +0.40 * latDot)
+          const extraLatRaw = latDot * 0.4 * invScale;
+          posAttr.setXYZ(
+            vi,
+            rx + sr[0] * extraLatRaw,
+            posAttr.getY(vi) + sr[1] * extraLatRaw,
+            rz + sr[2] * extraLatRaw
+          );
+        }
+        posAttr.needsUpdate = true;
+        child.geometry.computeBoundingBox();
+        child.geometry.computeBoundingSphere();
+      }
+
       ensureUpwardMeshNormalsAndWinding(child.geometry);
       const srcMat = Array.isArray(child.material) ? child.material[0] : child.material;
       if (srcMat) srcMat.side = THREE.DoubleSide;
@@ -1324,55 +1453,60 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
         child.receiveShadow = true;
 
         if (safeMapId === 'city') {
-          child.material = trackMat(
+          glbRoadMat = trackMat(
             new THREE.MeshPhysicalMaterial({
               color: 0xffffff,
               map: procRoadTex,
-              normalMap: roadMicroNormalTex,
-              normalScale: new THREE.Vector2(0.22, 0.22),
-              roughness: 0.13,
-              metalness: 0.42,
-              clearcoat: 0.94,
-              clearcoatRoughness: 0.05,
-              reflectivity: 0.96,
-              envMapIntensity: 1.95,
+              normalMap: roadPbrPack.normalMap,
+              normalScale: new THREE.Vector2(0.48, 0.48),
+              roughnessMap: roadPbrPack.armMap,
+              roughness: 0.42,
+              metalness: 0.22,
+              clearcoat: 0.36,
+              clearcoatRoughness: 0.32,
+              reflectivity: 0.62,
+              envMapIntensity: 0.85,
               side: THREE.DoubleSide,
             })
           );
         } else if (safeMapId === 'canyon') {
-          child.material = trackMat(
+          glbRoadMat = trackMat(
             new THREE.MeshPhysicalMaterial({
               color: 0xffffff,
               map: procRoadTex,
-              normalMap: roadMicroNormalTex,
-              normalScale: new THREE.Vector2(0.18, 0.18),
-              roughness: 0.24,
-              metalness: 0.25,
-              clearcoat: 0.72,
-              clearcoatRoughness: 0.14,
-              reflectivity: 0.85,
-              envMapIntensity: 1.55,
+              normalMap: roadPbrPack.normalMap,
+              normalScale: new THREE.Vector2(0.42, 0.42),
+              roughnessMap: roadPbrPack.armMap,
+              roughness: 0.52,
+              metalness: 0.14,
+              clearcoat: 0.24,
+              clearcoatRoughness: 0.42,
+              reflectivity: 0.52,
+              envMapIntensity: 0.78,
               side: THREE.DoubleSide,
             })
           );
         } else {
-          // Asphalt 9 / NFS Golden-Hour Specular Tarmac
-          child.material = trackMat(
+          // Balanced racing asphalt with Poly Haven photoscanned normal/roughness & zero glare blobs
+          glbRoadMat = trackMat(
             new THREE.MeshPhysicalMaterial({
               color: 0xffffff,
               map: procRoadTex,
-              normalMap: roadMicroNormalTex,
-              normalScale: new THREE.Vector2(0.22, 0.22),
-              roughness: 0.22,
-              metalness: 0.30,
-              clearcoat: 0.82,
-              clearcoatRoughness: 0.10,
-              reflectivity: 0.90,
-              envMapIntensity: 1.72,
+              normalMap: roadPbrPack.normalMap,
+              normalScale: new THREE.Vector2(0.50, 0.50),
+              roughnessMap: roadPbrPack.armMap,
+              roughness: 0.48,
+              metalness: 0.16,
+              clearcoat: 0.28,
+              clearcoatRoughness: 0.38,
+              reflectivity: 0.56,
+              envMapIntensity: 0.80,
               side: THREE.DoubleSide,
             })
           );
         }
+        attachWetPuddleSheenShader(glbRoadMat, roadWetnessUniform, `road_puddle_glb_${safeMapId}`);
+        child.material = glbRoadMat;
       } else if (lowerName === 'curbs') {
         child.castShadow = true;
         child.receiveShadow = true;
@@ -1380,7 +1514,7 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
           srcMat.side = THREE.DoubleSide;
           srcMat.roughness = safeMapId === 'city' ? 0.20 : 0.28;
           srcMat.metalness = safeMapId === 'city' ? 0.48 : 0.22;
-          srcMat.envMapIntensity = 1.35;
+          srcMat.envMapIntensity = 1.15;
           if (safeMapId === 'city' && srcMat.emissive) {
             srcMat.emissive.setHex(0x004466);
             srcMat.emissiveIntensity = 0.8;
@@ -1409,7 +1543,7 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
             map: procBarrierWallTex,
             roughness: safeMapId === 'city' ? 0.22 : 0.28,
             metalness: safeMapId === 'city' ? 0.72 : 0.62,
-            envMapIntensity: safeMapId === 'city' ? 1.65 : 1.45,
+            envMapIntensity: safeMapId === 'city' ? 1.35 : 1.25,
             emissive: new THREE.Color(safeMapId === 'city' ? 0x004466 : 0x1a0c02),
             emissiveIntensity: safeMapId === 'city' ? 0.55 : 0.25,
             side: THREE.DoubleSide,
@@ -1431,7 +1565,7 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
           srcMat.polygonOffset = true;
           srcMat.polygonOffsetFactor = -6;
           srcMat.polygonOffsetUnits = -6;
-          srcMat.roughness = 0.24;
+          srcMat.roughness = 0.34;
         }
       } else if (lowerName === 'ground') {
         // Hide the flat 2D GLB ground plane so our sculpted 3D heightmap terrain shines cleanly!
@@ -2162,7 +2296,7 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
     }
 
     // 2. Overhead Neon Expressway Portal Arches framing the street canyon
-    const archBeamGeo = trackGeo(new THREE.BoxGeometry(0.052, 0.0016, 0.002));
+    const archBeamGeo = trackGeo(new THREE.BoxGeometry(0.068, 0.0016, 0.002));
     archBeamGeo.translate(0, 0.025, 0);
     const archPillarGeo = trackGeo(new THREE.BoxGeometry(0.0016, 0.025, 0.002));
     archPillarGeo.translate(0, 0.0125, 0);
@@ -2179,7 +2313,7 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
       _left.crossVectors(_norm, _tang).normalize();
       _rotMat.makeBasis(_left, _norm, _tang);
       portalGroup.quaternion.setFromRotationMatrix(_rotMat);
-      const span = (s.half_width_m || 0.018) + 0.0055;
+      const span = (s.half_width_m || 0.024) + 0.0055;
       for (const side of [-1, 1]) {
         const p = new THREE.Mesh(archPillarGeo, gantryMetalMat);
         p.position.x = side * span;
@@ -2474,6 +2608,83 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
     rootGroup.add(snowPoints);
   }
 
+  // -------------------------------------------------------------------------
+  // 8. POLY HAVEN PHOTOGRAMMETRY 3D HERO PROPS (SINGLE-DRAW-CALL INSTANCEDMESH)
+  // -------------------------------------------------------------------------
+  const photogrammetryGroup = new THREE.Group();
+  photogrammetryGroup.name = 'PhotogrammetryHeroProps';
+  rootGroup.add(photogrammetryGroup);
+
+  const heroDummy = new THREE.Object3D();
+  // 1) Photogrammetry weathered Concrete Road Barriers lining start/finish pit & apexes (1 draw call)
+  loadPhotogrammetryPropTemplate('concrete_road_barrier').then((tpl) => {
+    if (isDisposed || !tpl) return;
+    const placements = [];
+    const barrierFractions = [0.02, 0.045, 0.07, 0.26, 0.285, 0.54, 0.565, 0.78, 0.805, 0.94, 0.965];
+    for (let i = 0; i < barrierFractions.length; i++) {
+      const idx = Math.floor(barrierFractions[i] * N) % N;
+      const s = samples[idx];
+      if (!s) continue;
+      const hw = s.half_width_m || 0.024;
+      const side = i % 2 === 0 ? 1 : -1;
+      const lat = side * (hw + 0.0085);
+      const bx = s.position[0] + s.right[0] * lat;
+      const bz = s.position[2] + s.right[2] * lat;
+      const by = Math.max(getTerrainHeightAt(bx, bz), s.position[1] - 0.0025);
+      const yaw = Math.atan2(s.tangent[0], s.tangent[2]);
+      placements.push({ x: bx, y: by, z: bz, yaw, scale: 0.014 });
+    }
+    if (placements.length === 0) return;
+    const inst = new THREE.InstancedMesh(tpl.geometry, tpl.material, placements.length);
+    inst.castShadow = false;
+    inst.receiveShadow = true;
+    for (let i = 0; i < placements.length; i++) {
+      const p = placements[i];
+      heroDummy.position.set(p.x, p.y, p.z);
+      heroDummy.rotation.set(0, p.yaw, 0);
+      heroDummy.scale.setScalar(p.scale);
+      heroDummy.updateMatrix();
+      inst.setMatrixAt(i, heroDummy.matrix);
+    }
+    inst.instanceMatrix.needsUpdate = true;
+    inst.computeBoundingSphere();
+    photogrammetryGroup.add(inst);
+  });
+
+  // 2) Photogrammetry Coastal / Alpine Boulders flanking outer turns (1 draw call, coast & canyon)
+  if (safeMapId === 'coast' || safeMapId === 'canyon') {
+    loadPhotogrammetryPropTemplate('boulder_01').then((tpl) => {
+      if (isDisposed || !tpl) return;
+      const boulderFractions = [0.11, 0.19, 0.34, 0.43, 0.62, 0.71, 0.85, 0.91];
+      const inst = new THREE.InstancedMesh(tpl.geometry, tpl.material, boulderFractions.length);
+      inst.castShadow = false;
+      inst.receiveShadow = true;
+      for (let i = 0; i < boulderFractions.length; i++) {
+        const idx = Math.floor(boulderFractions[i] * N) % N;
+        const s = samples[idx];
+        const hw = s.half_width_m || 0.024;
+        const side = i % 2 === 0 ? -1 : 1;
+        const lat = side * (hw + 0.042 + (i % 3) * 0.016);
+        const bx = s.position[0] + s.right[0] * lat;
+        const bz = s.position[2] + s.right[2] * lat;
+        const by = getTerrainHeightAt(bx, bz) - 0.004;
+        const sc = 0.038 + (i % 3) * 0.014;
+        heroDummy.position.set(bx, by, bz);
+        heroDummy.rotation.set(0, i * 1.37, 0);
+        heroDummy.scale.set(sc * 1.15, sc * 0.92, sc);
+        heroDummy.updateMatrix();
+        inst.setMatrixAt(i, heroDummy.matrix);
+      }
+      inst.instanceMatrix.needsUpdate = true;
+      inst.computeBoundingSphere();
+      photogrammetryGroup.add(inst);
+    });
+  }
+
+  function setDetailLevel(lowPowerMode = false) {
+    photogrammetryGroup.visible = !lowPowerMode;
+  }
+
   function update(elapsedTime) {
     if (skyMat && skyMat.uniforms && skyMat.uniforms.uTime) {
       skyMat.uniforms.uTime.value = elapsedTime;
@@ -2539,15 +2750,20 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
     if (Math.abs(w - lastAppliedWetness) < 0.004) return;
     lastAppliedWetness = w;
 
+    // Drive single-pass wet-puddle roughness modulation on BOTH fallback & GLB road shaders
+    roadWetnessUniform.value = safeMapId === 'city' ? Math.max(0.55, w) : w;
+
     // Subtle wet-road sheen: darker damp tarmac with controlled low roughness & zero blinding glare hotspots
-    if (roadMat) {
-      const targetWetRough = safeMapId === 'city' ? 0.11 : 0.25;
-      const targetWetMetal = safeMapId === 'city' ? 0.44 : 0.26;
-      const targetWetEnv = safeMapId === 'city' ? 1.55 : 0.95;
-      roadMat.roughness = THREE.MathUtils.lerp(baseRoadRoughness, targetWetRough, w);
-      roadMat.metalness = THREE.MathUtils.lerp(baseRoadMetalness, targetWetMetal, w);
-      roadMat.envMapIntensity = THREE.MathUtils.lerp(baseRoadEnvIntensity, targetWetEnv, w);
-      roadMat.color.copy(dryRoadColor).lerp(wetRoadColor, w * 0.85);
+    const activeRoadMats = [roadMat, glbRoadMat].filter(Boolean);
+    for (let i = 0; i < activeRoadMats.length; i++) {
+      const rm = activeRoadMats[i];
+      const targetWetRough = safeMapId === 'city' ? 0.34 : 0.38;
+      const targetWetMetal = safeMapId === 'city' ? 0.24 : 0.18;
+      const targetWetEnv = safeMapId === 'city' ? 0.95 : 0.86;
+      rm.roughness = THREE.MathUtils.lerp(baseRoadRoughness, targetWetRough, w);
+      rm.metalness = THREE.MathUtils.lerp(baseRoadMetalness, targetWetMetal, w);
+      rm.envMapIntensity = THREE.MathUtils.lerp(baseRoadEnvIntensity, targetWetEnv, w);
+      rm.color.copy(dryRoadColor).lerp(wetRoadColor, w * 0.85);
     }
 
     // Moody darkened storm sky dome with denser overcast cloud deck
@@ -2605,6 +2821,7 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
     setF1StartLights,
     attachTrafficLightGlb,
     setWetness,
+    setDetailLevel,
     update,
     dispose,
   };

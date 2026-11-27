@@ -139,7 +139,7 @@ export default function App() {
     return DEFAULT_COINS;
   });
 
-  // Persistent Unlocked Kits
+  // Persistent Unlocked Kits (always includes AAA showcase supercar 'ferrari' + starter 'coupe')
   const [unlockedKits, setUnlockedKits] = useState<BodyKitId[]>(() => {
     try {
       const saved = window.localStorage.getItem(STORAGE_UNLOCKED_KEY);
@@ -148,13 +148,14 @@ export default function App() {
         if (Array.isArray(parsed) && parsed.length > 0) {
           const mapped = parsed.map((id) => normalizeCarId(id));
           if (!mapped.includes('coupe')) mapped.unshift('coupe');
+          if (!mapped.includes('ferrari')) mapped.unshift('ferrari');
           return Array.from(new Set(mapped));
         }
       }
     } catch {
       // ignore
     }
-    return ['coupe', 's64'];
+    return ['ferrari', 'coupe', 's64'];
   });
 
   // Persistent Car Performance Upgrades (per BodyKitId)
@@ -173,20 +174,46 @@ export default function App() {
     return {};
   });
 
-  // Persistent Career Progress, XP, Missions & Track Records
+  // Persistent Career Progress, XP, Missions & Track Records (strictly separate PB per circuit)
   const [career, setCareer] = useState<PlayerCareerState>(() => {
     try {
       const saved = window.localStorage.getItem(STORAGE_CAREER_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === 'object') {
+          const rawRecords = {
+            ...DEFAULT_CAREER_STATE.trackRecords,
+            ...(parsed.trackRecords || {}),
+          };
+          const mapIds: MapId[] = ['coast', 'city', 'canyon'];
+          // Detect any legacy shared bestLap value (e.g. 12.35s leaked across multiple tracks)
+          const lapCounts = new Map<string, number>();
+          for (const id of mapIds) {
+            const b = rawRecords[id]?.bestLap;
+            if (typeof b === 'number' && b > 0) {
+              const key = b.toFixed(2);
+              lapCounts.set(key, (lapCounts.get(key) || 0) + 1);
+            }
+          }
+          const sanitizedRecords: Record<MapId, typeof DEFAULT_CAREER_STATE.trackRecords.coast> = {
+            coast: { ...DEFAULT_CAREER_STATE.trackRecords.coast, ...(rawRecords.coast || {}) },
+            city: { ...DEFAULT_CAREER_STATE.trackRecords.city, ...(rawRecords.city || {}) },
+            canyon: { ...DEFAULT_CAREER_STATE.trackRecords.canyon, ...(rawRecords.canyon || {}) },
+          };
+          for (const id of mapIds) {
+            const rec = sanitizedRecords[id];
+            const b = rec.bestLap;
+            if (typeof b === 'number') {
+              const key = b.toFixed(2);
+              if (b <= 3.0 || (lapCounts.get(key) || 0) > 1 || (rec.racesCompleted || 0) === 0) {
+                rec.bestLap = null;
+              }
+            }
+          }
           return {
             ...DEFAULT_CAREER_STATE,
             ...parsed,
-            trackRecords: {
-              ...DEFAULT_CAREER_STATE.trackRecords,
-              ...(parsed.trackRecords || {}),
-            },
+            trackRecords: sanitizedRecords,
           };
         }
       }
@@ -199,15 +226,15 @@ export default function App() {
   // Persistent Day 1–7 Daily Login Streak
   const [dailyStreak, setDailyStreak] = useState<DailyStreakState>(() => loadDailyStreakState());
 
-  // Persistent Equipped Body Kit
+  // Persistent Equipped Body Kit (defaults to AAA 'ferrari' showcase on first launch)
   const [equippedKitId, setEquippedKitId] = useState<BodyKitId>(() => {
     try {
       const saved = window.localStorage.getItem(STORAGE_KIT_KEY) as BodyKitId | null;
-      return normalizeCarId(saved);
+      return saved ? normalizeCarId(saved) : 'ferrari';
     } catch {
       // ignore
     }
-    return 'coupe';
+    return 'ferrari';
   });
 
   const equippedKit: BodyKitSpec =
@@ -647,16 +674,26 @@ export default function App() {
         const xpEarned =
           effectiveRank === 1 ? 140 : effectiveRank === 2 ? 105 : effectiveRank === 3 ? 80 : 55;
 
+        const validRaceLaps = Array.isArray(finishData.lapTimes)
+          ? finishData.lapTimes.filter((t) => typeof t === 'number' && Number.isFinite(t) && t > 3.0)
+          : [];
+        const currentRaceBestLap =
+          validRaceLaps.length > 0
+            ? Math.min(...validRaceLaps)
+            : typeof finishData.bestLap === 'number' && finishData.bestLap > 3.0
+              ? finishData.bestLap
+              : 0;
+
         setCoins((prev) => prev + totalReward);
         setCareer((prev) => {
           const prevRec =
             prev.trackRecords[completedMapId] ||
             DEFAULT_CAREER_STATE.trackRecords[completedMapId];
           const nextBestLap =
-            !isEliminated && finishData.bestLap > 0
+            !isEliminated && currentRaceBestLap > 0
               ? prevRec.bestLap === null
-                ? finishData.bestLap
-                : Math.min(prevRec.bestLap, finishData.bestLap)
+                ? currentRaceBestLap
+                : Math.min(prevRec.bestLap, currentRaceBestLap)
               : prevRec.bestLap;
           const nextBestTotal =
             !isEliminated && finishData.totalTime > 0
@@ -695,7 +732,7 @@ export default function App() {
 
         setRaceResult({
           totalTime: finishData.totalTime,
-          bestLap: finishData.bestLap,
+          bestLap: currentRaceBestLap,
           lapTimes: finishData.lapTimes,
           coinsEarned: totalReward,
           xpEarned,

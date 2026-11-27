@@ -335,6 +335,7 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
     right: new THREE.Vector3(0, 0, -1),
     normal: new THREE.Vector3(0, 1, 0),
     quaternion: new THREE.Quaternion(),
+    postLandingGraceTimer: 0.0,
   };
 
   let onLapCompleteCallback = null;
@@ -350,10 +351,10 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
     );
   }
 
-  function computeRailZone(latOffset, halfW = 0.01705) {
+  function computeRailZone(latOffset, halfW = 0.02387) {
     // Expand usable asphalt corridor all the way to the visual curbs for wider sweeping drifts
-    const railLim = Math.max(0.0108, halfW - 0.0020);
-    const curbLim = Math.max(0.0094, halfW - 0.0034);
+    const railLim = Math.max(0.0152, halfW - 0.0020);
+    const curbLim = Math.max(0.0132, halfW - 0.0034);
     if (latOffset <= -railLim) return 'L-RAIL';
     if (latOffset >= railLim) return 'R-RAIL';
     if (latOffset <= -curbLim) return 'L-CURB';
@@ -368,7 +369,7 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
   function syncPoseFromSpline() {
     const newFrame = sampleTrackAtArcLength(state.s);
     const aheadFrame = sampleTrackAtArcLength(state.s + 0.012, _nextSampleOut);
-    const halfW = newFrame.halfWidth || 0.01705;
+    const halfW = newFrame.halfWidth || 0.02387;
     state.sector = newFrame.sector;
     state.bankDeg = newFrame.bankDeg;
     state.halfWidth = halfW;
@@ -437,12 +438,15 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
       state.raceClockActive = false;
       state.totalRaceTime = 0.0;
       state.currentLapTime = 0.0;
+      state.bestLapTime = null;
+      state.lastLapTime = null;
       state.lapCount = 1;
       state.lapTimes = [];
       state.finishTotalTime = null;
       state.cornerCleanTimer = 0.0;
       state.railImpactActive = false;
       state.railHitCooldown = 0.0;
+      state.postLandingGraceTimer = 0.0;
       if (state.speed < 0.10) {
         state.speed = 0.187;
       }
@@ -494,6 +498,8 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
     state.stuntSpinAngle = 0.0;
     state.hopHeight = 0.0;
     state.hopVel = 0.0;
+    state.isAirborne = false;
+    state.postLandingGraceTimer = 0.0;
     state.rampPitch = 0.0;
     state.terrainPitch = 0.0;
     state.slopeAngleRad = 0.0;
@@ -512,6 +518,8 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
     state.raceFinished = false;
     state.totalRaceTime = 0.0;
     state.currentLapTime = 0.0;
+    state.bestLapTime = null;
+    state.lastLapTime = null;
     state.lapCount = 1;
     const startOffset = playerGridSlot ? (playerGridSlot.signedOffsetFromStart || -0.025) : 0.0;
     state.lapDistanceTraveled = startOffset;
@@ -528,6 +536,7 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
     state.cornerCleanTimer = 0.0;
     state.railImpactActive = false;
     state.railHitCooldown = 0.0;
+    state.postLandingGraceTimer = 0.0;
     state.wallStuckTimer = 0.0;
     state.angledIntoRail = false;
     state.steeringAway = false;
@@ -1190,7 +1199,7 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
       }
 
       // Clean Apex Exit Surge: reward carving a curve cleanly without hitting the guardrail
-      const cleanHalfW = frame.halfWidth || 0.01705;
+      const cleanHalfW = frame.halfWidth || 0.02387;
       if (
         state.railImpactActive ||
         state.speed <= 0.08 ||
@@ -1216,9 +1225,13 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
 
     // 2. Direct Nose + Smart Corner-Tracking Drift Vector (Wider, Effortless Sweeping Control!)
     let lateralDot = 0.0;
-    const halfW = frame.halfWidth || 0.01705;
-    const curbStartLat = Math.max(0.0094, halfW - 0.0034);
-    const railLimitLat = Math.max(0.0108, halfW - 0.0020);
+    const halfW = frame.halfWidth || 0.02387;
+    const curbStartLat = Math.max(0.0132, halfW - 0.0034);
+    const railLimitLat = Math.max(0.0152, halfW - 0.0020);
+
+    if ((state.postLandingGraceTimer || 0) > 0) {
+      state.postLandingGraceTimer = Math.max(0.0, state.postLandingGraceTimer - clampedDt);
+    }
 
     if (isAiCruise) {
       lateralDot =
@@ -1260,8 +1273,36 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
         state.knockbackLateralVel = 0.0;
       }
     }
+
+    // While airborne after hitting a ramp, gently dampen lateral velocity and auto-guide
+    // lateralOffset smoothly toward the safe inner 60% of the track so the car ALWAYS lands cleanly on asphalt.
+    if (state.isAirborne || (state.hopHeight || 0) > 0.00025 || state.onRampSurface) {
+      lateralDot *= 0.25;
+      state.headingYaw = THREE.MathUtils.lerp(
+        state.headingYaw,
+        0.0,
+        1.0 - Math.exp(-6.5 * clampedDt)
+      );
+      const safeInnerLimit = halfW * 0.52; // Strictly within the safe inner 60% of the track
+      const targetSafeLat = THREE.MathUtils.clamp(
+        state.lateralOffset * 0.45,
+        -safeInnerLimit,
+        safeInnerLimit
+      );
+      state.lateralOffset = THREE.MathUtils.lerp(
+        state.lateralOffset,
+        targetSafeLat,
+        1.0 - Math.exp(-5.2 * clampedDt)
+      );
+    }
+
     state.lateralVel = lateralDot;
     state.lateralOffset += lateralDot * clampedDt;
+
+    if (state.isAirborne || (state.hopHeight || 0) > 0.00025) {
+      const maxAirLat = halfW * 0.58;
+      state.lateralOffset = THREE.MathUtils.clamp(state.lateralOffset, -maxAirLat, maxAirLat);
+    }
 
     // 3. Forgiving FIA Curbs & Smooth Arcade Guardrail Wall-Gliding (Full Expanded Asphalt Width)
     state.curbRumble = 0.0;
@@ -1279,71 +1320,92 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
       state.railImpactActive = false;
     }
 
+    const inLandingGrace =
+      state.isAirborne ||
+      (state.hopHeight || 0) > 0.00025 ||
+      (state.postLandingGraceTimer || 0) > 0;
+
     if (absLat >= curbStartLat && absLat < railLimitLat) {
       // Stage 1 — Red/White FIA Curbs: tactile rumble feedback with ZERO speed penalty!
-      state.curbRumble = THREE.MathUtils.clamp(
-        (absLat - curbStartLat) / Math.max(0.0005, railLimitLat - curbStartLat),
-        0.0,
-        1.0
-      );
+      state.curbRumble = inLandingGrace
+        ? 0.0
+        : THREE.MathUtils.clamp(
+            (absLat - curbStartLat) / Math.max(0.0005, railLimitLat - curbStartLat),
+            0.0,
+            1.0
+          );
     } else if (absLat >= railLimitLat) {
-      // Stage 2 — Guardrail Wall Gliding: smooth deflection keeping ~99% speed & active boost!
       const signLat = Math.sign(state.lateralOffset) || 1;
-      state.curbRumble = 1.0;
+      if (inLandingGrace) {
+        // 0.5s post-landing wall-collision grace/soft-bounce window:
+        // Never trigger crash sound, sparks, or speed drop after landing from a ramp!
+        state.railImpactActive = false;
+        state.curbRumble = 0.0;
+        state.lateralOffset = signLat * (curbStartLat - 0.0004);
+        state.lateralVel = -signLat * 0.004;
+        state.headingYaw = THREE.MathUtils.lerp(
+          state.headingYaw,
+          0.0,
+          1.0 - Math.exp(-16.0 * clampedDt)
+        );
+      } else {
+        // Stage 2 — Guardrail Wall Gliding: smooth deflection keeping ~99% speed & active boost!
+        state.curbRumble = 1.0;
 
-      if (!isAiCruise) {
-        const steeringAway =
-          (signLat > 0 && turnRight < 0) || (signLat < 0 && turnRight > 0);
+        if (!isAiCruise) {
+          const steeringAway =
+            (signLat > 0 && turnRight < 0) || (signLat < 0 && turnRight > 0);
 
-        if (!state.railImpactActive && state.railHitCooldown <= 0.0) {
-          state.railImpactActive = true;
-          state.railHitCooldown = 0.48;
+          if (!state.railImpactActive && state.railHitCooldown <= 0.0) {
+            state.railImpactActive = true;
+            state.railHitCooldown = 0.48;
 
-          // Ultra-forgiving guardrail graze: sparks & scrapes while preserving 98.8% forward speed!
-          state.lateralOffset = signLat * (railLimitLat - 0.0006);
-          state.lateralVel = -signLat * 0.006;
-          state.speed *= 0.988;
-          state.headingYaw *= 0.35;
+            // Ultra-forgiving guardrail graze: sparks & scrapes while preserving 98.8% forward speed!
+            state.lateralOffset = signLat * (railLimitLat - 0.0006);
+            state.lateralVel = -signLat * 0.006;
+            state.speed *= 0.988;
+            state.headingYaw *= 0.35;
 
-          _impactPos
-            .copy(frame.position)
-            .addScaledVector(frame.right, signLat * railLimitLat)
-            .addScaledVector(frame.normal, 0.0018);
-          _impactNormal
-            .copy(frame.right)
-            .multiplyScalar(-signLat)
-            .addScaledVector(frame.normal, 0.35)
-            .normalize();
-          const hitSeverity = THREE.MathUtils.clamp(Math.abs(state.speed) / 0.145, 0.35, 1.0);
-          if (state.pendingImpactCount < state.pendingImpacts.length) {
-            const slot = state.pendingImpacts[state.pendingImpactCount++];
-            slot.pos.copy(_impactPos);
-            slot.normal.copy(_impactNormal);
-            slot.severity = hitSeverity;
+            _impactPos
+              .copy(frame.position)
+              .addScaledVector(frame.right, signLat * railLimitLat)
+              .addScaledVector(frame.normal, 0.0018);
+            _impactNormal
+              .copy(frame.right)
+              .multiplyScalar(-signLat)
+              .addScaledVector(frame.normal, 0.35)
+              .normalize();
+            const hitSeverity = THREE.MathUtils.clamp(Math.abs(state.speed) / 0.145, 0.35, 1.0);
+            if (state.pendingImpactCount < state.pendingImpacts.length) {
+              const slot = state.pendingImpacts[state.pendingImpactCount++];
+              slot.pos.copy(_impactPos);
+              slot.normal.copy(_impactNormal);
+              slot.severity = hitSeverity;
+            }
+            if (onRailImpactCallback) {
+              onRailImpactCallback(hitSeverity, _impactPos, _impactNormal);
+            }
+          } else {
+            state.lateralOffset = signLat * (railLimitLat - 0.0005);
           }
-          if (onRailImpactCallback) {
-            onRailImpactCallback(hitSeverity, _impactPos, _impactNormal);
+
+          if (steeringAway) {
+            state.railImpactActive = false;
+            state.headingYaw = signLat * 0.08;
+            state.lateralOffset = signLat * (curbStartLat + 0.0004);
+            state.wallStuckTimer = 0.0;
+          } else {
+            // Smoothly align car nose parallel to the guardrail so it glides cleanly along the wall
+            state.headingYaw = THREE.MathUtils.lerp(
+              state.headingYaw,
+              0.0,
+              1.0 - Math.exp(-20.0 * clampedDt)
+            );
           }
         } else {
           state.lateralOffset = signLat * (railLimitLat - 0.0005);
+          state.lateralVel = 0.0;
         }
-
-        if (steeringAway) {
-          state.railImpactActive = false;
-          state.headingYaw = signLat * 0.08;
-          state.lateralOffset = signLat * (curbStartLat + 0.0004);
-          state.wallStuckTimer = 0.0;
-        } else {
-          // Smoothly align car nose parallel to the guardrail so it glides cleanly along the wall
-          state.headingYaw = THREE.MathUtils.lerp(
-            state.headingYaw,
-            0.0,
-            1.0 - Math.exp(-20.0 * clampedDt)
-          );
-        }
-      } else {
-        state.lateralOffset = signLat * (railLimitLat - 0.0005);
-        state.lateralVel = 0.0;
       }
     } else {
       state.wallStuckTimer = 0.0;
@@ -1522,7 +1584,8 @@ export async function createKartPhysicsController(splineData, _manifest, _roadGe
         state.stuntRollAngle = 0.0;
         state.stuntSpinAngle = 0.0;
         if (wasAirborne) {
-          // Trigger Landing Juice: suspension compression bounce + tire dust/spark burst!
+          // Trigger Landing Juice: 0.55s post-landing wall grace window + suspension compression bounce + tire dust/spark burst!
+          state.postLandingGraceTimer = 0.55;
           state.landingCompression = 1.0;
           state.carImpactTimer = Math.max(state.carImpactTimer || 0.0, 0.28);
           state.justLanded = true;

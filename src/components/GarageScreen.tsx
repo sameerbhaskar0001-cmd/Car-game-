@@ -226,17 +226,17 @@ export const GarageScreen: React.FC<GarageScreenProps> = ({
           dragXRef.current = null;
         }}
       >
-        {/* Minimal Floating Spec Readout (Top-Left corner only — hidden on Customize so 3D view is 100% pure) */}
+        {/* Minimal Floating Spec Readout (Positioned cleanly to the right of the left '‹' switcher button so it NEVER obscures the arrow) */}
         {activeTab !== 'customize' && (
-          <div className="hidden sm:flex flex-col gap-1.5 absolute top-2.5 left-0 w-44 p-2.5 rounded-xl bg-[#070b14]/72 border border-white/10 backdrop-blur-sm pointer-events-none">
+          <div className="hidden sm:flex flex-col gap-1.5 absolute top-2 left-12 sm:left-14 z-10 w-40 p-2 rounded-xl bg-[#070b14]/78 border border-white/12 backdrop-blur-sm pointer-events-none">
             {[
               { label: 'Speed', val: perf.stats.speed, color: 'bg-cyan-400' },
               { label: 'Accel', val: perf.stats.acceleration, color: 'bg-amber-400' },
               { label: 'Grip', val: perf.stats.handling, color: 'bg-emerald-400' },
               { label: 'Drift', val: perf.stats.drift, color: 'bg-sky-400' },
             ].map((stat) => (
-              <div key={stat.label} className="flex items-center gap-2">
-                <span className="text-[10px] font-medium text-slate-300 w-10 shrink-0">
+              <div key={stat.label} className="flex items-center gap-1.5">
+                <span className="text-[10px] font-medium text-slate-300 w-9 shrink-0">
                   {stat.label}
                 </span>
                 <div className="flex-1 h-1 bg-slate-900 rounded-full overflow-hidden">
@@ -262,7 +262,7 @@ export const GarageScreen: React.FC<GarageScreenProps> = ({
           }}
           aria-label="Previous Car"
           style={{ touchAction: 'manipulation' }}
-          className="w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-[#070b14]/72 border border-white/20 text-white font-bold text-xl flex items-center justify-center cursor-pointer shadow-xl active:scale-90 hover:border-cyan-400 hover:text-cyan-300 transition-colors"
+          className="relative z-30 shrink-0 w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-[#070b14]/90 border border-cyan-400/45 text-white font-bold text-xl flex items-center justify-center cursor-pointer shadow-xl active:scale-90 hover:border-cyan-400 hover:text-cyan-300 transition-colors"
         >
           ‹
         </button>
@@ -276,7 +276,7 @@ export const GarageScreen: React.FC<GarageScreenProps> = ({
           }}
           aria-label="Next Car"
           style={{ touchAction: 'manipulation' }}
-          className="w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-[#070b14]/72 border border-white/20 text-white font-bold text-xl flex items-center justify-center cursor-pointer shadow-xl active:scale-90 hover:border-cyan-400 hover:text-cyan-300 transition-colors"
+          className="relative z-30 shrink-0 w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-[#070b14]/90 border border-cyan-400/45 text-white font-bold text-xl flex items-center justify-center cursor-pointer shadow-xl active:scale-90 hover:border-cyan-400 hover:text-cyan-300 transition-colors"
         >
           ›
         </button>

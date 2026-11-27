@@ -117,25 +117,25 @@ export const EventsScreen: React.FC<EventsScreenProps> = ({
         style={{
           touchAction: 'pan-y',
           WebkitOverflowScrolling: 'touch',
-          paddingTop: '0.85rem',
-          paddingBottom: '1rem',
+          paddingTop: '0.65rem',
+          paddingBottom: '0.85rem',
           paddingLeft: 'max(1rem, env(safe-area-inset-left))',
           paddingRight: 'max(1rem, env(safe-area-inset-right))',
         }}
       >
-        <div className="w-full max-w-6xl mx-auto flex flex-col gap-4 sm:gap-5">
+        <div className="w-full max-w-6xl mx-auto flex flex-col gap-3 sm:gap-3.5">
           {/* 01. EVENT FORMAT CARDS */}
           <section>
-            <div className="flex items-baseline justify-between gap-2 mb-2.5">
+            <div className="flex items-baseline justify-between gap-2 mb-1.5">
               <h2 className="font-['Orbitron'] italic font-extrabold text-xs sm:text-sm tracking-wider uppercase text-white">
                 01. Event Format
               </h2>
-              <span className="text-[11px] text-amber-300 font-mono font-semibold tabular-nums truncate">
+              <span className="text-[11px] text-amber-300 font-mono font-semibold tabular-nums whitespace-nowrap">
                 Top Prize 🪙 {getEstimatedTopPrize(activeMode.rewardMultiplier).toLocaleString()} COINS
               </span>
             </div>
 
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
               {RACE_MODES.map((mode) => {
                 const selected = mode.id === selectedModeId;
                 const topPrize = getEstimatedTopPrize(mode.rewardMultiplier);
@@ -151,7 +151,7 @@ export const EventsScreen: React.FC<EventsScreenProps> = ({
                         ? `0 8px 24px -8px ${mode.accentHex}55`
                         : undefined,
                     }}
-                    className={`relative overflow-hidden px-3.5 py-3 rounded-xl border text-left transition-all cursor-pointer active:scale-[0.99] flex flex-col justify-between gap-2 ${
+                    className={`relative overflow-hidden px-3 py-2 rounded-xl border text-left transition-all cursor-pointer active:scale-[0.99] flex flex-col justify-between gap-1.5 ${
                       selected
                         ? 'bg-gradient-to-b from-slate-900 to-[#0a1224] text-white'
                         : 'bg-[#080d1a]/92 border-white/10 text-slate-300 hover:border-white/25'
@@ -165,8 +165,8 @@ export const EventsScreen: React.FC<EventsScreenProps> = ({
                     />
 
                     <div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-['Orbitron'] italic font-black text-xs sm:text-sm tracking-wide uppercase truncate">
+                      <div className="flex items-center justify-between gap-1.5">
+                        <span className="font-['Orbitron'] italic font-black text-xs sm:text-sm tracking-wide uppercase">
                           {mode.name}
                         </span>
                         <span
@@ -176,13 +176,13 @@ export const EventsScreen: React.FC<EventsScreenProps> = ({
                           {mode.rewardMultiplier.toFixed(2)}x
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-400 mt-1 line-clamp-2 leading-snug">
+                      <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-1 leading-snug">
                         {mode.description}
                       </p>
                     </div>
 
-                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/10 text-[10px] font-mono tabular-nums">
-                      <span className="text-slate-400 truncate">{mode.ruleSummary}</span>
+                    <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-white/10 text-[10px] font-mono tabular-nums">
+                      <span className="text-slate-400">{mode.ruleSummary}</span>
                       <span className="text-amber-300 font-bold shrink-0 whitespace-nowrap">
                         🪙 {topPrize.toLocaleString()}
                       </span>
@@ -194,9 +194,9 @@ export const EventsScreen: React.FC<EventsScreenProps> = ({
           </section>
 
           {/* 02. ELEVATED CIRCUIT SHOWCASE CARDS */}
-          <section>
-            <div className="flex items-baseline justify-between gap-2 mb-2.5">
-              <h2 className="font-['Orbitron'] italic font-extrabold text-xs sm:text-sm tracking-wider uppercase text-white">
+          <section className="pt-0.5">
+            <div className="flex items-baseline justify-between gap-2 mb-1.5">
+              <h2 className="font-['Orbitron'] italic font-extrabold text-xs sm:text-sm tracking-wider uppercase text-white leading-tight">
                 02. Select Circuit
               </h2>
               <span className="text-[11px] text-slate-400 hidden sm:inline">
@@ -204,7 +204,7 @@ export const EventsScreen: React.FC<EventsScreenProps> = ({
               </span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
               {MAP_SPECS.map((map) => {
                 const isSelected = map.id === selectedMapId;
                 const rec = trackRecords[map.id];
@@ -229,8 +229,8 @@ export const EventsScreen: React.FC<EventsScreenProps> = ({
                         : 'border-white/12 hover:border-white/30'
                     }`}
                   >
-                    {/* Tall Full-Bleed Circuit Artwork */}
-                    <div className="relative w-full h-32 sm:h-36 lg:h-44 overflow-hidden bg-slate-900">
+                    {/* Circuit Artwork */}
+                    <div className="relative w-full h-28 sm:h-32 lg:h-36 overflow-hidden bg-slate-900">
                       {!imgFailed ? (
                         <img
                           src={map.previewImage}
@@ -262,7 +262,7 @@ export const EventsScreen: React.FC<EventsScreenProps> = ({
                       />
 
                       {/* Top metadata bar */}
-                      <div className="absolute inset-x-0 top-0 px-3 py-2 flex items-center justify-between gap-2 text-[10px] font-mono tabular-nums">
+                      <div className="absolute inset-x-0 top-0 px-3 py-1.5 flex items-center justify-between gap-2 text-[10px] font-mono tabular-nums">
                         <span className="text-slate-200 font-semibold drop-shadow">
                           {map.lengthLabel} · {map.laps} LAPS
                         </span>
@@ -281,13 +281,13 @@ export const EventsScreen: React.FC<EventsScreenProps> = ({
                         </div>
                       </div>
 
-                      {/* Bottom circuit identity */}
-                      <div className="absolute inset-x-0 bottom-0 px-3 py-2.5 flex items-end justify-between gap-2">
+                      {/* Bottom circuit identity — never truncates circuit names */}
+                      <div className="absolute inset-x-0 bottom-0 px-3 py-2 flex items-end justify-between gap-2">
                         <div className="min-w-0">
-                          <div className="font-['Orbitron'] italic font-black text-sm sm:text-base text-white tracking-wide uppercase leading-none truncate">
+                          <div className="font-['Orbitron'] italic font-black text-xs sm:text-sm lg:text-base text-white tracking-wide uppercase leading-tight whitespace-nowrap">
                             {map.name}
                           </div>
-                          <div className="text-[11px] text-slate-300 mt-1 leading-none truncate">
+                          <div className="text-[11px] text-slate-300 mt-0.5 leading-tight whitespace-nowrap">
                             {map.subtitle}
                           </div>
                         </div>
@@ -303,11 +303,11 @@ export const EventsScreen: React.FC<EventsScreenProps> = ({
                     </div>
 
                     {/* Circuit Telemetry Footer */}
-                    <div className="px-3.5 py-2.5 flex flex-col gap-1.5">
-                      <p className="text-[11px] text-slate-400 leading-snug line-clamp-2">
+                    <div className="px-3 py-2 flex flex-col gap-1">
+                      <p className="text-[11px] text-slate-400 leading-snug line-clamp-1">
                         {map.description}
                       </p>
-                      <div className="flex items-center justify-between text-[11px] pt-2 mt-0.5 border-t border-white/10 font-mono tabular-nums">
+                      <div className="flex items-center justify-between text-[11px] pt-1.5 mt-0.5 border-t border-white/10 font-mono tabular-nums">
                         <span className="text-slate-400">
                           Gold <span className="text-amber-300 font-semibold">&lt;{map.goldTargetSec}s</span>
                         </span>
@@ -324,33 +324,33 @@ export const EventsScreen: React.FC<EventsScreenProps> = ({
 
           {/* 03. FEATURED EVENT BRIEF + AUTOMATIC ATMOSPHERE + ROTATION */}
           <section className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-            <div className="p-3.5 rounded-xl bg-[#080e1c] border border-white/12 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3 min-w-0">
+            <div className="p-3 rounded-xl bg-[#080e1c] border border-white/12 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
                 <div
-                  className="w-10 h-10 rounded-xl bg-slate-900 border border-white/10 flex items-center justify-center shrink-0"
+                  className="w-9 h-9 rounded-xl bg-slate-900 border border-white/10 flex items-center justify-center shrink-0"
                   style={{ color: activeWeather.accentHex }}
                 >
-                  <WeatherIcon mode={weatherMode} className="w-5 h-5" />
+                  <WeatherIcon mode={weatherMode} className="w-4 h-4" />
                 </div>
                 <div className="min-w-0">
-                  <div className="flex items-center gap-1.5 font-['Orbitron'] italic font-bold text-xs uppercase text-white">
+                  <div className="flex items-center flex-wrap gap-1.5 font-['Orbitron'] italic font-bold text-[11px] sm:text-xs uppercase text-white leading-tight">
                     <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                    <span className="truncate">Auto Atmosphere · {activeWeather.label}</span>
+                    <span>Auto Atmosphere · {activeWeather.label}</span>
                   </div>
-                  <p className="text-[11px] text-slate-400 mt-0.5 truncate">
+                  <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
                     Environment lighting &amp; weather adapt automatically every race.
                   </p>
                 </div>
               </div>
             </div>
 
-            <div className="p-3.5 rounded-xl bg-[#080e1c] border border-white/12 flex items-center justify-between gap-3">
+            <div className="p-3 rounded-xl bg-[#080e1c] border border-white/12 flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <div className="flex items-center gap-1.5 font-['Orbitron'] italic font-bold text-xs uppercase text-white">
+                <div className="flex items-center gap-1.5 font-['Orbitron'] italic font-bold text-[11px] sm:text-xs uppercase text-white leading-tight">
                   <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                   <span>Auto Circuit Rotation</span>
                 </div>
-                <p className="text-[11px] text-slate-400 mt-0.5 truncate">
+                <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
                   Automatically advance to the next circuit after finishing each race.
                 </p>
               </div>

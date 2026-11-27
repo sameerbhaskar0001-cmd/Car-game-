@@ -424,9 +424,10 @@ export function buildMicroKart() {
     targetObj.position.set(hx * 1.15, 0.0018, 0.22);
     chassisGroup.add(targetObj);
 
-    const spot = new THREE.SpotLight(0xf0f9ff, 0.14, 0.24, Math.PI * 0.22, 0.98, 2.0);
+    const spot = new THREE.SpotLight(0xf0f9ff, 0.0, 0.24, Math.PI * 0.22, 0.98, 2.0);
     spot.position.set(hx, 0.0046, 0.0092);
     spot.target = targetObj;
+    spot.visible = false;
     chassisGroup.add(spot);
     headlightSpotLights.push(spot);
   }
@@ -986,7 +987,7 @@ export function buildMicroKart() {
       if (lens) lens.visible = false;
     }
     for (const spot of headlightSpotLights) {
-      if (spot) spot.visible = showLights;
+      if (spot) spot.visible = false;
     }
   }
 
@@ -1019,10 +1020,8 @@ export function buildMicroKart() {
     }
 
     if (changed || nextIdle) {
-      const hasAnyCarModel = Boolean(attachedCosmoCar || attachedS64Car || attachedGlbScene);
-      const showLights = !cockpitRoadOnly && hasAnyCarModel && !isIdleShowroom;
       for (const spot of headlightSpotLights) {
-        if (spot) spot.visible = showLights;
+        if (spot) spot.visible = false;
       }
     }
   }

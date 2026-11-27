@@ -121,7 +121,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
       <div className="flex-1 flex items-center justify-between gap-3 my-auto py-3">
         <nav
           aria-label="Lobby Navigation"
-          className="pointer-events-auto flex flex-col gap-2 w-44 sm:w-52 shrink-0"
+          className="pointer-events-auto flex flex-col gap-2 w-48 sm:w-56 shrink-0"
         >
           <button
             type="button"
@@ -133,7 +133,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
               <div className="font-['Orbitron'] italic font-extrabold text-xs sm:text-sm text-white tracking-wider uppercase whitespace-nowrap">
                 EVENTS
               </div>
-              <div className="text-[11px] text-slate-400 truncate mt-0.5">
+              <div className="text-[11px] text-slate-400 whitespace-nowrap mt-0.5">
                 {activeMode.shortName} · {activeMap.shortName}
               </div>
             </div>

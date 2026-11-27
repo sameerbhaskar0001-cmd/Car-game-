@@ -11,6 +11,9 @@ import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 
 import { buildMicroKart } from './scene/MicroKartBuilder.js';
 import { preloadCoreCosmoCars, preloadAllCosmoCars } from './scene/CosmoCarLoader.js';
+import { preloadSupercars } from './scene/SupercarLoader.js';
+import { createHdriEnvironmentManager } from './scene/HdriEnvironmentManager.js';
+import { configurePbrAnisotropy } from './scene/PbrAssetManager.js';
 import { loadS64ModularCar } from './scene/S64CarLoader.js';
 import { normalizeCarId, normalizeMapId } from './types/game';
 import { buildGoldenHourAtmosphere } from './scene/GoldenHourAtmosphere.js';
@@ -56,8 +59,24 @@ async function initApp() {
     12.0
   );
 
+  // Software WebGL detector (SwiftShader / llvmpipe / WARP) — adjusts GPU cost only, never scene content
+  const isSoftwareGl = (() => {
+    try {
+      const probeCanvas = document.createElement('canvas');
+      const gl = probeCanvas.getContext('webgl2') || probeCanvas.getContext('webgl');
+      if (!gl) return true;
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      const param = ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER;
+      const gpu = String(gl.getParameter(param) || '');
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
+      return /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(gpu);
+    } catch {
+      return false;
+    }
+  })();
+
   const renderer = new THREE.WebGLRenderer({
-    antialias: true,
+    antialias: !isSoftwareGl,
     powerPreference: 'high-performance',
   });
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -84,14 +103,47 @@ async function initApp() {
     }
   }
 
-  const pixelRatio = isScreenshotUrl ? 1.0 : Math.min(window.devicePixelRatio || 1, 1.35);
-  renderer.setPixelRatio(pixelRatio);
-  renderer.shadowMap.enabled = true;
+  let currentPixelRatio = isSoftwareGl || isScreenshotUrl
+    ? 1.0
+    : Math.min(window.devicePixelRatio || 1, 1.35);
+  renderer.setPixelRatio(currentPixelRatio);
+  renderer.shadowMap.enabled = !isSoftwareGl;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.78 + 0.08 * 1.15;
+  renderer.toneMappingExposure = 0.88;
   renderer.debug.checkShaderErrors = false;
+  configurePbrAnisotropy(isSoftwareGl ? 1 : renderer.capabilities.getMaxAnisotropy());
   container.appendChild(renderer.domElement);
+
+  // Layer 6 Crash-Proof GPU Shield: WebGL Context Loss & Auto-Restore Recovery
+  let isWebGLContextLost = false;
+  let hdriManager = null;
+  let watchdogSamples = 0;
+  let watchdogAccumMs = 0;
+  let gpuLowPowerTier = isSoftwareGl;
+  renderer.domElement.addEventListener(
+    'webglcontextlost',
+    (event) => {
+      event.preventDefault();
+      isWebGLContextLost = true;
+      console.warn('[GPU Shield] WebGL context lost — pausing render loop safely for auto-restore.');
+    },
+    false
+  );
+  renderer.domElement.addEventListener(
+    'webglcontextrestored',
+    () => {
+      isWebGLContextLost = false;
+      console.info('[GPU Shield] WebGL context restored — rebuilding HDRI PMREM and resuming.');
+      if (hdriManager && hdriManager.handleContextRestored) {
+        hdriManager.handleContextRestored();
+      }
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      if (composer) composer.setSize(window.innerWidth, window.innerHeight);
+    },
+    false
+  );
 
   // Balanced Automotive Studio & Sky Horizon PMREM: luminous sky-slate dome + soft horizon ring
   // + studio softbox strips so metallic bodywork catches rich sky/horizon highlights instead of crushing into black.
@@ -116,13 +168,13 @@ async function initApp() {
 
     const stripGeo = new THREE.BoxGeometry(1, 1, 1);
 
-    // 1. Overhead slender softbox ribbon (draws balanced highlight down hood, glass & roof without white blowout)
+    // 1. Overhead soft sky diffuser (sculpts car roofline and glass smoothly without casting a white glare blob on asphalt)
     const topStrip = new THREE.Mesh(
       stripGeo,
-      new THREE.MeshBasicMaterial({ color: new THREE.Color(1.75, 1.75, 1.75) })
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(0.92, 0.98, 1.08) })
     );
     topStrip.position.set(0, 12, 0);
-    topStrip.scale.set(2.4, 0.2, 16.0);
+    topStrip.scale.set(4.2, 0.2, 16.0);
     envScene.add(topStrip);
 
     // 2. Front-right cool ice-blue accent strip (sculpts fenders & wheel rims)
@@ -150,14 +202,19 @@ async function initApp() {
 
   const pmremGenerator = new THREE.PMREMGenerator(renderer);
   const studioEnvScene = createAutomotiveStudioEnv();
-  scene.environment = pmremGenerator.fromScene(studioEnvScene, 0.03).texture;
+  const fallbackStudioEnvTex = pmremGenerator.fromScene(studioEnvScene, 0.03).texture;
+  scene.environment = fallbackStudioEnvTex;
   studioEnvScene.traverse((obj) => {
     if (obj.isMesh) {
       obj.geometry?.dispose();
       obj.material?.dispose();
     }
   });
-  scene.environmentIntensity = 0.65;
+  pmremGenerator.dispose();
+  scene.environmentIntensity = 0.85;
+
+  // Real 360° Photographic HDRI Manager (Poly Haven CC0 — venice_sunset, shanghai_bund, pizzo_pernice)
+  hdriManager = createHdriEnvironmentManager(renderer, scene, fallbackStudioEnvTex);
 
   const composer = new EffectComposer(renderer);
   const rtSize = renderer.getDrawingBufferSize(new THREE.Vector2());
@@ -289,7 +346,7 @@ async function initApp() {
   // -------------------------------------------------------------------------
   let currentMapId = 'coast';
   let currentWeather = 'dust';
-  let initialSavedKitId = 'coupe';
+  let initialSavedKitId = 'ferrari';
   let initialSavedPaintHex = null;
   try {
     const savedMap = window.localStorage.getItem('the_race_3d_selected_map_v1');
@@ -337,9 +394,15 @@ async function initApp() {
   const atmosphere = buildGoldenHourAtmosphere(scene);
   const weatherSystem = buildWeatherSystem(scene);
   weatherSystem.setWeather(currentWeather);
+  if (hdriManager) {
+    hdriManager.setMapAndWeather(currentMapId, currentWeather);
+  }
   const pitGarage = buildPitLaneGarage(scene, new THREE.Vector3(0.0, 0.088, 0.22));
   pitGarage.rootGroup.visible = false; // Shown strictly in GARAGE workshop mode
   let activeWorldMap = buildRealWorldMap(currentMapId, splineData, scene);
+  if (isSoftwareGl && activeWorldMap.setDetailLevel) {
+    activeWorldMap.setDetailLevel(true);
+  }
   activeWorldMap.rootGroup.visible = true; // Shown live on HOME Start-Grid & during RACE
 
   const microKart = buildMicroKart();
@@ -1111,8 +1174,9 @@ async function initApp() {
     microKart.setS64LazyLoader(ensureS64Loaded);
   }
 
-  // Fast startup preload: ONLY load the player's equipped car + 3 rival cars cleanly before Menu opens!
+  // Fast startup preload: load AAA showcase supercar + equipped car + 3 rival cars cleanly before Menu opens!
   await Promise.all([
+    preloadSupercars(),
     preloadCoreCosmoCars(initialSavedKitId),
     initialSavedKitId === 's64' ? ensureS64Loaded() : Promise.resolve(),
   ]);
@@ -3438,12 +3502,20 @@ async function initApp() {
     splineData = getTrackSplineForMap(currentMapId);
     syncSectorNames(splineData);
     activeWorldMap = buildRealWorldMap(currentMapId, splineData, scene);
+    if ((isSoftwareGl || gpuLowPowerTier) && activeWorldMap.setDetailLevel) {
+      activeWorldMap.setDetailLevel(true);
+    }
     if (cachedTrafficLightGlb && activeWorldMap.attachTrafficLightGlb) {
       activeWorldMap.attachTrafficLightGlb(cachedTrafficLightGlb);
     }
 
     const isGarage = currentAppScreen === 'GARAGE';
     activeWorldMap.rootGroup.visible = !isGarage;
+
+    if (hdriManager) {
+      hdriManager.setMapAndWeather(currentMapId, currentWeather);
+      hdriManager.setShowroomBoost(isGarage);
+    }
 
     // 3. Re-bind physics, AI rivals, boost pads/ramps & minimap radar
     if (physics.setSplineData) {
@@ -3480,6 +3552,9 @@ async function initApp() {
   function setActiveWeather(mode) {
     currentWeather = normalizeWeatherMode(mode);
     weatherSystem.setWeather(currentWeather);
+    if (hdriManager) {
+      hdriManager.setMapAndWeather(currentMapId, currentWeather);
+    }
     try {
       window.localStorage.setItem('the_race_3d_weather_v1', currentWeather);
     } catch (_e) {
@@ -3538,6 +3613,7 @@ async function initApp() {
           if (atmosphere.applyMapAtmospherePreset) {
             atmosphere.applyMapAtmospherePreset(currentMapId, false, scene, renderer, currentWeather, 0.016, true);
           }
+          if (hdriManager) hdriManager.setShowroomBoost(false);
           if (prev !== 'MENU' && prev !== 'EVENTS' && prev !== 'MISSIONS') {
             snapHomeStartGridCamera();
           }
@@ -3548,6 +3624,7 @@ async function initApp() {
           if (atmosphere.applyMapAtmospherePreset) {
             atmosphere.applyMapAtmospherePreset(currentMapId, true, scene, renderer, currentWeather, 0.016, true);
           }
+          if (hdriManager) hdriManager.setShowroomBoost(true);
         }
       }
     },
@@ -4085,8 +4162,8 @@ async function initApp() {
         stuntCamState.elapsed = 0.0;
         stuntCamState.duration = 0.9;
         stuntCamState.side = -stuntCamState.side;
-        if (audioSynth.playUnlockOrStuntVoice) {
-          audioSynth.playUnlockOrStuntVoice();
+        if (audioSynth.playFlybyWhoosh) {
+          audioSynth.playFlybyWhoosh({ volume: 0.92, playbackRate: 1.14, cooldownMs: 300 });
         }
       }
 
@@ -4516,11 +4593,17 @@ async function initApp() {
       return;
     }
 
-    // 6. Fast Single-Pass Direct WebGL Rendering for 60 FPS Mobile Performance
-    // (Falls back to EffectComposer only if user explicitly enabled high DOF or Bloom in Settings)
+    // 6. Crash-Proof Single-Pass Direct WebGL Rendering + Adaptive FPS Watchdog
+    if (isWebGLContextLost) {
+      requestAnimationFrame(animate);
+      return;
+    }
+
+    const frameStartMs = performance.now();
     renderer.info.autoReset = false;
     renderer.info.reset();
-    const usePostComposer = bokehPass.enabled || (settings.bloomStrength ?? 0) > 0.12;
+    const usePostComposer =
+      !isSoftwareGl && (bokehPass.enabled || (settings.bloomStrength ?? 0) > 0.12);
     if (usePostComposer) {
       composer.render();
     } else {
@@ -4534,6 +4617,30 @@ async function initApp() {
         renderer.autoClear = prevAutoClear;
       }
     }
+
+    // Adaptive FPS Watchdog: protects low-end phones from WebGL crashes / thermal throttling
+    if (!isSoftwareGl && !isScreenshotMode) {
+      const renderMs = performance.now() - frameStartMs;
+      watchdogSamples += 1;
+      watchdogAccumMs += renderMs;
+      if (watchdogSamples >= 60) {
+        const avgMs = watchdogAccumMs / watchdogSamples;
+        if (avgMs > 26 && currentPixelRatio > 0.9) {
+          currentPixelRatio = Math.max(0.85, Number((currentPixelRatio - 0.2).toFixed(2)));
+          renderer.setPixelRatio(currentPixelRatio);
+          if (currentPixelRatio <= 1.0 && !gpuLowPowerTier) {
+            gpuLowPowerTier = true;
+            renderer.shadowMap.enabled = false;
+            if (activeWorldMap && activeWorldMap.setDetailLevel) {
+              activeWorldMap.setDetailLevel(true);
+            }
+          }
+        }
+        watchdogSamples = 0;
+        watchdogAccumMs = 0;
+      }
+    }
+
     window.__deskRacerStats = {
       calls: renderer.info.render.calls,
       triangles: renderer.info.render.triangles,

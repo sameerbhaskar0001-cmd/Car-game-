@@ -927,20 +927,20 @@ export function createRivalRacersController(splineData, scene) {
               const overlapLat = minDLat - absDLat + 0.0008;
               playerState.lateralOffset = THREE.MathUtils.clamp(
                 playerState.lateralOffset + pushDir * overlapLat * 0.42,
-                -0.0148,
-                0.0148
+                -0.0208,
+                0.0208
               );
               rival.lateralOffset = THREE.MathUtils.clamp(
                 rival.lateralOffset - pushDir * overlapLat * 0.58,
-                -0.0144,
-                0.0144
+                -0.0202,
+                0.0202
               );
               playerState.knockbackLateralVel = pushDir * 0.018;
               rival.lateralVel = -pushDir * 0.032;
               rival.targetLane = THREE.MathUtils.clamp(
                 rival.lateralOffset - pushDir * 0.0064,
-                -0.0096,
-                0.0096
+                -0.0135,
+                0.0135
               );
             }
 

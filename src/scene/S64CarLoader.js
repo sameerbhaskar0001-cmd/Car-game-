@@ -36,10 +36,10 @@ const SPOILER_FILES = {
 // S64 Compact native FBX wheel well coordinates:
 // Nose is +X (+176), Tail is -X (-158), Roof is +Y (+104), Left is -Z (-58), Right is +Z (+58)
 const WHEEL_SLOTS = [
-  { name: 'FL', x: 104.2, y: 24.0, z: -58.0, side: 'L', isFront: true },
-  { name: 'FR', x: 104.2, y: 24.0, z: 58.0, side: 'R', isFront: true },
-  { name: 'RL', x: -99.5, y: 24.0, z: -58.0, side: 'L', isFront: false },
-  { name: 'RR', x: -99.5, y: 24.0, z: 58.0, side: 'R', isFront: false },
+  { name: 'FL', x: 104.2, y: 24.0, z: -61.5, side: 'L', isFront: true },
+  { name: 'FR', x: 104.2, y: 24.0, z: 61.5, side: 'R', isFront: true },
+  { name: 'RL', x: -99.5, y: 24.0, z: -61.5, side: 'L', isFront: false },
+  { name: 'RR', x: -99.5, y: 24.0, z: 61.5, side: 'R', isFront: false },
 ];
 
 const RIM_STYLES = {
@@ -97,9 +97,9 @@ function upgradeBodyMaterials(fbxObj, kitId, customPaintHex = null) {
       if (mName.includes('headlight') || mName.includes('front_light')) {
         return new THREE.MeshStandardMaterial({
           name: 'S64_Headlights',
-          color: 0xffffff,
-          emissive: new THREE.Color(0xfff8e0),
-          emissiveIntensity: 3.2,
+          color: 0xe0f7ff,
+          emissive: new THREE.Color(0xbae6fd),
+          emissiveIntensity: 2.4,
           roughness: 0.05,
           metalness: 0.1,
           toneMapped: false,
@@ -111,7 +111,7 @@ function upgradeBodyMaterials(fbxObj, kitId, customPaintHex = null) {
           name: 'S64_RearLights',
           color: 0xff0018,
           emissive: new THREE.Color(0xff0518),
-          emissiveIntensity: 2.5,
+          emissiveIntensity: 2.2,
           roughness: 0.08,
           metalness: 0.15,
           toneMapped: false,
@@ -121,12 +121,13 @@ function upgradeBodyMaterials(fbxObj, kitId, customPaintHex = null) {
       if (mName.includes('glass') || mName.includes('window') || mName.includes('windshield')) {
         return new THREE.MeshPhysicalMaterial({
           name: 'S64_Glass',
-          color: 0x040812,
+          color: 0x04070f,
           roughness: 0.04,
-          metalness: 0.10,
+          metalness: 0.38,
           clearcoat: 1.0,
-          clearcoatRoughness: 0.02,
-          envMapIntensity: 1.0,
+          clearcoatRoughness: 0.04,
+          reflectivity: 0.96,
+          envMapIntensity: 1.35,
         });
       }
 
@@ -165,12 +166,12 @@ function upgradeBodyMaterials(fbxObj, kitId, customPaintHex = null) {
       return new THREE.MeshPhysicalMaterial({
         name: `S64_CarPaint_${kitId}_${matIdx}`,
         color: paintHex,
-        roughness: 0.28,
-        metalness: 0.22,
+        roughness: 0.25,
+        metalness: 0.65,
         clearcoat: 1.0,
-        clearcoatRoughness: 0.03,
-        reflectivity: 0.90,
-        envMapIntensity: 0.95,
+        clearcoatRoughness: 0.12,
+        reflectivity: 0.92,
+        envMapIntensity: 1.15,
       });
     });
 
@@ -634,9 +635,9 @@ export async function loadS64ModularCar() {
   const fbxSpaceGroup = new THREE.Group();
   fbxSpaceGroup.name = 'S64FbxSpaceRoot';
   const s64Scale = 0.0000565;
-  fbxSpaceGroup.scale.setScalar(s64Scale);
+  fbxSpaceGroup.scale.set(s64Scale * 1.03, s64Scale * 0.88, s64Scale * 1.14);
   fbxSpaceGroup.rotation.y = -Math.PI / 2;
-  fbxSpaceGroup.position.set(0, 0.0001, -0.00035);
+  fbxSpaceGroup.position.set(0, 0.00005, -0.00035);
   carAssemblyRoot.add(fbxSpaceGroup);
 
   // 1. Prepare 3 Body Meshes + Bespoke 3D Bodykit Sculptures so each car has a truly distinct 3D silhouette

@@ -69,13 +69,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md max-h-[90dvh] flex flex-col overflow-hidden bg-[#070b14] border border-white/15 rounded-2xl shadow-2xl text-left pointer-events-auto relative"
+        className="w-full max-w-md max-h-[92dvh] flex flex-col overflow-hidden bg-[#070b14] border border-white/15 rounded-2xl shadow-2xl text-left pointer-events-auto relative"
         style={{ zIndex: 100000 }}
       >
-        {/* Opaque Header */}
-        <div className="flex items-center justify-between gap-3 px-4 py-3 bg-[#080d1a] border-b border-white/10 shrink-0">
+        {/* Compact Opaque Header */}
+        <div className="flex items-center justify-between gap-3 px-3.5 py-2.5 bg-[#080d1a] border-b border-white/10 shrink-0">
           <div>
-            <h2 className="font-['Orbitron'] italic font-black text-base sm:text-lg text-white uppercase leading-none">
+            <h2 className="font-['Orbitron'] italic font-black text-sm sm:text-base text-white uppercase leading-none">
               SETTINGS
             </h2>
             <p className="text-[11px] text-slate-400 mt-0.5">
@@ -92,19 +92,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             }}
             aria-label="Close Settings"
             style={{ touchAction: 'manipulation' }}
-            className="w-8 h-8 rounded-lg bg-slate-900 border border-white/15 hover:border-cyan-400 text-slate-200 font-bold text-sm flex items-center justify-center cursor-pointer active:scale-95 shrink-0"
+            className="w-7 h-7 rounded-lg bg-slate-900 border border-white/15 hover:border-cyan-400 text-slate-200 font-bold text-xs flex items-center justify-center cursor-pointer active:scale-95 shrink-0"
           >
             ✕
           </button>
         </div>
 
-        {/* Scrollable Settings Body */}
+        {/* Compact Settings Body — guarantees GRAPHICS is 100% visible */}
         <div
-          className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 flex flex-col gap-3"
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 flex flex-col gap-2"
           style={{ touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}
         >
           {/* 1. Throttle Controls */}
-          <div className="p-3 rounded-xl bg-slate-900/90 border border-white/10 flex flex-col gap-2">
+          <div className="p-2.5 rounded-xl bg-slate-900/90 border border-white/10 flex flex-col gap-1.5">
             <div className="flex items-center justify-between gap-2">
               <span className="font-['Orbitron'] italic font-bold text-xs text-white uppercase">
                 Throttle Control
@@ -118,7 +118,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 type="button"
                 onClick={() => handleSetAutoGas(true)}
                 style={{ touchAction: 'manipulation' }}
-                className={`py-2 px-3 rounded-lg text-xs font-semibold border cursor-pointer transition-colors whitespace-nowrap ${
+                className={`py-1.5 px-3 rounded-lg text-xs font-semibold border cursor-pointer transition-colors whitespace-nowrap ${
                   autoGas
                     ? 'bg-cyan-500/20 border-cyan-400 text-white'
                     : 'bg-slate-950/70 border-white/10 text-slate-400'
@@ -130,7 +130,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 type="button"
                 onClick={() => handleSetAutoGas(false)}
                 style={{ touchAction: 'manipulation' }}
-                className={`py-2 px-3 rounded-lg text-xs font-semibold border cursor-pointer transition-colors whitespace-nowrap ${
+                className={`py-1.5 px-3 rounded-lg text-xs font-semibold border cursor-pointer transition-colors whitespace-nowrap ${
                   !autoGas
                     ? 'bg-amber-500/20 border-amber-400 text-white'
                     : 'bg-slate-950/70 border-white/10 text-slate-400'
@@ -142,19 +142,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           {/* 2. Automatic Dynamic Environment */}
-          <div className="p-3 rounded-xl bg-slate-900/90 border border-white/10 flex items-center justify-between gap-3">
+          <div className="p-2.5 rounded-xl bg-slate-900/90 border border-white/10 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5 min-w-0">
               <span
-                className="w-8 h-8 rounded-lg bg-slate-950 border border-white/10 flex items-center justify-center shrink-0"
+                className="w-7 h-7 rounded-lg bg-slate-950 border border-white/10 flex items-center justify-center shrink-0"
                 style={{ color: activeWeather.accentHex }}
               >
-                <WeatherIcon mode={weatherMode} className="w-4 h-4" />
+                <WeatherIcon mode={weatherMode} className="w-3.5 h-3.5" />
               </span>
               <div className="min-w-0">
                 <div className="font-['Orbitron'] italic font-bold text-xs text-white uppercase">
                   Dynamic Environment
                 </div>
-                <p className="text-[11px] text-slate-400 leading-snug truncate">
+                <p className="text-[11px] text-slate-400 leading-snug">
                   Auto-selected: <span style={{ color: activeWeather.accentHex }}>{activeWeather.label}</span>
                 </p>
               </div>
@@ -164,8 +164,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </span>
           </div>
 
-          {/* 3. Visual Quality */}
-          <div className="p-3 rounded-xl bg-slate-900/90 border border-white/10 flex flex-col gap-2">
+          {/* 3. Visual Quality (GRAPHICS) */}
+          <div className="p-2.5 rounded-xl bg-slate-900/90 border border-white/10 flex flex-col gap-1.5">
             <div className="flex items-center justify-between">
               <span className="font-['Orbitron'] italic font-bold text-xs text-white uppercase">
                 Graphics
@@ -185,7 +185,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   handleSetQuality('performance');
                 }}
                 style={{ touchAction: 'manipulation' }}
-                className={`py-2 px-3 rounded-lg text-xs font-semibold cursor-pointer border transition-colors active:scale-95 whitespace-nowrap ${
+                className={`py-1.5 px-3 rounded-lg text-xs font-semibold cursor-pointer border transition-colors active:scale-95 whitespace-nowrap ${
                   visualQuality === 'performance'
                     ? 'bg-cyan-500/20 border-cyan-400 text-white'
                     : 'bg-slate-950/70 border-white/10 text-slate-400'
@@ -203,7 +203,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   handleSetQuality('ultra');
                 }}
                 style={{ touchAction: 'manipulation' }}
-                className={`py-2 px-3 rounded-lg text-xs font-semibold cursor-pointer border transition-colors active:scale-95 whitespace-nowrap ${
+                className={`py-1.5 px-3 rounded-lg text-xs font-semibold cursor-pointer border transition-colors active:scale-95 whitespace-nowrap ${
                   visualQuality === 'ultra'
                     ? 'bg-amber-500/20 border-amber-400 text-white'
                     : 'bg-slate-950/70 border-white/10 text-slate-400'
@@ -215,8 +215,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
         </div>
 
-        {/* Opaque Footer Buttons */}
-        <div className="grid grid-cols-2 gap-2.5 px-4 py-3 bg-[#080d1a] border-t border-white/10 shrink-0">
+        {/* Compact Opaque Footer Buttons */}
+        <div className="grid grid-cols-2 gap-2.5 px-3.5 py-2.5 bg-[#080d1a] border-t border-white/10 shrink-0">
           <button
             type="button"
             onClick={(e) => {
@@ -225,7 +225,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               onBackToMenu();
             }}
             style={{ touchAction: 'manipulation' }}
-            className="py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 border border-white/15 font-['Orbitron'] italic font-bold text-xs text-slate-200 uppercase tracking-wider cursor-pointer active:scale-95 whitespace-nowrap"
+            className="py-2 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 border border-white/15 font-['Orbitron'] italic font-bold text-xs text-slate-200 uppercase tracking-wider cursor-pointer active:scale-95 whitespace-nowrap"
           >
             Lobby
           </button>
@@ -238,7 +238,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               onClose();
             }}
             style={{ touchAction: 'manipulation' }}
-            className="py-2.5 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-['Orbitron'] italic font-black text-xs uppercase tracking-wider cursor-pointer active:scale-95 whitespace-nowrap"
+            className="py-2 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-['Orbitron'] italic font-black text-xs uppercase tracking-wider cursor-pointer active:scale-95 whitespace-nowrap"
           >
             Resume
           </button>

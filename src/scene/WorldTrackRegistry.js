@@ -174,7 +174,8 @@ function buildSplineFromGameShipKitJson(rawId, rawJson) {
   const rawGrid = Array.isArray(json.grid) ? json.grid : [];
 
   const N = centerLine.length;
-  const baseWidthRaw = typeof json.width === 'number' ? json.width : 15.5;
+  const TRACK_WIDTH_MULTIPLIER = 1.4;
+  const baseWidthRaw = (typeof json.width === 'number' ? json.width : 15.5) * TRACK_WIDTH_MULTIPLIER;
   const baseWidthM = baseWidthRaw * WORLD_TRACK_SCALE;
   const worldUp = new THREE.Vector3(0, 1, 0);
 
@@ -190,7 +191,9 @@ function buildSplineFromGameShipKitJson(rawId, rawJson) {
       BASE_GROUND_Y + pt.y * WORLD_TRACK_SCALE,
       pt.z * WORLD_TRACK_SCALE
     );
-    rawWidths[i] = (typeof pt.width === 'number' ? pt.width : baseWidthRaw) * WORLD_TRACK_SCALE;
+    rawWidths[i] =
+      (typeof pt.width === 'number' ? pt.width * TRACK_WIDTH_MULTIPLIER : baseWidthRaw) *
+      WORLD_TRACK_SCALE;
     rawBanks[i] = typeof pt.bank === 'number' ? pt.bank : 0.0;
   }
 

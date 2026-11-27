@@ -1,16 +1,24 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { BODY_KITS, normalizeCarId } from '../types/game';
+import { getSharedGltfLoader } from './PbrAssetManager.js';
+import {
+  isSupercarId,
+  loadSupercarGlb,
+  createSupercarInstance,
+} from './SupercarLoader.js';
 
-const gltfLoader = new GLTFLoader();
+const gltfLoader = getSharedGltfLoader();
 const rawGlbCache = new Map();
 const loadPromises = new Map();
 
 /**
- * Loads a Cosmo GLB model from /models/cosmo/{carId}.glb with caching.
+ * Loads a Cosmo or AAA Supercar GLB model with caching and Draco support.
  */
 export function loadCosmoGlb(carId) {
   const normId = normalizeCarId(carId);
+  if (isSupercarId(normId)) {
+    return loadSupercarGlb(normId);
+  }
   if (rawGlbCache.has(normId)) {
     return Promise.resolve(rawGlbCache.get(normId));
   }
@@ -68,12 +76,12 @@ function upgradeCosmoMaterial(srcMat, normId = 'coupe') {
       roughnessMap: srcMat.roughnessMap || null,
       metalnessMap: srcMat.metalnessMap || null,
       side: srcMat.side ?? THREE.FrontSide,
-      metalness: 0.45,
-      roughness: 0.22,
-      clearcoat: 0.82,
+      metalness: 0.65,
+      roughness: 0.25,
+      clearcoat: 1.0,
       clearcoatRoughness: 0.12,
-      reflectivity: 0.85,
-      envMapIntensity: 0.92,
+      reflectivity: 0.92,
+      envMapIntensity: 1.15,
     });
     mat.userData.origMap = srcMat.map || null;
     mat.userData.isStarterCoupe = isStarterCoupe;
@@ -83,29 +91,30 @@ function upgradeCosmoMaterial(srcMat, normId = 'coupe') {
   if (mName.includes('glass')) {
     return new THREE.MeshPhysicalMaterial({
       name: srcMat.name,
-      color: new THREE.Color(0x050b18),
+      color: new THREE.Color(0x04070f),
       map: null,
       side: srcMat.side ?? THREE.FrontSide,
-      metalness: 0.22,
-      roughness: 0.06,
-      clearcoat: 0.85,
-      clearcoatRoughness: 0.08,
-      reflectivity: 0.9,
-      envMapIntensity: 1.05,
+      metalness: 0.38,
+      roughness: 0.04,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.04,
+      reflectivity: 0.96,
+      envMapIntensity: 1.35,
     });
   }
 
   if (mName.includes('light')) {
+    // Default GLB light material to sleek glowing white/ice-blue LED for front headlights;
+    // rear tail-light faces are dynamically split into a dedicated crimson rear-light material per mesh!
     return new THREE.MeshStandardMaterial({
       name: srcMat.name,
-      color: new THREE.Color(0xff1e2e),
-      map: srcMat.map || null,
-      emissive: new THREE.Color(0xff0a1e),
-      emissiveMap: srcMat.map || null,
-      emissiveIntensity: 1.35,
-      roughness: 0.12,
-      metalness: 0.12,
-      toneMapped: true,
+      color: new THREE.Color(0xe0f7ff),
+      map: null,
+      emissive: new THREE.Color(0x7dd3fc),
+      emissiveIntensity: 2.1,
+      roughness: 0.08,
+      metalness: 0.15,
+      toneMapped: false,
     });
   }
 
@@ -118,10 +127,98 @@ function upgradeCosmoMaterial(srcMat, normId = 'coupe') {
     roughnessMap: srcMat.roughnessMap || null,
     metalnessMap: srcMat.metalnessMap || null,
     side: srcMat.side ?? THREE.FrontSide,
-    metalness: 0.36,
-    roughness: 0.38,
-    envMapIntensity: 0.95,
+    metalness: 0.45,
+    roughness: 0.34,
+    envMapIntensity: 1.05,
   });
+}
+
+/**
+ * Splits or assigns vertex-colored front (sleek white/ice-blue LED) vs rear (red LED lightbar)
+ * lighting on any mesh that uses a 'light' material, so FRONT headlights are NEVER red!
+ */
+function configureFrontAndRearLightMesh(mesh, centerZ, rearTailLightMat) {
+  if (!mesh || !mesh.geometry) return;
+  const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+  const hasLightMat = mats.some((m) => (m?.name || '').toLowerCase().includes('light'));
+  if (!hasLightMat) return;
+
+  // Ensure unique cloned geometry so we can safely split or vertex-color front vs rear light faces
+  const geo = mesh.geometry.clone();
+  mesh.geometry = geo;
+  const posAttr = geo.attributes.position;
+  if (!posAttr) return;
+
+  // Compute mesh local Z threshold relative to car center
+  const invWorld = new THREE.Matrix4();
+  mesh.updateMatrixWorld(true);
+  invWorld.copy(mesh.matrixWorld).invert();
+
+  if (Array.isArray(mesh.material) && geo.groups && geo.groups.length > 0) {
+    // Multi-material mesh: check each group's triangles; if a group uses 'light', split it into
+    // front headlights (white/ice-blue LED) vs rear taillights (red LED) based on triangle centroid Z!
+    const newMats = mesh.material.slice();
+    const rearMatIdx = newMats.length;
+    newMats.push(rearTailLightMat);
+
+    if (geo.index) {
+      const idxArr = geo.index.array;
+      const newGroups = [];
+      const rebuiltIndices = [];
+
+      for (const grp of geo.groups) {
+        const grpMat = newMats[grp.materialIndex];
+        const mName = (grpMat?.name || '').toLowerCase();
+        if (!mName.includes('light')) {
+          const start = rebuiltIndices.length;
+          for (let k = 0; k < grp.count; k++) {
+            rebuiltIndices.push(idxArr[grp.start + k]);
+          }
+          newGroups.push({ start, count: grp.count, materialIndex: grp.materialIndex });
+        } else {
+          const frontTris = [];
+          const rearTris = [];
+          for (let k = 0; k + 2 < grp.count; k += 3) {
+            const i0 = idxArr[grp.start + k];
+            const i1 = idxArr[grp.start + k + 1];
+            const i2 = idxArr[grp.start + k + 2];
+            const avgLocalZ = (posAttr.getZ(i0) + posAttr.getZ(i1) + posAttr.getZ(i2)) / 3.0;
+            if (avgLocalZ >= centerZ) {
+              frontTris.push(i0, i1, i2);
+            } else {
+              rearTris.push(i0, i1, i2);
+            }
+          }
+          if (frontTris.length > 0) {
+            const start = rebuiltIndices.length;
+            rebuiltIndices.push(...frontTris);
+            newGroups.push({ start, count: frontTris.length, materialIndex: grp.materialIndex });
+          }
+          if (rearTris.length > 0) {
+            const start = rebuiltIndices.length;
+            rebuiltIndices.push(...rearTris);
+            newGroups.push({ start, count: rearTris.length, materialIndex: rearMatIdx });
+          }
+        }
+      }
+      geo.setIndex(rebuiltIndices);
+      geo.clearGroups();
+      for (const g of newGroups) {
+        geo.addGroup(g.start, g.count, g.materialIndex);
+      }
+      mesh.material = newMats;
+    }
+  } else {
+    // Single-material 'light' mesh: check if its bounding box sits in the rear half
+    geo.computeBoundingBox();
+    const bb = geo.boundingBox;
+    if (bb) {
+      const midZ = (bb.min.z + bb.max.z) * 0.5;
+      if (midZ < centerZ) {
+        mesh.material = rearTailLightMat;
+      }
+    }
+  }
 }
 
 /**
@@ -160,32 +257,34 @@ function cloneCarHierarchy(source, normId = 'coupe') {
 function buildPlaceholderCarScene() {
   const scene = new THREE.Group();
   const bodyRoot = new THREE.Mesh(
-    new THREE.BoxGeometry(1.75, 0.72, 4.10),
-    new THREE.MeshStandardMaterial({
+    new THREE.BoxGeometry(1.88, 0.62, 4.16),
+    new THREE.MeshPhysicalMaterial({
       name: 'metallic',
       color: 0x38bdf8,
-      metalness: 0.38,
-      roughness: 0.20,
-      envMapIntensity: 1.35,
+      metalness: 0.65,
+      roughness: 0.25,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.12,
+      envMapIntensity: 1.25,
     })
   );
   bodyRoot.name = 'placeholder_coupe';
-  bodyRoot.position.set(0, 0.62, 0);
+  bodyRoot.position.set(0, 0.54, 0);
 
-  const wheelGeo = new THREE.CylinderGeometry(0.32, 0.32, 0.24, 18);
+  const wheelGeo = new THREE.CylinderGeometry(0.32, 0.32, 0.26, 18);
   wheelGeo.rotateZ(Math.PI / 2);
   const wheelMat = new THREE.MeshStandardMaterial({
     name: 'texture',
     color: 0x1e293b,
-    metalness: 0.35,
-    roughness: 0.55,
+    metalness: 0.45,
+    roughness: 0.48,
   });
 
   const wheelOffsets = [
-    ['wheels.FL', -0.86, -0.30, 1.32],
-    ['wheels.FR', 0.86, -0.30, 1.32],
-    ['wheels.RL', -0.86, -0.30, -1.28],
-    ['wheels.RR', 0.86, -0.30, -1.28],
+    ['wheels.FL', -0.94, -0.24, 1.32],
+    ['wheels.FR', 0.94, -0.24, 1.32],
+    ['wheels.RL', -0.94, -0.24, -1.28],
+    ['wheels.RR', 0.94, -0.24, -1.28],
   ];
   for (const [wName, wx, wy, wz] of wheelOffsets) {
     const wMesh = new THREE.Mesh(wheelGeo, wheelMat);
@@ -199,10 +298,14 @@ function buildPlaceholderCarScene() {
 
 /**
  * Creates a playable, steerable 3D instance of any of the Cosmo 3D cars.
- * Scaled to 1:87 HO micro-scale (~21mm length) and normalized so wheel contact sits at Y=0.
+ * Scaled to 1:87 HO micro-scale (~21mm length) with a lowered, wider sports coupe stance
+ * and normalized so wheel contact sits flush at Y=0.
  */
-export async function createCosmoCarInstance(carId = 'coupe', customPaintHex = null) {
+export async function createCosmoCarInstance(carId = 'ferrari', customPaintHex = null) {
   const normId = normalizeCarId(carId);
+  if (isSupercarId(normId)) {
+    return createSupercarInstance(normId, customPaintHex);
+  }
   let gltfSceneSource = null;
   try {
     const gltf = await loadCosmoGlb(normId);
@@ -226,28 +329,45 @@ export async function createCosmoCarInstance(carId = 'coupe', customPaintHex = n
   rawBox.getSize(rawSize);
   rawBox.getCenter(rawCenter);
 
-  const targetLength = 0.021;
+  const targetLength = 0.0214;
   const scaleFactor = targetLength / Math.max(rawSize.z, 4.0);
+
+  // Lower chassis stance (-14% height) and widen track (+14% width) so the silhouette looks
+  // like a sleek, aggressive widebody sports coupe instead of a tall narrow box.
+  const scaleX = scaleFactor * 1.14;
+  const scaleY = scaleFactor * 0.86;
+  const scaleZ = scaleFactor * 1.02;
 
   const modelContainer = new THREE.Group();
   modelContainer.name = `CosmoCar_${normId}_Container`;
-  modelContainer.scale.setScalar(scaleFactor);
+  modelContainer.scale.set(scaleX, scaleY, scaleZ);
 
   modelContainer.position.set(
-    -rawCenter.x * scaleFactor,
-    -rawBox.min.y * scaleFactor,
-    -rawCenter.z * scaleFactor
+    -rawCenter.x * scaleX,
+    -rawBox.min.y * scaleY,
+    -rawCenter.z * scaleZ
   );
 
   modelContainer.add(carScene);
   assemblyRoot.add(modelContainer);
+
+  // Dedicated crimson rear tail-light material (strictly for REAR lights — never front!)
+  const rearTailLightMat = new THREE.MeshStandardMaterial({
+    name: 'Cosmo_RearTailLight_LED',
+    color: new THREE.Color(0xff1024),
+    emissive: new THREE.Color(0xff0518),
+    emissiveIntensity: 1.55,
+    roughness: 0.1,
+    metalness: 0.12,
+    toneMapped: false,
+  });
 
   let bodyMesh = null;
   const wheelNodes = [];
   const frontWheels = [];
   const rearWheels = [];
   const materials = [];
-  const lightMaterials = [];
+  const rearBrakeMaterials = [rearTailLightMat];
 
   carScene.traverse((child) => {
     if (child.isMesh) {
@@ -260,13 +380,13 @@ export async function createCosmoCarInstance(carId = 'coupe', customPaintHex = n
         child.geometry.computeVertexNormals();
       }
 
+      // Split any shared 'light' material so front headlights are glowing white/ice-blue LED
+      // and rear lights are crimson red LED!
+      configureFrontAndRearLightMesh(child, rawCenter.z, rearTailLightMat);
+
       const mats = Array.isArray(child.material) ? child.material : [child.material];
       for (const m of mats) {
-        if (!materials.includes(m)) materials.push(m);
-        const mName = (m?.name || '').toLowerCase();
-        if (mName.includes('light') && !lightMaterials.includes(m)) {
-          lightMaterials.push(m);
-        }
+        if (m && !materials.includes(m)) materials.push(m);
       }
 
       const name = (child.name || '').toLowerCase();
@@ -286,6 +406,52 @@ export async function createCosmoCarInstance(carId = 'coupe', customPaintHex = n
       }
     }
   });
+
+  // Lower body shell stance slightly relative to the wheel axles and push wheels slightly outward
+  // for a planted, wide-track sports coupe stance.
+  if (bodyMesh && wheelNodes.length > 0 && bodyMesh.children.includes(wheelNodes[0])) {
+    bodyMesh.position.y -= 0.045;
+    for (let i = 0; i < wheelNodes.length; i++) {
+      wheelNodes[i].position.y += 0.045;
+      wheelNodes[i].position.x *= 1.07;
+    }
+  } else {
+    for (let i = 0; i < wheelNodes.length; i++) {
+      wheelNodes[i].position.x *= 1.07;
+    }
+  }
+
+  // Attach sleek flush front white/ice-blue LED strips and rear red LED lightbar
+  // so front vs rear lighting is 100% unmistakable from every camera angle.
+  const frontLedMat = new THREE.MeshStandardMaterial({
+    name: 'Cosmo_FrontHeadlight_LED',
+    color: new THREE.Color(0xe0f7ff),
+    emissive: new THREE.Color(0xbae6fd),
+    emissiveIntensity: 2.35,
+    roughness: 0.06,
+    metalness: 0.1,
+    toneMapped: false,
+  });
+  materials.push(frontLedMat, rearTailLightMat);
+
+  const halfCarW = Math.max(0.75, rawSize.x * 0.44);
+  const frontZ = rawBox.max.z - 0.05;
+  const rearZ = rawBox.min.z + 0.05;
+  const headlampY = rawBox.min.y + rawSize.y * 0.42;
+  const taillampY = rawBox.min.y + rawSize.y * 0.48;
+
+  const frontStripGeo = new THREE.BoxGeometry(halfCarW * 0.42, 0.065, 0.09);
+  for (const side of [-1, 1]) {
+    const fStrip = new THREE.Mesh(frontStripGeo, frontLedMat);
+    fStrip.position.set(rawCenter.x + side * (halfCarW * 0.58), headlampY, frontZ);
+    fStrip.rotation.y = side * -0.14;
+    carScene.add(fStrip);
+  }
+
+  const rearBarGeo = new THREE.BoxGeometry(halfCarW * 1.48, 0.075, 0.08);
+  const rearBarMesh = new THREE.Mesh(rearBarGeo, rearTailLightMat);
+  rearBarMesh.position.set(rawCenter.x, taillampY, rearZ);
+  carScene.add(rearBarMesh);
 
   // Sort & classify the 4 extracted wheel meshes into front (steerable + spinning) and rear (spinning)
   let avgZ = 0;
@@ -337,9 +503,9 @@ export async function createCosmoCarInstance(carId = 'coupe', customPaintHex = n
   }
 
   function setBraking(isBraking) {
-    const targetEmissive = isBraking ? 2.6 : 1.35;
-    for (let i = 0; i < lightMaterials.length; i++) {
-      const lm = lightMaterials[i];
+    const targetEmissive = isBraking ? 2.85 : 1.55;
+    for (let i = 0; i < rearBrakeMaterials.length; i++) {
+      const lm = rearBrakeMaterials[i];
       lm.emissiveIntensity = targetEmissive;
     }
   }
@@ -350,7 +516,7 @@ export async function createCosmoCarInstance(carId = 'coupe', customPaintHex = n
 
   let wheelRotX = 0;
   let currentSteerY = 0;
-  const wheelRadius = Math.max(0.0008, measuredWheelRadiusLocal * scaleFactor);
+  const wheelRadius = Math.max(0.0008, measuredWheelRadiusLocal * scaleY);
 
   function spinWheels(distDelta) {
     if (wheelNodes.length === 0 || Math.abs(distDelta) < 1e-7) return;
@@ -400,9 +566,9 @@ export async function createCosmoCarInstance(carId = 'coupe', customPaintHex = n
  * Fast startup preload: loads ONLY the player's equipped car and the 3 rival cars
  * so initial boot is snappy with zero multi-megabyte parse stalls.
  */
-export function preloadCoreCosmoCars(equippedCarId = 'coupe') {
+export function preloadCoreCosmoCars(equippedCarId = 'ferrari') {
   const coreIds = Array.from(
-    new Set([normalizeCarId(equippedCarId), 'police', 'kamaro', 'ghini'])
+    new Set([normalizeCarId(equippedCarId), 'ferrari', 'police', 'kamaro', 'ghini'])
   );
   return Promise.all(
     coreIds.map((id) =>
