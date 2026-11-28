@@ -161,7 +161,7 @@ export const GarageScreen: React.FC<GarageScreenProps> = ({
       }}
     >
       {/* 1. CLEAN TOP BAR: Back | Car Name & PR | Coins */}
-      <header className="pointer-events-auto flex items-center justify-between gap-2 w-full">
+      <header className="pointer-events-auto flex items-center justify-between gap-1.5 sm:gap-2 w-full">
         <button
           type="button"
           onPointerDown={(e) => e.stopPropagation()}
@@ -170,34 +170,34 @@ export const GarageScreen: React.FC<GarageScreenProps> = ({
             onBackToMenu();
           }}
           style={{ touchAction: 'manipulation' }}
-          className="h-9 px-3.5 rounded-lg bg-[#070b14]/88 border border-white/15 hover:border-cyan-400/60 text-xs font-semibold text-white flex items-center gap-1.5 cursor-pointer active:scale-95 whitespace-nowrap shrink-0 backdrop-blur-md"
+          className="h-9 px-2.5 sm:px-3.5 rounded-lg bg-[#070b14]/88 border border-white/15 hover:border-cyan-400/60 text-xs font-semibold text-white flex items-center gap-1.5 cursor-pointer active:scale-95 whitespace-nowrap shrink-0 backdrop-blur-md"
         >
           <span>←</span>
-          <span>Lobby</span>
+          <span className="hidden sm:inline">Lobby</span>
         </button>
 
-        {/* Compact Centered Car Identity */}
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#070b14]/84 border border-white/12 backdrop-blur-md min-w-0">
+        {/* Compact Centered Car Identity (never clips car name on portrait mobile!) */}
+        <div className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-lg bg-[#070b14]/86 border border-white/12 backdrop-blur-md min-w-0 max-w-[66vw] sm:max-w-none">
           <span
-            className={`w-6 h-6 rounded font-['Orbitron'] italic font-black text-xs flex items-center justify-center shrink-0 ${classColorMap[perf.carClass]}`}
+            className={`w-5 h-5 sm:w-6 sm:h-6 rounded font-['Orbitron'] italic font-black text-[11px] sm:text-xs flex items-center justify-center shrink-0 ${classColorMap[perf.carClass]}`}
           >
             {perf.carClass}
           </span>
-          <span className="font-['Orbitron'] italic font-black text-xs sm:text-sm text-white tracking-wider uppercase truncate">
+          <span className="font-['Orbitron'] italic font-black text-[11px] sm:text-sm text-white tracking-wide sm:tracking-wider uppercase truncate">
             {activeKit.name}
           </span>
           <span className="text-slate-500 text-xs hidden sm:inline" aria-hidden="true">·</span>
-          <span className="font-mono font-bold text-[11px] sm:text-xs text-amber-300 tabular-nums shrink-0">
+          <span className="font-mono font-bold text-[10px] sm:text-xs text-amber-300 tabular-nums shrink-0">
             PR {perf.pr}
           </span>
         </div>
 
         {/* Coins Counter */}
-        <div className="h-9 flex items-center gap-1.5 px-3 rounded-lg bg-[#070b14]/88 border border-amber-400/45 backdrop-blur-md shrink-0 whitespace-nowrap">
-          <span className="text-sm leading-none" aria-hidden="true">
+        <div className="h-9 flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 rounded-lg bg-[#070b14]/88 border border-amber-400/45 backdrop-blur-md shrink-0 whitespace-nowrap">
+          <span className="text-xs sm:text-sm leading-none" aria-hidden="true">
             🪙
           </span>
-          <span className="font-mono font-bold text-xs sm:text-sm text-white tabular-nums">
+          <span className="font-mono font-bold text-[11px] sm:text-sm text-white tabular-nums">
             {coins.toLocaleString()}
           </span>
           <span className="hidden sm:inline font-['Orbitron'] font-bold text-[10px] text-amber-300 uppercase">

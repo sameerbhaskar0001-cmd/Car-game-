@@ -10,14 +10,21 @@ import {
   getSharedGltfLoader,
   getRoadPbrPackForMap,
   loadPhotogrammetryPropTemplate,
+  loadMultiPartPropTemplate,
+  loadEnvironmentSceneGlb,
 } from './PbrAssetManager.js';
 
 /**
- * Custom 3D Track & AAA Multi-Layered 3D Environment Builder
- * - Uses shared Draco-enabled GLTFLoader for track GLBs and Poly Haven photogrammetry props.
- * - Upgrades road surfaces with Poly Haven 1K photoscanned PBR normal/roughness maps and a
- *   single-pass wet-puddle roughness sheen shader (zero double-render mirror cost -> 60 FPS!).
- * - Scatters real 3D-scanned photogrammetry boulders & concrete road barriers via InstancedMesh.
+ * Custom 3D Track & AAA Multi-Layered 3D Environment Builder (6 Distinct World Circuits)
+ * - Supports all 6 maps:
+ *   1. 'coast'  (Amalfi Riviera)
+ *   2. 'city'   (Shibuya Metropolis)
+ *   3. 'canyon' (Chamonix Glacier — with user's 3D Snowy Mountain Road Scene & 3D Mountain Massifs)
+ *   4. 'drift'  (Autodrome Arena — user's full 3D Drift Race Track Circuit GLB aligned 1:1)
+ *   5. 'desert' (Mojave Red Canyon — Poly Haven 3D Photogrammetry Canyon Cliffs, Rock Faces & Desert Trees)
+ *   6. 'forest' (Hakone Touge Pass — user's 3D Forest Grove Island + 3D Normal-Mapped Forest Trees)
+ * - Zero toy cone mountains or low-poly placeholder trees: uses real 3D GLB assets and
+ *   Poly Haven 3D photogrammetry via InstancedMesh to sustain 60 FPS on mobile and desktop.
  */
 
 const sharedGltfLoader = getSharedGltfLoader();
@@ -81,7 +88,6 @@ function normalizeGeometryForMerge(geo) {
   if (!g.attributes.normal) {
     g.computeVertexNormals();
   }
-  // Ensure consistent attribute set (position + normal) for safe mergeGeometries
   const pos = g.attributes.position;
   const norm = g.attributes.normal;
   const out = new THREE.BufferGeometry();
@@ -137,7 +143,6 @@ function createAtmosphericSkyDomeMaterial(cfg) {
       uniform float uStarsIntensity;
       varying vec3 vWorldDir;
 
-      // 2D Simplex Noise (Ashima / Gustavson) — zero square/diagonal bilinear grid artifacts
       vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
       vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
       vec3 permute(vec3 x) { return mod289(((x * 34.0) + 1.0) * x); }
@@ -192,17 +197,14 @@ function createAtmosphericSkyDomeMaterial(cfg) {
         vec3 dir = normalize(vWorldDir);
         float h = clamp(dir.y, -0.15, 1.0);
 
-        // Smooth 3-stop atmospheric sky gradient
         vec3 skyCol = mix(uBottomColor, uMidColor, smoothstep(-0.04, 0.24, h));
         skyCol = mix(skyCol, uTopColor, smoothstep(0.24, 0.85, h));
 
-        // Sun / Moon disc + atmospheric corona scattering
         float sunDot = max(0.0, dot(dir, normalize(uSunDir)));
         float sunGlow = pow(sunDot, 7.0) * 0.42 + pow(sunDot, 48.0) * 0.55;
         float sunDisc = smoothstep(0.9965, 0.9988, sunDot) * 1.45;
         skyCol += uSunColor * (sunGlow + sunDisc);
 
-        // Optional night stars for Neon City
         if (uStarsIntensity > 0.01 && h > 0.08) {
           vec2 starUv = floor(dir.xz / max(0.15, dir.y + 0.35) * 180.0);
           float st = hash21(starUv);
@@ -212,7 +214,6 @@ function createAtmosphericSkyDomeMaterial(cfg) {
           }
         }
 
-        // Silky, artifact-free wispy Simplex clouds above horizon
         if (h > 0.01 && uCloudDensity > 0.01) {
           vec2 cloudUv = dir.xz / (h + 0.22) * 1.15 + vec2(uTime * 0.008, uTime * 0.003);
           float c1 = fbmSmooth(cloudUv * 1.45);
@@ -224,7 +225,6 @@ function createAtmosphericSkyDomeMaterial(cfg) {
           skyCol = mix(skyCol, cloudCol, clamp(cloudMask, 0.0, 0.88));
         }
 
-        // Subtle warm/cool horizon mist band so distant 3D mountains melt smoothly into the sky
         float horizonMist = exp(-abs(h) * 14.0) * 0.28;
         skyCol = mix(skyCol, uBottomColor, horizonMist);
 
@@ -265,8 +265,7 @@ function createCheckeredBannerTexture(accentHex) {
 }
 
 /**
- * High-resolution 1024x1024 PBR racing road texture with dark specular Asphalt 9 / NFS tarmac,
- * high-contrast dual rubberized racing grooves, metallic shoulder stripes, and crisp lane markers.
+ * High-resolution 1024x1024 PBR racing road texture customized per biome for all 6 tracks.
  */
 function createHighResRoadTexture(safeMapId) {
   const size = 1024;
@@ -276,11 +275,17 @@ function createHighResRoadTexture(safeMapId) {
   const ctx = canvas.getContext('2d');
 
   if (safeMapId === 'city') {
-    ctx.fillStyle = '#0b101d';
+    ctx.fillStyle = '#070a13';
   } else if (safeMapId === 'canyon') {
-    ctx.fillStyle = '#1e293b';
+    ctx.fillStyle = '#141c28';
+  } else if (safeMapId === 'desert') {
+    ctx.fillStyle = '#191412';
+  } else if (safeMapId === 'forest') {
+    ctx.fillStyle = '#0e1513';
+  } else if (safeMapId === 'drift') {
+    ctx.fillStyle = '#10151f';
   } else {
-    ctx.fillStyle = '#121620';
+    ctx.fillStyle = '#0d1118';
   }
   ctx.fillRect(0, 0, size, size);
 
@@ -290,7 +295,6 @@ function createHighResRoadTexture(safeMapId) {
     return (seed - 1) / 2147483646;
   };
 
-  // Fine high-frequency mineral aggregate micro-grain
   for (let i = 0; i < 18000; i++) {
     const x = Math.floor(rand() * size);
     const y = Math.floor(rand() * size);
@@ -300,71 +304,73 @@ function createHighResRoadTexture(safeMapId) {
       ctx.fillStyle = rand() > 0.55 ? 'rgba(148, 163, 184, 0.07)' : 'rgba(2, 6, 15, 0.42)';
     } else if (safeMapId === 'canyon') {
       ctx.fillStyle = rand() > 0.48 ? 'rgba(226, 232, 240, 0.14)' : 'rgba(9, 14, 24, 0.36)';
+    } else if (safeMapId === 'desert') {
+      ctx.fillStyle = rand() > 0.50 ? 'rgba(251, 146, 60, 0.08)' : 'rgba(12, 8, 6, 0.38)';
     } else {
       ctx.fillStyle = rand() > 0.52 ? 'rgba(203, 213, 225, 0.08)' : 'rgba(4, 7, 15, 0.38)';
     }
     ctx.fillRect(x, y, w, h);
   }
 
-  // Subtle frost-dusted outer shoulders on Alpine Canyon track
-  if (safeMapId === 'canyon') {
-    const leftGrad = ctx.createLinearGradient(0, 0, 120, 0);
-    leftGrad.addColorStop(0.0, 'rgba(226, 232, 240, 0.55)');
-    leftGrad.addColorStop(0.55, 'rgba(203, 213, 225, 0.18)');
-    leftGrad.addColorStop(1.0, 'rgba(203, 213, 225, 0.0)');
+  // Subtle frost-dusted or sand-dusted outer shoulders on Canyon / Desert tracks
+  if (safeMapId === 'canyon' || safeMapId === 'desert') {
+    const dustRgb = safeMapId === 'canyon' ? '226, 232, 240' : '217, 119, 66';
+    const leftGrad = ctx.createLinearGradient(0, 0, 125, 0);
+    leftGrad.addColorStop(0.0, `rgba(${dustRgb}, 0.52)`);
+    leftGrad.addColorStop(0.55, `rgba(${dustRgb}, 0.18)`);
+    leftGrad.addColorStop(1.0, `rgba(${dustRgb}, 0.0)`);
     ctx.fillStyle = leftGrad;
-    ctx.fillRect(0, 0, 120, size);
+    ctx.fillRect(0, 0, 125, size);
 
-    const rightGrad = ctx.createLinearGradient(size, 0, size - 120, 0);
-    rightGrad.addColorStop(0.0, 'rgba(226, 232, 240, 0.55)');
-    rightGrad.addColorStop(0.55, 'rgba(203, 213, 225, 0.18)');
-    rightGrad.addColorStop(1.0, 'rgba(203, 213, 240, 0.0)');
+    const rightGrad = ctx.createLinearGradient(size, 0, size - 125, 0);
+    rightGrad.addColorStop(0.0, `rgba(${dustRgb}, 0.52)`);
+    rightGrad.addColorStop(0.55, `rgba(${dustRgb}, 0.18)`);
+    rightGrad.addColorStop(1.0, `rgba(${dustRgb}, 0.0)`);
     ctx.fillStyle = rightGrad;
-    ctx.fillRect(size - 120, 0, 120, size);
+    ctx.fillRect(size - 125, 0, 125, size);
   }
 
-  // Deep polished rubberized racing wheel tracks (Left & Right lanes)
+  // Deep polished rubberized racing wheel tracks
   const grooveGradL = ctx.createLinearGradient(180, 0, 410, 0);
   grooveGradL.addColorStop(0.0, 'rgba(0, 0, 0, 0.0)');
-  grooveGradL.addColorStop(0.35, 'rgba(2, 4, 10, 0.42)');
-  grooveGradL.addColorStop(0.65, 'rgba(2, 4, 10, 0.42)');
+  grooveGradL.addColorStop(0.35, 'rgba(2, 4, 10, 0.44)');
+  grooveGradL.addColorStop(0.65, 'rgba(2, 4, 10, 0.44)');
   grooveGradL.addColorStop(1.0, 'rgba(0, 0, 0, 0.0)');
   ctx.fillStyle = grooveGradL;
   ctx.fillRect(180, 0, 230, size);
 
   const grooveGradR = ctx.createLinearGradient(size - 410, 0, size - 180, 0);
   grooveGradR.addColorStop(0.0, 'rgba(0, 0, 0, 0.0)');
-  grooveGradR.addColorStop(0.35, 'rgba(2, 4, 10, 0.42)');
-  grooveGradR.addColorStop(0.65, 'rgba(2, 4, 10, 0.42)');
+  grooveGradR.addColorStop(0.35, 'rgba(2, 4, 10, 0.44)');
+  grooveGradR.addColorStop(0.65, 'rgba(2, 4, 10, 0.44)');
   grooveGradR.addColorStop(1.0, 'rgba(0, 0, 0, 0.0)');
   ctx.fillStyle = grooveGradR;
   ctx.fillRect(size - 410, 0, 230, size);
 
-  // Crisp continuous outer shoulder boundary stripes (Asphalt 9 dual-line signature)
-  if (safeMapId === 'city') {
-    ctx.fillStyle = '#00f0ff';
-    ctx.fillRect(26, 0, 14, size);
-    ctx.fillRect(size - 40, 0, 14, size);
-    ctx.fillStyle = '#f43f5e';
-    ctx.fillRect(46, 0, 6, size);
-    ctx.fillRect(size - 52, 0, 6, size);
-  } else if (safeMapId === 'canyon') {
-    ctx.fillStyle = '#f8fafc';
-    ctx.fillRect(26, 0, 14, size);
-    ctx.fillRect(size - 40, 0, 14, size);
-    ctx.fillStyle = '#38bdf8';
-    ctx.fillRect(46, 0, 6, size);
-    ctx.fillRect(size - 52, 0, 6, size);
-  } else {
-    ctx.fillStyle = '#f8fafc';
-    ctx.fillRect(26, 0, 14, size);
-    ctx.fillRect(size - 40, 0, 14, size);
-    ctx.fillStyle = '#f59e0b';
-    ctx.fillRect(46, 0, 7, size);
-    ctx.fillRect(size - 53, 0, 7, size);
-  }
+  // Outer shoulder boundary stripes
+  const outerPrimary =
+    safeMapId === 'city' ? '#00f0ff' : '#f8fafc';
+  const outerAccent =
+    safeMapId === 'city'
+      ? '#f43f5e'
+      : safeMapId === 'canyon'
+        ? '#38bdf8'
+        : safeMapId === 'drift'
+          ? '#ef4444'
+          : safeMapId === 'desert'
+            ? '#f97316'
+            : safeMapId === 'forest'
+              ? '#10b981'
+              : '#f59e0b';
 
-  // Sleek dashed center & subtle lane lines
+  ctx.fillStyle = outerPrimary;
+  ctx.fillRect(26, 0, 14, size);
+  ctx.fillRect(size - 40, 0, 14, size);
+  ctx.fillStyle = outerAccent;
+  ctx.fillRect(46, 0, 7, size);
+  ctx.fillRect(size - 53, 0, 7, size);
+
+  // Sleek dashed center & lane lines
   ctx.fillStyle = safeMapId === 'city' ? '#38bdf8' : 'rgba(248, 250, 252, 0.88)';
   for (let y = 36; y < size; y += 256) {
     ctx.fillRect(size * 0.5 - 7, y, 14, 118);
@@ -385,8 +391,7 @@ function createHighResRoadTexture(safeMapId) {
 }
 
 /**
- * Metallic Armco Crash Barrier & Racing Chevron Texture for GLB `Walls` mesh.
- * Replaces the flat untextured gray ribbon with a realistic multi-rail steel barrier.
+ * Metallic Armco Crash Barrier & Racing Chevron Texture for GLB and extruded `Walls` mesh.
  */
 function createRacingBarrierWallTexture(safeMapId) {
   const canvas = document.createElement('canvas');
@@ -394,11 +399,9 @@ function createRacingBarrierWallTexture(safeMapId) {
   canvas.height = 128;
   const ctx = canvas.getContext('2d');
 
-  // Dark gunmetal steel base
   ctx.fillStyle = '#111827';
   ctx.fillRect(0, 0, 512, 128);
 
-  // Corrugated horizontal W-beam steel rail shading
   const beamGrad = ctx.createLinearGradient(0, 0, 0, 128);
   beamGrad.addColorStop(0.0, '#334155');
   beamGrad.addColorStop(0.18, '#0f172a');
@@ -409,9 +412,19 @@ function createRacingBarrierWallTexture(safeMapId) {
   ctx.fillStyle = beamGrad;
   ctx.fillRect(0, 0, 512, 128);
 
-  // Bold diagonal racing hazard chevrons along the central band
   const accentColor =
-    safeMapId === 'city' ? '#00f0ff' : safeMapId === 'canyon' ? '#38bdf8' : '#f59e0b';
+    safeMapId === 'city'
+      ? '#00f0ff'
+      : safeMapId === 'canyon'
+        ? '#38bdf8'
+        : safeMapId === 'drift'
+          ? '#ef4444'
+          : safeMapId === 'desert'
+            ? '#f97316'
+            : safeMapId === 'forest'
+              ? '#10b981'
+              : '#f59e0b';
+
   ctx.save();
   ctx.beginPath();
   ctx.rect(0, 34, 512, 60);
@@ -433,13 +446,11 @@ function createRacingBarrierWallTexture(safeMapId) {
   }
   ctx.restore();
 
-  // Top & bottom high-visibility reflective safety trim
   ctx.fillStyle = safeMapId === 'city' ? '#f43f5e' : '#ef4444';
   ctx.fillRect(0, 6, 512, 10);
   ctx.fillStyle = '#f8fafc';
   ctx.fillRect(0, 112, 512, 8);
 
-  // Vertical steel stanchion seam lines
   ctx.fillStyle = 'rgba(2, 6, 23, 0.75)';
   for (let x = 0; x < 512; x += 128) {
     ctx.fillRect(x, 0, 6, 128);
@@ -454,40 +465,23 @@ function createRacingBarrierWallTexture(safeMapId) {
   return tex;
 }
 
-function createRoadMicroNormalTexture(repeatX = 4, repeatY = 120) {
-  const size = 128;
-  const data = new Uint8Array(size * size * 4);
-  let seed = 90210;
-  const rand = () => {
-    seed = (seed * 48271) % 2147483647;
-    return (seed - 1) / 2147483646;
-  };
-
-  for (let i = 0; i < size * size; i++) {
-    const nx = Math.floor(128 + (rand() - 0.5) * 26);
-    const ny = Math.floor(128 + (rand() - 0.5) * 26);
-    data[i * 4 + 0] = nx;
-    data[i * 4 + 1] = ny;
-    data[i * 4 + 2] = 255;
-    data[i * 4 + 3] = 255;
-  }
-
-  const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(repeatX, repeatY);
-  tex.needsUpdate = true;
-  return tex;
-}
-
 function createCurbStripeTexture(safeMapId) {
   const canvas = document.createElement('canvas');
   canvas.width = 128;
   canvas.height = 256;
   const ctx = canvas.getContext('2d');
 
-  const c1 = safeMapId === 'city' ? '#00f0ff' : safeMapId === 'canyon' ? '#0284c7' : '#dc2626';
-  const c2 = safeMapId === 'city' ? '#0f172a' : '#f8fafc';
+  const c1 =
+    safeMapId === 'city'
+      ? '#00f0ff'
+      : safeMapId === 'canyon'
+        ? '#0284c7'
+        : safeMapId === 'desert'
+          ? '#ea580c'
+          : safeMapId === 'forest'
+            ? '#059669'
+            : '#dc2626';
+  const c2 = safeMapId === 'city' ? '#0f172a' : safeMapId === 'desert' ? '#fef3c7' : '#f8fafc';
 
   for (let y = 0; y < 256; y += 64) {
     ctx.fillStyle = (y / 64) % 2 === 0 ? c1 : c2;
@@ -510,7 +504,6 @@ function createCityBuildingFacadeTexture() {
   ctx.fillStyle = '#070d1f';
   ctx.fillRect(0, 0, 256, 512);
 
-  // Horizontal floor bands
   ctx.fillStyle = '#0f172a';
   for (let y = 0; y < 512; y += 22) {
     ctx.fillRect(0, y, 256, 4);
@@ -554,10 +547,6 @@ function createCityBuildingFacadeTexture() {
   return tex;
 }
 
-/**
- * Ensures any GLB mesh whose vertex normals point downward (`-Y`) has its
- * normals negated and triangle winding flipped so it faces upward (`+Y`).
- */
 function ensureUpwardMeshNormalsAndWinding(geometry) {
   if (!geometry || !geometry.attributes || !geometry.attributes.normal) return;
   const normAttr = geometry.attributes.normal;
@@ -591,19 +580,14 @@ function ensureUpwardMeshNormalsAndWinding(geometry) {
 }
 
 /**
- * Builds a high-density 192x192 3D Heightmap Terrain around the entire track loop:
- * - Uses a 4-corner quad corridor safety clamp so ZERO terrain triangles can ever
- *   bridge across or poke through the road surface, curbs, or walls on any map.
- * - Dips cleanly underneath elevated bridges so concrete viaduct piers stand tall.
- * - Rises smoothly into multi-layered coastal headlands & cliffs (`coast`), jagged alpine
- *   ridges & snowy mountains (`canyon`), or terraced waterfront blocks (`city`).
- * - Returns `{ terrainMesh, getTerrainHeightAt }` so trees, villas, chalets, and towers
- *   sit organically on the 3D hills and slopes at multiple elevations.
+ * Builds a high-density 192x192 3D Heightmap Terrain around the entire track loop for all 6 biomes.
+ * Uses a 4-corner quad corridor safety clamp so ZERO terrain triangles can ever bridge across or
+ * poke through the road surface, curbs, or walls.
  */
 function buildSculpted3DTerrainMesh(samples, safeMapId, trackGeo, trackMat) {
   const N = samples.length;
   const gridSegs = 192;
-  const size = 2.65;
+  const size = 2.85;
   const halfSize = size * 0.5;
   const geo = trackGeo(new THREE.PlaneGeometry(size, size, gridSegs, gridSegs));
   geo.rotateX(-Math.PI / 2);
@@ -626,15 +610,47 @@ function buildSculpted3DTerrainMesh(samples, safeMapId, trackGeo, trackMat) {
   }
 
   const colLow = new THREE.Color(
-    safeMapId === 'city' ? 0x060b18 : safeMapId === 'canyon' ? 0x94a3b8 : 0x161d2a
+    safeMapId === 'city'
+      ? 0x060b18
+      : safeMapId === 'canyon'
+        ? 0x64748b
+        : safeMapId === 'desert'
+          ? 0x3b1d11
+          : safeMapId === 'forest'
+            ? 0x0d1b14
+            : safeMapId === 'drift'
+              ? 0x111915
+              : 0x161d2a
   );
   const colMid = new THREE.Color(
-    safeMapId === 'city' ? 0x0f172a : safeMapId === 'canyon' ? 0x64748b : 0x162e22
+    safeMapId === 'city'
+      ? 0x0f172a
+      : safeMapId === 'canyon'
+        ? 0x94a3b8
+        : safeMapId === 'desert'
+          ? 0x7c3419
+          : safeMapId === 'forest'
+            ? 0x163022
+            : safeMapId === 'drift'
+              ? 0x1c2b21
+              : 0x162e22
   );
   const colPeak = new THREE.Color(
-    safeMapId === 'city' ? 0x1e293b : safeMapId === 'canyon' ? 0xe2e8f0 : 0x3b302a
+    safeMapId === 'city'
+      ? 0x1e293b
+      : safeMapId === 'canyon'
+        ? 0xe2e8f0
+        : safeMapId === 'desert'
+          ? 0xb45328
+          : safeMapId === 'forest'
+            ? 0x25422e
+            : safeMapId === 'drift'
+              ? 0x2b3a2e
+              : 0x3b302a
   );
-  const colSnowCap = new THREE.Color(0xf8fafc);
+  const colTopCap = new THREE.Color(
+    safeMapId === 'desert' ? 0xd97742 : safeMapId === 'forest' ? 0x3f523a : 0xf8fafc
+  );
   const tmpCol = new THREE.Color();
 
   const fbmHeight = (x, z) => {
@@ -683,13 +699,28 @@ function buildSculpted3DTerrainMesh(samples, safeMapId, trackGeo, trackMat) {
       const cliffRise = (0.014 + Math.max(0.0, rawRidge) * 0.095) * hillBlend * islandMask;
       const seaDrop = (1.0 - islandMask) * -0.0065 * hillBlend;
       finalY = THREE.MathUtils.lerp(safeFloor, BASE_GROUND_Y + cliffRise + seaDrop, hillBlend);
-    } else if (safeMapId === 'canyon') {
+    } else if (safeMapId === 'canyon' || safeMapId === 'forest') {
       const ridge = Math.abs(fbmHeight(vx * 1.15, vz * 1.15));
       const valleyFloor = safeFloor + Math.sin(vx * 7.0 + vz * 6.0) * 0.0022 * hillBlend;
       const mountainWall =
         Math.pow(THREE.MathUtils.clamp((margin - 0.008) / 0.16, 0.0, 1.35), 1.35) *
-        (0.046 + ridge * 0.155);
+        (0.044 + ridge * 0.145);
       finalY = THREE.MathUtils.lerp(safeFloor, valleyFloor + mountainWall, hillBlend);
+    } else if (safeMapId === 'desert') {
+      // Stepped Mojave Red Canyon flat-topped mesas & deep badland gorges
+      const rawMesa = Math.abs(fbmHeight(vx * 1.05, vz * 1.05));
+      const steppedMesa = Math.floor(rawMesa * 4.5) / 4.5;
+      const canyonWall =
+        Math.pow(THREE.MathUtils.clamp((margin - 0.008) / 0.15, 0.0, 1.3), 1.25) *
+        (0.038 + steppedMesa * 0.125);
+      finalY = THREE.MathUtils.lerp(safeFloor, safeFloor + canyonWall, hillBlend);
+    } else if (safeMapId === 'drift') {
+      // Gentle stadium bowl around the Drift Autodrome
+      const ridge = Math.max(0, fbmHeight(vx * 0.9, vz * 0.9));
+      const bowlRise =
+        Math.pow(THREE.MathUtils.clamp((margin - 0.012) / 0.22, 0.0, 1.2), 1.3) *
+        (0.022 + ridge * 0.065);
+      finalY = THREE.MathUtils.lerp(safeFloor, BASE_GROUND_Y - 0.0015 + bowlRise, hillBlend);
     } else {
       const stepTerrace = Math.floor(Math.max(0, fbmHeight(vx * 1.6, vz * 1.6)) * 3.0) * 0.0042;
       finalY = THREE.MathUtils.lerp(safeFloor, BASE_GROUND_Y - 0.0018 + stepTerrace, hillBlend);
@@ -728,21 +759,21 @@ function buildSculpted3DTerrainMesh(samples, safeMapId, trackGeo, trackMat) {
 
   for (let i = 0; i < vCount; i++) {
     const finalY = posAttr.getY(i);
-    if (safeMapId === 'coast') {
+    if (safeMapId === 'coast' || safeMapId === 'drift') {
       const hNorm = THREE.MathUtils.clamp((finalY - BASE_GROUND_Y) / 0.068, 0, 1);
       if (hNorm < 0.25) {
         tmpCol.lerpColors(colLow, colMid, hNorm / 0.25);
       } else {
         tmpCol.lerpColors(colMid, colPeak, (hNorm - 0.25) / 0.75);
       }
-    } else if (safeMapId === 'canyon') {
+    } else if (safeMapId === 'canyon' || safeMapId === 'desert' || safeMapId === 'forest') {
       const hNorm = THREE.MathUtils.clamp((finalY - BASE_GROUND_Y) / 0.115, 0, 1);
       if (hNorm < 0.28) {
         tmpCol.lerpColors(colLow, colMid, hNorm / 0.28);
-      } else if (hNorm < 0.62) {
-        tmpCol.lerpColors(colMid, colPeak, (hNorm - 0.28) / 0.34);
+      } else if (hNorm < 0.65) {
+        tmpCol.lerpColors(colMid, colPeak, (hNorm - 0.28) / 0.37);
       } else {
-        tmpCol.lerpColors(colPeak, colSnowCap, (hNorm - 0.62) / 0.38);
+        tmpCol.lerpColors(colPeak, colTopCap, (hNorm - 0.65) / 0.35);
       }
     } else {
       const tNorm = THREE.MathUtils.clamp((finalY - (BASE_GROUND_Y - 0.002)) / 0.012, 0, 1);
@@ -760,9 +791,10 @@ function buildSculpted3DTerrainMesh(samples, safeMapId, trackGeo, trackMat) {
   const mat = trackMat(
     new THREE.MeshStandardMaterial({
       vertexColors: true,
-      roughness: safeMapId === 'city' ? 0.42 : safeMapId === 'canyon' ? 0.72 : 0.85,
+      roughness:
+        safeMapId === 'city' ? 0.42 : safeMapId === 'canyon' ? 0.72 : safeMapId === 'desert' ? 0.88 : 0.84,
       metalness: safeMapId === 'city' ? 0.32 : 0.06,
-      flatShading: safeMapId === 'canyon',
+      flatShading: safeMapId === 'canyon' || safeMapId === 'desert',
       side: THREE.DoubleSide,
       polygonOffset: true,
       polygonOffsetFactor: 6,
@@ -798,7 +830,6 @@ function buildSculpted3DTerrainMesh(samples, safeMapId, trackGeo, trackMat) {
  * Multi-part 3D Tropical Palm Tree Geometry (Curved Segmented Trunk + 8 Arched Leaf Fronds)
  */
 function build3DPalmTreeGeometries(trackGeo) {
-  // 1. Curved segmented palm trunk (5 tapered tilted segments)
   const trunkParts = [];
   let curY = 0;
   let curX = 0;
@@ -821,13 +852,11 @@ function build3DPalmTreeGeometries(trackGeo) {
   const trunkGeo = trackGeo(mergeNormalizedParts(trunkParts));
   trunkParts.forEach((p) => p.dispose());
 
-  // 2. Crown of 8 arched 3D palm frond blades fanning outward + drooping tips
   const frondParts = [];
   const frondCount = 8;
   for (let f = 0; f < frondCount; f++) {
     const yaw = (f / frondCount) * Math.PI * 2 + (f % 2) * 0.14;
     const pitchBase = f % 2 === 0 ? 0.32 : 0.08;
-    // Inner leaf stem + outer drooping blade tip
     const innerBlade = new THREE.BoxGeometry(0.0028, 0.00035, 0.0085);
     innerBlade.translate(0, 0, 0.0045);
     innerBlade.rotateX(-pitchBase);
@@ -850,59 +879,19 @@ function build3DPalmTreeGeometries(trackGeo) {
 }
 
 /**
- * Multi-part 3D Alpine Spruce/Pine Tree Geometry (4 staggered irregular bough tiers + snow caps)
- */
-function build3DAlpinePineGeometries(trackGeo) {
-  const trunkGeo = trackGeo(new THREE.CylinderGeometry(0.0007, 0.0013, 0.011, 6));
-  trunkGeo.translate(0, 0.0055, 0);
-
-  const boughParts = [];
-  const snowCapParts = [];
-  const tiers = [
-    { y: 0.010, r: 0.0068, h: 0.0095 },
-    { y: 0.016, r: 0.0054, h: 0.0085 },
-    { y: 0.021, r: 0.0040, h: 0.0075 },
-    { y: 0.025, r: 0.0026, h: 0.0065 },
-  ];
-
-  tiers.forEach((t, idx) => {
-    const bough = new THREE.ConeGeometry(t.r, t.h, 7);
-    bough.rotateY(idx * 0.55);
-    bough.translate(0, t.y, 0);
-    boughParts.push(bough);
-
-    const cap = new THREE.ConeGeometry(t.r * 0.74, t.h * 0.48, 7);
-    cap.rotateY(idx * 0.55);
-    cap.translate(0, t.y + t.h * 0.28, 0);
-    snowCapParts.push(cap);
-  });
-
-  const boughsGeo = trackGeo(mergeNormalizedParts(boughParts));
-  const snowCapsGeo = trackGeo(mergeNormalizedParts(snowCapParts));
-  boughParts.forEach((p) => p.dispose());
-  snowCapParts.forEach((p) => p.dispose());
-
-  return { trunkGeo, boughsGeo, snowCapsGeo };
-}
-
-/**
  * Multi-part 3D Cyberpunk Stepped Skyscraper Geometry (Podium + Tower + Upper Spire + Neon Trim)
  */
 function build3DCyberTowerGeometries(trackGeo) {
   const bodyParts = [];
-  // Wide street-level podium
   const podium = new THREE.BoxGeometry(1.18, 0.22, 1.18);
   podium.translate(0, 0.11, 0);
   bodyParts.push(podium);
-  // Main tower shaft
   const midShaft = new THREE.BoxGeometry(0.92, 0.56, 0.92);
   midShaft.translate(0, 0.50, 0);
   bodyParts.push(midShaft);
-  // Setback upper spire
   const upperSpire = new THREE.BoxGeometry(0.64, 0.24, 0.64);
   upperSpire.translate(0, 0.90, 0);
   bodyParts.push(upperSpire);
-  // Rooftop comms antenna mast
   const mast = new THREE.CylinderGeometry(0.02, 0.04, 0.18, 5);
   mast.translate(0, 1.11, 0);
   bodyParts.push(mast);
@@ -910,7 +899,6 @@ function build3DCyberTowerGeometries(trackGeo) {
   const bodyGeo = trackGeo(mergeNormalizedParts(bodyParts));
   bodyParts.forEach((p) => p.dispose());
 
-  // Glowing neon bands around podium top, mid-crown, and upper spire top
   const trimParts = [];
   const b1 = new THREE.BoxGeometry(1.20, 0.022, 1.20);
   b1.translate(0, 0.22, 0);
@@ -929,9 +917,19 @@ function build3DCyberTowerGeometries(trackGeo) {
 }
 
 /**
- * Synchronous 3D Roadbed + Curbs fallback until GLB finishes parsing
+ * Complete 3D Spline-Extruded Roadbed + Raised FIA Curbs + Metallic Armco Crash Barrier Walls
+ * Used both as synchronous fallback for GLB tracks AND as the high-precision banked 3D road
+ * for Mojave Red Canyon ('desert') and Hakone Touge Pass ('forest').
  */
-function buildSynchronousFallbackTrack(splineData, safeMapId, roadSurfaceTex, curbTex, trackGeo, trackMat) {
+function buildSynchronousFallbackTrack(
+  splineData,
+  safeMapId,
+  roadSurfaceTex,
+  curbTex,
+  barrierWallTex,
+  trackGeo,
+  trackMat
+) {
   const group = new THREE.Group();
   group.name = 'SynchronousFallbackTrackGroup';
 
@@ -949,6 +947,12 @@ function buildSynchronousFallbackTrack(splineData, safeMapId, roadSurfaceTex, cu
   const curbNorm = new Float32Array((N + 1) * 4 * 3);
   const curbUv = new Float32Array((N + 1) * 4 * 2);
   const curbIndices = new Uint32Array(N * 12);
+
+  const wallHeight = 0.0028;
+  const wallPos = new Float32Array((N + 1) * 4 * 3);
+  const wallNorm = new Float32Array((N + 1) * 4 * 3);
+  const wallUv = new Float32Array((N + 1) * 4 * 2);
+  const wallIndices = new Uint32Array(N * 12);
 
   for (let i = 0; i <= N; i++) {
     const s = samples[i % N];
@@ -987,21 +991,22 @@ function buildSynchronousFallbackTrack(splineData, safeMapId, roadSurfaceTex, cu
 
     const cBase = i * 4;
     const ch = 0.00035;
+    const outerDist = hw + curbWidth;
     curbPos[(cBase + 0) * 3 + 0] = px - rx * hw + nx * ch;
     curbPos[(cBase + 0) * 3 + 1] = py - ry * hw + ny * ch;
     curbPos[(cBase + 0) * 3 + 2] = pz - rz * hw + nz * ch;
 
-    curbPos[(cBase + 1) * 3 + 0] = px - rx * (hw + curbWidth) + nx * ch * 1.4;
-    curbPos[(cBase + 1) * 3 + 1] = py - ry * (hw + curbWidth) + ny * ch * 1.4;
-    curbPos[(cBase + 1) * 3 + 2] = pz - rz * (hw + curbWidth) + nz * ch * 1.4;
+    curbPos[(cBase + 1) * 3 + 0] = px - rx * outerDist + nx * ch * 1.4;
+    curbPos[(cBase + 1) * 3 + 1] = py - ry * outerDist + ny * ch * 1.4;
+    curbPos[(cBase + 1) * 3 + 2] = pz - rz * outerDist + nz * ch * 1.4;
 
     curbPos[(cBase + 2) * 3 + 0] = px + rx * hw + nx * ch;
     curbPos[(cBase + 2) * 3 + 1] = py + ry * hw + ny * ch;
     curbPos[(cBase + 2) * 3 + 2] = pz + rz * hw + nz * ch;
 
-    curbPos[(cBase + 3) * 3 + 0] = px + rx * (hw + curbWidth) + nx * ch * 1.4;
-    curbPos[(cBase + 3) * 3 + 1] = py + ry * (hw + curbWidth) + ny * ch * 1.4;
-    curbPos[(cBase + 3) * 3 + 2] = pz + rz * (hw + curbWidth) + nz * ch * 1.4;
+    curbPos[(cBase + 3) * 3 + 0] = px + rx * outerDist + nx * ch * 1.4;
+    curbPos[(cBase + 3) * 3 + 1] = py + ry * outerDist + ny * ch * 1.4;
+    curbPos[(cBase + 3) * 3 + 2] = pz + rz * outerDist + nz * ch * 1.4;
 
     for (let k = 0; k < 4; k++) {
       curbNorm[(cBase + k) * 3 + 0] = nx;
@@ -1010,6 +1015,46 @@ function buildSynchronousFallbackTrack(splineData, safeMapId, roadSurfaceTex, cu
       curbUv[(cBase + k) * 2 + 0] = k % 2;
       curbUv[(cBase + k) * 2 + 1] = (i / N) * 220.0;
     }
+
+    // 3D Armco Crash Barrier Walls along outer edge of curbs
+    const wallDist = outerDist + 0.0003;
+    const wU = i * 0.28;
+    // Left wall bottom & top
+    wallPos[(cBase + 0) * 3 + 0] = px - rx * wallDist;
+    wallPos[(cBase + 0) * 3 + 1] = py - ry * wallDist;
+    wallPos[(cBase + 0) * 3 + 2] = pz - rz * wallDist;
+    wallPos[(cBase + 1) * 3 + 0] = px - rx * wallDist + nx * wallHeight;
+    wallPos[(cBase + 1) * 3 + 1] = py - ry * wallDist + ny * wallHeight;
+    wallPos[(cBase + 1) * 3 + 2] = pz - rz * wallDist + nz * wallHeight;
+    // Right wall bottom & top
+    wallPos[(cBase + 2) * 3 + 0] = px + rx * wallDist;
+    wallPos[(cBase + 2) * 3 + 1] = py + ry * wallDist;
+    wallPos[(cBase + 2) * 3 + 2] = pz + rz * wallDist;
+    wallPos[(cBase + 3) * 3 + 0] = px + rx * wallDist + nx * wallHeight;
+    wallPos[(cBase + 3) * 3 + 1] = py + ry * wallDist + ny * wallHeight;
+    wallPos[(cBase + 3) * 3 + 2] = pz + rz * wallDist + nz * wallHeight;
+
+    wallNorm[(cBase + 0) * 3 + 0] = rx;
+    wallNorm[(cBase + 0) * 3 + 1] = ry;
+    wallNorm[(cBase + 0) * 3 + 2] = rz;
+    wallNorm[(cBase + 1) * 3 + 0] = rx;
+    wallNorm[(cBase + 1) * 3 + 1] = ry;
+    wallNorm[(cBase + 1) * 3 + 2] = rz;
+    wallNorm[(cBase + 2) * 3 + 0] = -rx;
+    wallNorm[(cBase + 2) * 3 + 1] = -ry;
+    wallNorm[(cBase + 2) * 3 + 2] = -rz;
+    wallNorm[(cBase + 3) * 3 + 0] = -rx;
+    wallNorm[(cBase + 3) * 3 + 1] = -ry;
+    wallNorm[(cBase + 3) * 3 + 2] = -rz;
+
+    wallUv[(cBase + 0) * 2 + 0] = wU;
+    wallUv[(cBase + 0) * 2 + 1] = 0.0;
+    wallUv[(cBase + 1) * 2 + 0] = wU;
+    wallUv[(cBase + 1) * 2 + 1] = 1.0;
+    wallUv[(cBase + 2) * 2 + 0] = wU;
+    wallUv[(cBase + 2) * 2 + 1] = 0.0;
+    wallUv[(cBase + 3) * 2 + 0] = wU;
+    wallUv[(cBase + 3) * 2 + 1] = 1.0;
 
     if (i < N) {
       const a = i * 2;
@@ -1039,6 +1084,19 @@ function buildSynchronousFallbackTrack(splineData, safeMapId, roadSurfaceTex, cu
       curbIndices[cIdx + 9] = c0 + 3;
       curbIndices[cIdx + 10] = c1 + 2;
       curbIndices[cIdx + 11] = c1 + 3;
+
+      wallIndices[cIdx + 0] = c0 + 0;
+      wallIndices[cIdx + 1] = c1 + 0;
+      wallIndices[cIdx + 2] = c0 + 1;
+      wallIndices[cIdx + 3] = c0 + 1;
+      wallIndices[cIdx + 4] = c1 + 0;
+      wallIndices[cIdx + 5] = c1 + 1;
+      wallIndices[cIdx + 6] = c0 + 2;
+      wallIndices[cIdx + 7] = c0 + 3;
+      wallIndices[cIdx + 8] = c1 + 2;
+      wallIndices[cIdx + 9] = c0 + 3;
+      wallIndices[cIdx + 10] = c1 + 3;
+      wallIndices[cIdx + 11] = c1 + 2;
     }
   }
 
@@ -1050,29 +1108,21 @@ function buildSynchronousFallbackTrack(splineData, safeMapId, roadSurfaceTex, cu
   roadGeo.computeBoundingSphere();
 
   const roadMat = trackMat(
-    safeMapId === 'city'
-      ? new THREE.MeshPhysicalMaterial({
-          color: 0xffffff,
-          map: roadSurfaceTex,
-          roughness: 0.34,
-          metalness: 0.22,
-          clearcoat: 0.32,
-          clearcoatRoughness: 0.36,
-          reflectivity: 0.55,
-          envMapIntensity: 0.72,
-          side: THREE.DoubleSide,
-        })
-      : new THREE.MeshStandardMaterial({
-          color: 0xffffff,
-          map: roadSurfaceTex,
-          roughness: safeMapId === 'canyon' ? 0.42 : 0.48,
-          metalness: 0.15,
-          envMapIntensity: 0.68,
-          side: THREE.DoubleSide,
-        })
+    new THREE.MeshPhysicalMaterial({
+      color: safeMapId === 'desert' ? 0xb5aba3 : 0xadb8c6,
+      map: roadSurfaceTex,
+      roughness: safeMapId === 'city' ? 0.42 : safeMapId === 'desert' ? 0.58 : 0.52,
+      metalness: safeMapId === 'city' ? 0.18 : 0.12,
+      clearcoat: safeMapId === 'city' ? 0.24 : 0.16,
+      clearcoatRoughness: 0.44,
+      reflectivity: 0.50,
+      envMapIntensity: 0.68,
+      side: THREE.DoubleSide,
+    })
   );
 
   const roadMesh = new THREE.Mesh(roadGeo, roadMat);
+  roadMesh.castShadow = true;
   roadMesh.receiveShadow = true;
   group.add(roadMesh);
 
@@ -1087,14 +1137,39 @@ function buildSynchronousFallbackTrack(splineData, safeMapId, roadSurfaceTex, cu
     new THREE.MeshStandardMaterial({
       color: 0xffffff,
       map: curbTex,
-      roughness: 0.35,
-      metalness: 0.2,
+      roughness: 0.32,
+      metalness: 0.22,
       side: THREE.DoubleSide,
     })
   );
   const curbMesh = new THREE.Mesh(curbGeo, curbMat);
+  curbMesh.castShadow = true;
   curbMesh.receiveShadow = true;
   group.add(curbMesh);
+
+  const wallGeo = trackGeo(new THREE.BufferGeometry());
+  wallGeo.setAttribute('position', new THREE.BufferAttribute(wallPos, 3));
+  wallGeo.setAttribute('normal', new THREE.BufferAttribute(wallNorm, 3));
+  wallGeo.setAttribute('uv', new THREE.BufferAttribute(wallUv, 2));
+  wallGeo.setIndex(new THREE.BufferAttribute(wallIndices, 1));
+  wallGeo.computeBoundingSphere();
+
+  const wallMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: barrierWallTex,
+      roughness: 0.28,
+      metalness: 0.64,
+      envMapIntensity: 1.25,
+      emissive: new THREE.Color(safeMapId === 'city' ? 0x004466 : 0x1a0c02),
+      emissiveIntensity: safeMapId === 'city' ? 0.55 : 0.25,
+      side: THREE.DoubleSide,
+    })
+  );
+  const wallMesh = new THREE.Mesh(wallGeo, wallMat);
+  wallMesh.castShadow = true;
+  wallMesh.receiveShadow = true;
+  group.add(wallMesh);
 
   return { group, roadGeo, roadMat };
 }
@@ -1126,13 +1201,13 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
   };
 
   // -------------------------------------------------------------------------
-  // 1. VIBRANT 3D ATMOSPHERIC SKY DOME (SUN/MOON HALO + DRIFTING 3D CLOUDS)
+  // 1. VIBRANT 3D ATMOSPHERIC SKY DOME FOR ALL 6 TRACK BIOMES
   // -------------------------------------------------------------------------
   const skyConfigs = {
     coast: {
-      top: 0x1d4ed8, // Rich cobalt zenith (no pitch-black roof!)
-      mid: 0x9333ea, // Twilight violet-rose mid sky
-      bottom: 0xfdba74, // Warm golden-apricot horizon
+      top: 0x1d4ed8,
+      mid: 0x9333ea,
+      bottom: 0xfdba74,
       sunDir: [-0.55, 0.28, 0.78],
       sunColor: 0xffd27d,
       cloudColor: 0xffedd5,
@@ -1142,9 +1217,9 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
       accent: '#fb923c',
     },
     city: {
-      top: 0x090f26, // Deep midnight metropolis blue
-      mid: 0x1e1b4b, // Indigo neon glow
-      bottom: 0x0f4c81, // Cyber cyan/magenta skyline haze
+      top: 0x090f26,
+      mid: 0x1e1b4b,
+      bottom: 0x0f4c81,
       sunDir: [0.45, 0.34, 0.82],
       sunColor: 0x7dd3fc,
       cloudColor: 0x38bdf8,
@@ -1154,16 +1229,52 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
       accent: '#00e5ff',
     },
     canyon: {
-      top: 0x0284c7, // Crisp alpine mountain blue sky
-      mid: 0x60a5fa, // Clear bright daylight blue
-      bottom: 0xe0f2fe, // Crisp snowy mountain horizon mist
+      top: 0x0284c7,
+      mid: 0x60a5fa,
+      bottom: 0xe0f2fe,
       sunDir: [-0.48, 0.42, 0.76],
       sunColor: 0xfff7ed,
       cloudColor: 0xffffff,
       cloudShadow: 0x94a3b8,
       cloudDensity: 0.65,
       starsIntensity: 0.0,
-      accent: '#34d399',
+      accent: '#38bdf8',
+    },
+    drift: {
+      top: 0x0f294a,
+      mid: 0x2563eb,
+      bottom: 0xfde68a,
+      sunDir: [0.52, 0.38, -0.76],
+      sunColor: 0xfff3c4,
+      cloudColor: 0xffffff,
+      cloudShadow: 0x64748b,
+      cloudDensity: 0.62,
+      starsIntensity: 0.0,
+      accent: '#f43f5e',
+    },
+    desert: {
+      top: 0x23153c,
+      mid: 0xc2410c,
+      bottom: 0xfdba74,
+      sunDir: [-0.62, 0.24, -0.74],
+      sunColor: 0xffedd5,
+      cloudColor: 0xfed7aa,
+      cloudShadow: 0x7c2d12,
+      cloudDensity: 0.54,
+      starsIntensity: 0.0,
+      accent: '#f97316',
+    },
+    forest: {
+      top: 0x0d2b2e,
+      mid: 0x0f766e,
+      bottom: 0xa7f3d0,
+      sunDir: [0.44, 0.36, 0.82],
+      sunColor: 0xfef3c7,
+      cloudColor: 0xecfdf5,
+      cloudShadow: 0x115e59,
+      cloudDensity: 0.68,
+      starsIntensity: 0.0,
+      accent: '#10b981',
     },
   };
   const skyCfg = skyConfigs[safeMapId] || skyConfigs.coast;
@@ -1191,7 +1302,9 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
   // High-res PBR road textures: sharp racing lanes + Poly Haven 1K photoscanned Normal/ARM depth
   const procRoadTex = trackTex(createHighResRoadTexture(safeMapId));
   const roadPbrPack = getRoadPbrPackForMap(safeMapId);
-  const roadWetnessUniform = { value: safeMapId === 'city' ? 0.55 : 0.0 };
+  const roadWetnessUniform = {
+    value: safeMapId === 'city' ? 0.55 : safeMapId === 'forest' ? 0.25 : 0.0,
+  };
   const procCurbTex = trackTex(createCurbStripeTexture(safeMapId));
   const procBarrierWallTex = trackTex(createRacingBarrierWallTexture(safeMapId));
   procBarrierWallTex.repeat.set(1, 1);
@@ -1201,12 +1314,13 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
     safeMapId,
     procRoadTex,
     procCurbTex,
+    procBarrierWallTex,
     trackGeo,
     trackMat
   );
   if (roadMat) {
     roadMat.normalMap = roadPbrPack.normalMap;
-    roadMat.normalScale = new THREE.Vector2(0.45, 0.45);
+    roadMat.normalScale = new THREE.Vector2(0.78, 0.78);
     roadMat.roughnessMap = roadPbrPack.armMap;
     attachWetPuddleSheenShader(roadMat, roadWetnessUniform, `road_puddle_fallback_${safeMapId}`);
   }
@@ -1236,7 +1350,6 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
     splineData.startLineDir || startSample.tangent
   );
 
-  // Raised & sleek open-truss F1 arch so it frames the sky and track cleanly on mobile portrait screens
   const gantryHalfSpan = 0.0315;
   const gantryHeight = 0.0265;
 
@@ -1280,7 +1393,6 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
   topBar.position.set(0, gantryHeight + 0.0005, 0);
   gantryAnchor.add(topBar);
 
-  // Compact 5 F1 Start Light Pods suspended cleanly under the beam
   const f1PodGeo = trackGeo(new THREE.SphereGeometry(0.00085, 10, 10));
   const f1PodHousingGeo = trackGeo(new THREE.BoxGeometry(0.002, 0.0024, 0.0018));
   const f1PodMats = [];
@@ -1332,11 +1444,11 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
   }
 
   // -------------------------------------------------------------------------
-  // 4. DYNAMIC TRACK GLB ASSET LOADING (`track_asphalt.glb`, `track_neon.glb`, `track_snow.glb`)
+  // 4. DYNAMIC TRACK GLB ASSET LOADING (`coast`, `city`, `canyon`, AND `drift_race_track.glb`)
   // -------------------------------------------------------------------------
   const glbMountGroup = new THREE.Group();
   glbMountGroup.name = `CustomTrackGLB_${descriptor.trackKey}`;
-  glbMountGroup.scale.setScalar(WORLD_TRACK_SCALE);
+  glbMountGroup.scale.setScalar(descriptor.customGlbScale || WORLD_TRACK_SCALE);
   glbMountGroup.position.set(0, BASE_GROUND_Y, 0);
   rootGroup.add(glbMountGroup);
 
@@ -1359,6 +1471,63 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
       }
     });
 
+    // Special handling for the user's complete 3D Drift Race Track GLB (`/models/env/drift_race_track.glb`)
+    if (descriptor.isCustomDriftGlb) {
+      gltfScene.traverse((child) => {
+        if (!child.isMesh) return;
+        const nodeName = (child.name || '').trim();
+        const lowerName = nodeName.toLowerCase();
+        const srcMat = Array.isArray(child.material) ? child.material[0] : child.material;
+        const matName = ((srcMat && srcMat.name) || '').toLowerCase();
+
+        child.castShadow = true;
+        child.receiveShadow = true;
+
+        if (lowerName === 'object_0' || lowerName.includes('terrain') || matName === 'grass') {
+          // Hide the flat GLB grass plane near y=0 so our sculpted 3D stadium terrain renders cleanly without z-fighting
+          child.visible = false;
+        } else if (lowerName === 'object_1' || lowerName.includes('road') || matName === 'asphalt') {
+          // Upgrade the 3D Drift Circuit Road with our 1K photoscanned Normal/ARM maps & wet-puddle shader
+          glbRoadMat = trackMat(
+            new THREE.MeshPhysicalMaterial({
+              color: 0xd8e0ea,
+              map: (srcMat && srcMat.map) || procRoadTex,
+              normalMap: (srcMat && srcMat.normalMap) || roadPbrPack.normalMap,
+              normalScale: new THREE.Vector2(0.82, 0.82),
+              roughnessMap: roadPbrPack.armMap,
+              roughness: 0.50,
+              metalness: 0.14,
+              clearcoat: 0.18,
+              clearcoatRoughness: 0.44,
+              reflectivity: 0.50,
+              envMapIntensity: 0.72,
+              side: THREE.DoubleSide,
+            })
+          );
+          attachWetPuddleSheenShader(glbRoadMat, roadWetnessUniform, 'road_puddle_glb_drift');
+          child.material = glbRoadMat;
+        } else if (matName.includes('leaf') || lowerName.includes('bush')) {
+          // 93 3D Trees inside `drift_race_track.glb`: enforce crisp alpha-cutout foliage
+          if (srcMat) {
+            srcMat.alphaTest = 0.35;
+            srcMat.transparent = false;
+            srcMat.depthWrite = true;
+            srcMat.side = THREE.DoubleSide;
+            srcMat.roughness = 0.58;
+            srcMat.needsUpdate = true;
+          }
+        } else if (srcMat) {
+          // Guardrails (`Rails_03`), sponsor arches (`Banners`), racing flags (`Flags`), arrows, barriers, cones
+          srcMat.side = THREE.DoubleSide;
+          srcMat.envMapIntensity = 1.25;
+        }
+      });
+
+      glbMountGroup.add(gltfScene);
+      fallbackTrackGroup.visible = false;
+      return;
+    }
+
     gltfScene.traverse((child) => {
       const nodeName = (child.name || '').trim();
       const lowerName = nodeName.toLowerCase();
@@ -1376,8 +1545,6 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
 
       if (!child.isMesh) return;
 
-      // Widen loaded GLB road, curbs, walls, and startline laterally by +40% along the nearest spline right vector
-      // so the visual 3D track matches the +40% widened physics bounds seamlessly.
       if (
         (lowerName === 'road' ||
           lowerName === 'curbs' ||
@@ -1397,7 +1564,6 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
           const wx = rx * WORLD_TRACK_SCALE;
           const wz = rz * WORLD_TRACK_SCALE;
 
-          // Coarse + fine search for closest spline sample
           let bestIdx = 0;
           let bestDistSq = Infinity;
           for (let si = 0; si < N; si += 10) {
@@ -1427,10 +1593,9 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
           const sp = sNear.position;
           const sr = sNear.right;
           const dx = wx - sp[0];
-          const dy = (BASE_GROUND_Y + posAttr.getY(vi) * WORLD_TRACK_SCALE) - sp[1];
+          const dy = BASE_GROUND_Y + posAttr.getY(vi) * WORLD_TRACK_SCALE - sp[1];
           const dz = wz - sp[2];
           const latDot = dx * sr[0] + dy * sr[1] + dz * sr[2];
-          // Expand lateral distance from centerline by +40% (delta = +0.40 * latDot)
           const extraLatRaw = latDot * 0.4 * invScale;
           posAttr.setXYZ(
             vi,
@@ -1455,52 +1620,51 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
         if (safeMapId === 'city') {
           glbRoadMat = trackMat(
             new THREE.MeshPhysicalMaterial({
-              color: 0xffffff,
+              color: 0xaab4c4,
               map: procRoadTex,
               normalMap: roadPbrPack.normalMap,
-              normalScale: new THREE.Vector2(0.48, 0.48),
+              normalScale: new THREE.Vector2(0.80, 0.80),
               roughnessMap: roadPbrPack.armMap,
-              roughness: 0.42,
-              metalness: 0.22,
-              clearcoat: 0.36,
-              clearcoatRoughness: 0.32,
-              reflectivity: 0.62,
-              envMapIntensity: 0.85,
+              roughness: 0.44,
+              metalness: 0.18,
+              clearcoat: 0.24,
+              clearcoatRoughness: 0.42,
+              reflectivity: 0.54,
+              envMapIntensity: 0.74,
               side: THREE.DoubleSide,
             })
           );
         } else if (safeMapId === 'canyon') {
           glbRoadMat = trackMat(
             new THREE.MeshPhysicalMaterial({
-              color: 0xffffff,
+              color: 0xb2bcc9,
               map: procRoadTex,
               normalMap: roadPbrPack.normalMap,
-              normalScale: new THREE.Vector2(0.42, 0.42),
+              normalScale: new THREE.Vector2(0.72, 0.72),
               roughnessMap: roadPbrPack.armMap,
-              roughness: 0.52,
-              metalness: 0.14,
-              clearcoat: 0.24,
-              clearcoatRoughness: 0.42,
-              reflectivity: 0.52,
-              envMapIntensity: 0.78,
+              roughness: 0.56,
+              metalness: 0.12,
+              clearcoat: 0.14,
+              clearcoatRoughness: 0.50,
+              reflectivity: 0.45,
+              envMapIntensity: 0.65,
               side: THREE.DoubleSide,
             })
           );
         } else {
-          // Balanced racing asphalt with Poly Haven photoscanned normal/roughness & zero glare blobs
           glbRoadMat = trackMat(
             new THREE.MeshPhysicalMaterial({
-              color: 0xffffff,
+              color: 0xadb8c6,
               map: procRoadTex,
               normalMap: roadPbrPack.normalMap,
-              normalScale: new THREE.Vector2(0.50, 0.50),
+              normalScale: new THREE.Vector2(0.82, 0.82),
               roughnessMap: roadPbrPack.armMap,
-              roughness: 0.48,
-              metalness: 0.16,
-              clearcoat: 0.28,
-              clearcoatRoughness: 0.38,
-              reflectivity: 0.56,
-              envMapIntensity: 0.80,
+              roughness: 0.54,
+              metalness: 0.12,
+              clearcoat: 0.16,
+              clearcoatRoughness: 0.46,
+              reflectivity: 0.48,
+              envMapIntensity: 0.68,
               side: THREE.DoubleSide,
             })
           );
@@ -1523,7 +1687,6 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
       } else if (lowerName === 'walls') {
         child.castShadow = true;
         child.receiveShadow = true;
-        // Generate clean strip UVs along the barrier wall so the Armco chevron texture maps crisply
         const posAttr = child.geometry.attributes.position;
         if (posAttr) {
           const vCount = posAttr.count;
@@ -1568,7 +1731,6 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
           srcMat.roughness = 0.34;
         }
       } else if (lowerName === 'ground') {
-        // Hide the flat 2D GLB ground plane so our sculpted 3D heightmap terrain shines cleanly!
         child.visible = false;
       }
     });
@@ -1577,7 +1739,7 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
     fallbackTrackGroup.visible = false;
   }
 
-  const candidateUrls = descriptor.glbCandidateUrls || [`/${descriptor.trackKey}.glb`];
+  const candidateUrls = descriptor.glbCandidateUrls || [];
   function tryLoadCandidateGlb(urlIdx) {
     if (isDisposed || urlIdx >= candidateUrls.length) return;
     sharedGltfLoader.load(
@@ -1597,10 +1759,12 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
       }
     );
   }
-  tryLoadCandidateGlb(0);
+  if (candidateUrls.length > 0) {
+    tryLoadCandidateGlb(0);
+  }
 
   // -------------------------------------------------------------------------
-  // 5. DUAL-SIDED 3D TRACKSIDE ARCHITECTURE, PARALLAX POSTS & OPEN VISTAS
+  // 5. DUAL-SIDED 3D TRACKSIDE ARCHITECTURE, VIADUCT PIERS & GRANDSTANDS
   // -------------------------------------------------------------------------
   const trackPts2D = new Float32Array(N * 3);
   for (let i = 0; i < N; i++) {
@@ -1632,7 +1796,6 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
   const _left = new THREE.Vector3();
   const _rotMat = new THREE.Matrix4();
 
-  // A. Corner Chevron Turn Boards + 3D Bridge Viaduct Piers (No curb-crowding stanchion boxes)
   const chevronPlacements = [];
   const viaductPlacements = [];
   for (let i = 0; i < N; i += 3) {
@@ -1642,13 +1805,13 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
     if (isElevated && i % 9 === 0 && s.position[1] > BASE_GROUND_Y + 0.0065) {
       viaductPlacements.push(s);
     }
-    // Place angled corner chevron warning signs on outer bend of sharp turns, safely outside the barrier wall
     const iPrev = (i - 4 + N) % N;
     const iNext = (i + 4) % N;
     const dotTang =
       samples[iPrev].tangent[0] * samples[iNext].tangent[0] +
       samples[iPrev].tangent[2] * samples[iNext].tangent[2];
-    if (dotTang < 0.955 && i % 9 === 0 && !isElevated) {
+    // Skip extra procedural chevrons on 'drift' since `drift_race_track.glb` already has 17 3D Arrow signs + 52 barriers
+    if (safeMapId !== 'drift' && dotTang < 0.955 && i % 9 === 0 && !isElevated) {
       const crossY =
         samples[iPrev].tangent[0] * samples[iNext].tangent[2] -
         samples[iPrev].tangent[2] * samples[iNext].tangent[0];
@@ -1657,7 +1820,6 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
     }
   }
 
-  // 3D Concrete Highway Overpass Viaduct Support Piers under Elevated Track Spans
   if (viaductPlacements.length > 0) {
     const pierColGeo = trackGeo(new THREE.CylinderGeometry(0.0018, 0.0024, 1.0, 8));
     pierColGeo.translate(0, -0.5, 0);
@@ -1665,7 +1827,7 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
     pierCapGeo.translate(0, -0.0014, 0);
     const pierMat = trackMat(
       new THREE.MeshStandardMaterial({
-        color: safeMapId === 'city' ? 0x0f172a : 0x334155,
+        color: safeMapId === 'city' ? 0x0f172a : safeMapId === 'desert' ? 0x573b26 : 0x334155,
         roughness: 0.55,
         metalness: 0.35,
       })
@@ -1714,8 +1876,8 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
     chevBoardGeo.translate(0, 0.0044, 0);
     const chevMat = trackMat(
       new THREE.MeshStandardMaterial({
-        color: safeMapId === 'city' ? 0x00f0ff : 0xf59e0b,
-        emissive: new THREE.Color(safeMapId === 'city' ? 0x00b4d8 : 0xd97706),
+        color: new THREE.Color(skyCfg.accent),
+        emissive: new THREE.Color(skyCfg.accent),
         emissiveIntensity: safeMapId === 'city' ? 1.35 : 0.75,
         roughness: 0.25,
         metalness: 0.5,
@@ -1743,7 +1905,7 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
     rootGroup.add(instChev);
   }
 
-  // B. Tiered Spectator Grandstands (Merged 3-Step Bleachers + Canopy Roof) on Start Straight
+  // Tiered Spectator Grandstands on Start Straight
   const grandstandPlacements = [];
   for (const idx of [722, 734, 8, 20]) {
     const s = samples[((idx % N) + N) % N];
@@ -1810,55 +1972,6 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
     rootGroup.add(instGsBody, instGsRoof);
   }
 
-  // C. Sleek Dual-Sided Highway Luminaire Streetlamps (set well outside guardrails)
-  const dualLampPlacements = [];
-  for (let i = 8; i < N; i += 20) {
-    const s = samples[i];
-    if (s.position[1] > BASE_GROUND_Y + 0.0045) continue;
-    const hw = s.half_width_m || 0.0175;
-    for (const side of [-1, 1]) {
-      dualLampPlacements.push({ sample: s, side, outDist: hw + 0.0064 });
-    }
-  }
-  if (dualLampPlacements.length > 0) {
-    const poleGeo = trackGeo(new THREE.CylinderGeometry(0.00035, 0.0005, 0.021, 6));
-    poleGeo.translate(0, 0.0105, 0);
-    const poleMat = trackMat(
-      new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.25, metalness: 0.88 })
-    );
-    const bulbGeo = trackGeo(new THREE.BoxGeometry(0.0042, 0.0006, 0.0011));
-    bulbGeo.translate(-0.0018, 0.021, 0);
-    const bulbColor =
-      safeMapId === 'city' ? 0x00f0ff : safeMapId === 'canyon' ? 0xe0f2fe : 0xffb347;
-    const bulbMat = trackMat(new THREE.MeshBasicMaterial({ color: bulbColor, toneMapped: false }));
-
-    const instPoles = new THREE.InstancedMesh(poleGeo, poleMat, dualLampPlacements.length);
-    const instBulbs = new THREE.InstancedMesh(bulbGeo, bulbMat, dualLampPlacements.length);
-
-    for (let idx = 0; idx < dualLampPlacements.length; idx++) {
-      const { sample: s, side, outDist } = dualLampPlacements[idx];
-      _pos.fromArray(s.position);
-      _right.fromArray(s.right);
-      _norm.fromArray(s.normal);
-      _tang.fromArray(s.tangent);
-      _left.crossVectors(_norm, _tang).normalize();
-      _rotMat.makeBasis(_left, _norm, _tang);
-
-      dummy.position.copy(_pos).addScaledVector(_right, side * outDist);
-      dummy.quaternion.setFromRotationMatrix(_rotMat);
-      if (side < 0) dummy.rotateY(Math.PI);
-      dummy.scale.setScalar(1.0);
-      dummy.updateMatrix();
-      instPoles.setMatrixAt(idx, dummy.matrix);
-      instBulbs.setMatrixAt(idx, dummy.matrix);
-    }
-    instPoles.instanceMatrix.needsUpdate = true;
-    instBulbs.instanceMatrix.needsUpdate = true;
-    instPoles.computeBoundingSphere();
-    instBulbs.computeBoundingSphere();
-    rootGroup.add(instPoles, instBulbs);
-  }
-
   // -------------------------------------------------------------------------
   // 6. MULTI-LAYERED 3D ENVIRONMENT WORLDS & ANIMATED 3D HORIZON LANDMARKS
   // -------------------------------------------------------------------------
@@ -1873,7 +1986,7 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
   let cyberBlimps = [];
 
   if (safeMapId === 'coast') {
-    // 1. Deep Golden-Hour Specular Ocean Horizon Plane (Asphalt 9 / Horizon twilight water)
+    // 1. Deep Golden-Hour Specular Ocean Horizon Plane
     oceanUniforms = {
       uTime: { value: 0.0 },
       uDeepColor: { value: new THREE.Color(0x040d1a) },
@@ -1919,24 +2032,32 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
     oceanMesh.position.set(0, BASE_GROUND_Y - 0.0038, 0);
     rootGroup.add(oceanMesh);
 
-    // 2. Natural Deep-Olive Tropical Palm Trees (set back from the road so the track feels wide and fast)
+    // 2. Tropical Coastal Palm Trees + Modern Dark-Glass Resort Towers
     const palmPlacements = [];
-    for (let i = 0; i < N; i += 8) {
+    const resortPlacements = [];
+    for (let i = 0; i < N; i += 10) {
       const s = samples[i];
       const hw = s.half_width_m || 0.0175;
       for (const side of [-1, 1]) {
-        for (let tier = 0; tier < 2; tier++) {
-          if (tier === 1 && i % 16 !== 0) continue;
-          const distOut =
-            hw +
-            (tier === 0 ? 0.032 : 0.076) +
-            ((i * 17 + (side > 0 ? 3 : 0) + tier * 5) % 6) * (tier === 0 ? 0.0075 : 0.015);
-          const px = s.position[0] + s.right[0] * side * distOut;
-          const pz = s.position[2] + s.right[2] * side * distOut;
-          if (isClearOfTrack(px, pz, 0.018)) {
-            const py = Math.max(BASE_GROUND_Y - 0.0015, getTerrainHeightAt(px, pz) - 0.0006);
-            const sc = (tier === 0 ? 0.92 : 1.25) + ((i * 3 + tier) % 5) * 0.16;
-            palmPlacements.push([px, py, pz, sc, i * 1.15 + side + tier]);
+        const distOut = hw + 0.032 + ((i * 17 + (side > 0 ? 3 : 0)) % 6) * 0.008;
+        const px = s.position[0] + s.right[0] * side * distOut;
+        const pz = s.position[2] + s.right[2] * side * distOut;
+        if (isClearOfTrack(px, pz, 0.018)) {
+          const py = Math.max(BASE_GROUND_Y - 0.0015, getTerrainHeightAt(px, pz) - 0.0006);
+          const sc = 0.96 + ((i * 3) % 5) * 0.16;
+          palmPlacements.push([px, py, pz, sc, i * 1.15 + side]);
+        }
+
+        if (i % 20 === 0) {
+          const towerDist = hw + 0.058 + ((i * 11) % 4) * 0.018;
+          const vx = s.position[0] + s.right[0] * side * towerDist;
+          const vz = s.position[2] + s.right[2] * side * towerDist;
+          if (isClearOfTrack(vx, vz, 0.025)) {
+            const vy = Math.max(BASE_GROUND_Y - 0.001, getTerrainHeightAt(vx, vz) - 0.0008);
+            const sc = 0.95 + (i % 4) * 0.22;
+            const yaw =
+              Math.atan2(s.tangent[0], s.tangent[2]) + (side > 0 ? -Math.PI / 2 : Math.PI / 2);
+            resortPlacements.push([vx, vy, vz, sc, yaw]);
           }
         }
       }
@@ -1954,7 +2075,6 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
           metalness: 0.12,
         })
       );
-
       const instTrunks = new THREE.InstancedMesh(trunkGeo, trunkMat, palmPlacements.length);
       const instFronds = new THREE.InstancedMesh(frondGeo, frondMat, palmPlacements.length);
       for (let i = 0; i < palmPlacements.length; i++) {
@@ -1971,63 +2091,6 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
       instTrunks.computeBoundingSphere();
       instFronds.computeBoundingSphere();
       rootGroup.add(instTrunks, instFronds);
-    }
-
-    // 3. Rugged 3D Coastal Basalt Cliff Outcrops & Modern Dark-Glass Resort Towers (Replaces toy huts)
-    const cliffRockPlacements = [];
-    const resortPlacements = [];
-    for (let i = 6; i < N; i += 10) {
-      const s = samples[i];
-      const hw = s.half_width_m || 0.0175;
-      for (const side of [-1, 1]) {
-        const rockDist = hw + 0.022 + ((i * 7 + (side > 0 ? 2 : 0)) % 5) * 0.008;
-        const rx = s.position[0] + s.right[0] * side * rockDist;
-        const rz = s.position[2] + s.right[2] * side * rockDist;
-        if (isClearOfTrack(rx, rz, 0.014)) {
-          const ry = Math.max(BASE_GROUND_Y - 0.002, getTerrainHeightAt(rx, rz) - 0.001);
-          const rScale = 0.85 + ((i * 5) % 6) * 0.24;
-          cliffRockPlacements.push([rx, ry, rz, rScale, i * 0.9 + side]);
-        }
-
-        if (i % 20 === 6) {
-          const towerDist = hw + 0.056 + ((i * 11) % 4) * 0.018;
-          const vx = s.position[0] + s.right[0] * side * towerDist;
-          const vz = s.position[2] + s.right[2] * side * towerDist;
-          if (isClearOfTrack(vx, vz, 0.025)) {
-            const vy = Math.max(BASE_GROUND_Y - 0.001, getTerrainHeightAt(vx, vz) - 0.0008);
-            const sc = 0.95 + (i % 4) * 0.22;
-            const yaw =
-              Math.atan2(s.tangent[0], s.tangent[2]) + (side > 0 ? -Math.PI / 2 : Math.PI / 2);
-            resortPlacements.push([vx, vy, vz, sc, yaw]);
-          }
-        }
-      }
-    }
-
-    if (cliffRockPlacements.length > 0) {
-      const rockGeo = trackGeo(new THREE.DodecahedronGeometry(0.011, 1));
-      rockGeo.scale(1.35, 0.95, 1.15);
-      rockGeo.translate(0, 0.006, 0);
-      const rockMat = trackMat(
-        new THREE.MeshStandardMaterial({
-          color: 0x263142,
-          roughness: 0.76,
-          metalness: 0.18,
-          flatShading: true,
-        })
-      );
-      const instRocks = new THREE.InstancedMesh(rockGeo, rockMat, cliffRockPlacements.length);
-      for (let i = 0; i < cliffRockPlacements.length; i++) {
-        const [rx, ry, rz, rScale, rotY] = cliffRockPlacements[i];
-        dummy.position.set(rx, ry, rz);
-        dummy.rotation.set(0, rotY, 0);
-        dummy.scale.set(rScale, rScale * (0.8 + (i % 3) * 0.35), rScale);
-        dummy.updateMatrix();
-        instRocks.setMatrixAt(i, dummy.matrix);
-      }
-      instRocks.instanceMatrix.needsUpdate = true;
-      instRocks.computeBoundingSphere();
-      rootGroup.add(instRocks);
     }
 
     if (resortPlacements.length > 0) {
@@ -2087,48 +2150,12 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
       rootGroup.add(instResorts, instResortGlow);
     }
 
-    // 4. Far-Horizon 3D Volcanic/Coastal Mountain Massifs Ring (Deep Parallax Silhouette Backdrop)
-    const islandPeakCount = 14;
-    const islandGeo = trackGeo(new THREE.ConeGeometry(0.16, 0.24, 7));
-    islandGeo.translate(0, 0.11, 0);
-    const islandMat = trackMat(
-      new THREE.MeshStandardMaterial({
-        color: 0x172030,
-        roughness: 0.84,
-        metalness: 0.12,
-        flatShading: true,
-      })
-    );
-    const instIslands = new THREE.InstancedMesh(islandGeo, islandMat, islandPeakCount);
-    for (let i = 0; i < islandPeakCount; i++) {
-      const ang = (i / islandPeakCount) * Math.PI * 2.0 + 0.18;
-      const rad = 0.96 + (i % 3) * 0.22;
-      const sx = 0.85 + (i % 4) * 0.32;
-      const sy = 0.65 + ((i * 3) % 5) * 0.28;
-      dummy.position.set(Math.cos(ang) * rad, BASE_GROUND_Y - 0.006, Math.sin(ang) * rad);
-      dummy.rotation.set(0, i * 1.1, 0);
-      dummy.scale.set(sx, sy, sx * 0.9);
-      dummy.updateMatrix();
-      instIslands.setMatrixAt(i, dummy.matrix);
-    }
-    instIslands.instanceMatrix.needsUpdate = true;
-    instIslands.computeBoundingSphere();
-    rootGroup.add(instIslands);
-
-    // 5. Iconic 3D Coastal Headland Lighthouse with Rotating Volumetric Beacon Beam
+    // 3. Iconic 3D Coastal Headland Lighthouse with Rotating Volumetric Beacon Beam
     const lhGroup = new THREE.Group();
     const lhX = 0.34;
     const lhZ = -0.38;
     const lhBaseY = Math.max(BASE_GROUND_Y + 0.012, getTerrainHeightAt(lhX, lhZ));
     lhGroup.position.set(lhX, lhBaseY, lhZ);
-
-    const lhRockGeo = trackGeo(new THREE.DodecahedronGeometry(0.028, 1));
-    const lhRockMat = trackMat(
-      new THREE.MeshStandardMaterial({ color: 0x78716c, roughness: 0.88, flatShading: true })
-    );
-    const lhRock = new THREE.Mesh(lhRockGeo, lhRockMat);
-    lhRock.scale.set(1.4, 0.65, 1.3);
-    lhGroup.add(lhRock);
 
     const lhTowerGeo = trackGeo(new THREE.CylinderGeometry(0.0055, 0.0095, 0.068, 12));
     lhTowerGeo.translate(0, 0.034, 0);
@@ -2175,7 +2202,7 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
     lhGroup.add(lighthouseBeamGroup);
     rootGroup.add(lhGroup);
 
-    // 6. 10 3D Sunset Racing Yachts / Sailboats Floating on the Outer Bay
+    // 4. 10 3D Sunset Racing Yachts Floating on the Outer Bay
     const yachtHullGeo = trackGeo(new THREE.BoxGeometry(0.007, 0.003, 0.022));
     const yachtSailGeo = trackGeo(new THREE.ConeGeometry(0.0085, 0.028, 3));
     yachtSailGeo.translate(0, 0.015, 0);
@@ -2207,7 +2234,7 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
       yachtGroupList.push({ group: yGroup, basePhase: yIdx * 0.9 });
     }
   } else if (safeMapId === 'city') {
-    // 1. Multi-Tiered 3D Cyberpunk Stepped Skyscrapers (Near Street + Mid District + Mega Skyline Ring)
+    // Shibuya Metropolis: Stepped Cyberpunk Skyscrapers + Neon Portals + Sky Searchlights
     const buildingTex = trackTex(createCityBuildingFacadeTexture());
     const towerPlacements = [];
 
@@ -2242,7 +2269,6 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
       }
     }
 
-    // Outer 3D Mega-Metropolis Skyline Ring (24 monumental futuristic horizon towers)
     for (let m = 0; m < 24; m++) {
       const ang = (m / 24) * Math.PI * 2.0 + 0.11;
       const rad = 0.78 + (m % 3) * 0.16;
@@ -2295,7 +2321,6 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
       rootGroup.add(instTowers, instTrims);
     }
 
-    // 2. Overhead Neon Expressway Portal Arches framing the street canyon
     const archBeamGeo = trackGeo(new THREE.BoxGeometry(0.068, 0.0016, 0.002));
     archBeamGeo.translate(0, 0.025, 0);
     const archPillarGeo = trackGeo(new THREE.BoxGeometry(0.0016, 0.025, 0.002));
@@ -2323,7 +2348,6 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
       rootGroup.add(portalGroup);
     }
 
-    // 3. 6 Animated Sky-Slicing Neon Searchlight Beams + 2 Orbiting Cyber Blimps
     const laserConeGeo = trackGeo(new THREE.ConeGeometry(0.026, 0.42, 10, 1, true));
     laserConeGeo.translate(0, 0.21, 0);
     const cyanLaserMat = trackMat(
@@ -2378,176 +2402,9 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
         phase: bIdx * Math.PI,
       });
     }
-  } else {
-    // 'canyon' / 'track_snow': Sunlit Alpine Snow Pass
-    // 1. Multi-Tier Snow-Dusted 3D Alpine Spruce Forest climbing up the 3D Valley Slopes
-    const pinePlacements = [];
-    for (let i = 0; i < N; i += 5) {
-      const s = samples[i];
-      const hw = s.half_width_m || 0.0175;
-      for (const side of [-1, 1]) {
-        for (let row = 0; row < 3; row++) {
-          if (row === 1 && i % 10 !== 0) continue;
-          if (row === 2 && i % 15 !== 0) continue;
-          const distOut =
-            hw +
-            (row === 0 ? 0.022 : row === 1 ? 0.048 : 0.088) +
-            ((i * 19 + (side > 0 ? 4 : 0) + row * 3) % 6) * 0.0065;
-          const px = s.position[0] + s.right[0] * side * distOut;
-          const pz = s.position[2] + s.right[2] * side * distOut;
-          if (isClearOfTrack(px, pz, 0.013)) {
-            const py = Math.max(BASE_GROUND_Y - 0.0015, getTerrainHeightAt(px, pz) - 0.0008);
-            const sc = (0.76 + row * 0.18) + ((i + row * 2) % 5) * 0.14;
-            pinePlacements.push([px, py, pz, sc, i * 1.1 + side + row]);
-          }
-        }
-      }
-    }
-
-    if (pinePlacements.length > 0) {
-      const { trunkGeo, boughsGeo, snowCapsGeo } = build3DAlpinePineGeometries(trackGeo);
-      const pTrunkMat = trackMat(
-        new THREE.MeshStandardMaterial({ color: 0x4a3525, roughness: 0.9 })
-      );
-      const pBoughMat = trackMat(
-        new THREE.MeshStandardMaterial({
-          color: 0x166534,
-          roughness: 0.72,
-          flatShading: true,
-        })
-      );
-      const pSnowMat = trackMat(
-        new THREE.MeshStandardMaterial({
-          color: 0xf8fafc,
-          roughness: 0.45,
-          metalness: 0.08,
-          flatShading: true,
-        })
-      );
-
-      const instTrunks = new THREE.InstancedMesh(trunkGeo, pTrunkMat, pinePlacements.length);
-      const instBoughs = new THREE.InstancedMesh(boughsGeo, pBoughMat, pinePlacements.length);
-      const instCaps = new THREE.InstancedMesh(snowCapsGeo, pSnowMat, pinePlacements.length);
-
-      for (let i = 0; i < pinePlacements.length; i++) {
-        const [px, py, pz, sc, rotY] = pinePlacements[i];
-        dummy.position.set(px, py, pz);
-        dummy.rotation.set(0, rotY, 0);
-        dummy.scale.setScalar(sc);
-        dummy.updateMatrix();
-        instTrunks.setMatrixAt(i, dummy.matrix);
-        instBoughs.setMatrixAt(i, dummy.matrix);
-        instCaps.setMatrixAt(i, dummy.matrix);
-      }
-      instTrunks.instanceMatrix.needsUpdate = true;
-      instBoughs.instanceMatrix.needsUpdate = true;
-      instCaps.instanceMatrix.needsUpdate = true;
-      instTrunks.computeBoundingSphere();
-      instBoughs.computeBoundingSphere();
-      instCaps.computeBoundingSphere();
-      rootGroup.add(instTrunks, instBoughs, instCaps);
-    }
-
-    // 2. 3D Wooden Alpine Ski Chalets perched on the 3D Snow Slopes
-    const chaletPlacements = [];
-    for (let i = 10; i < N; i += 20) {
-      const s = samples[i];
-      const hw = s.half_width_m || 0.0175;
-      for (const side of [-1, 1]) {
-        const distOut = hw + 0.036 + ((i * 7) % 4) * 0.012;
-        const cx = s.position[0] + s.right[0] * side * distOut;
-        const cz = s.position[2] + s.right[2] * side * distOut;
-        if (isClearOfTrack(cx, cz, 0.018)) {
-          const cy = Math.max(BASE_GROUND_Y - 0.001, getTerrainHeightAt(cx, cz) - 0.0008);
-          const yaw =
-            Math.atan2(s.tangent[0], s.tangent[2]) + (side > 0 ? -Math.PI / 2 : Math.PI / 2);
-          chaletPlacements.push([cx, cy, cz, 0.92 + (i % 3) * 0.18, yaw]);
-        }
-      }
-    }
-    if (chaletPlacements.length > 0) {
-      const cabinBodyGeo = trackGeo(new THREE.BoxGeometry(0.016, 0.009, 0.013));
-      cabinBodyGeo.translate(0, 0.0045, 0);
-      const cabinMat = trackMat(
-        new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.85 })
-      );
-
-      const roofGeo = trackGeo(new THREE.ConeGeometry(0.014, 0.009, 4));
-      roofGeo.rotateY(Math.PI / 4);
-      roofGeo.translate(0, 0.013, 0);
-      const roofMat = trackMat(
-        new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.5 })
-      );
-
-      const glowWinGeo = trackGeo(new THREE.BoxGeometry(0.004, 0.003, 0.0134));
-      glowWinGeo.translate(0, 0.0048, 0);
-      const glowWinMat = trackMat(
-        new THREE.MeshBasicMaterial({ color: 0xfbbf24, toneMapped: false })
-      );
-
-      const instCabins = new THREE.InstancedMesh(cabinBodyGeo, cabinMat, chaletPlacements.length);
-      const instRoofs = new THREE.InstancedMesh(roofGeo, roofMat, chaletPlacements.length);
-      const instWins = new THREE.InstancedMesh(glowWinGeo, glowWinMat, chaletPlacements.length);
-      for (let i = 0; i < chaletPlacements.length; i++) {
-        const [cx, cy, cz, sc, yaw] = chaletPlacements[i];
-        dummy.position.set(cx, cy, cz);
-        dummy.rotation.set(0, yaw, 0);
-        dummy.scale.setScalar(sc);
-        dummy.updateMatrix();
-        instCabins.setMatrixAt(i, dummy.matrix);
-        instRoofs.setMatrixAt(i, dummy.matrix);
-        instWins.setMatrixAt(i, dummy.matrix);
-      }
-      instCabins.instanceMatrix.needsUpdate = true;
-      instRoofs.instanceMatrix.needsUpdate = true;
-      instWins.instanceMatrix.needsUpdate = true;
-      instCabins.computeBoundingSphere();
-      instRoofs.computeBoundingSphere();
-      instWins.computeBoundingSphere();
-      rootGroup.add(instCabins, instRoofs, instWins);
-    }
-
-    // 3. Outer Ring of 18 Monumental 3D Jagged Alpine Matterhorn Snow Peaks
-    const peakCount = 18;
-    const peakBaseGeo = trackGeo(new THREE.ConeGeometry(0.16, 0.28, 6));
-    peakBaseGeo.translate(0, 0.13, 0);
-    const peakCapGeo = trackGeo(new THREE.ConeGeometry(0.095, 0.165, 6));
-    peakCapGeo.translate(0, 0.215, 0);
-    const peakBaseMat = trackMat(
-      new THREE.MeshStandardMaterial({
-        color: 0x475569,
-        roughness: 0.78,
-        flatShading: true,
-      })
-    );
-    const peakCapMat = trackMat(
-      new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        roughness: 0.42,
-        flatShading: true,
-      })
-    );
-    const instPeakBases = new THREE.InstancedMesh(peakBaseGeo, peakBaseMat, peakCount);
-    const instPeakCaps = new THREE.InstancedMesh(peakCapGeo, peakCapMat, peakCount);
-    for (let i = 0; i < peakCount; i++) {
-      const ang = (i / peakCount) * Math.PI * 2.0 + 0.08;
-      const rad = 0.88 + (i % 3) * 0.22;
-      const sx = 0.85 + (i % 4) * 0.26;
-      const sy = 0.78 + ((i * 5) % 5) * 0.26;
-      dummy.position.set(Math.cos(ang) * rad, BASE_GROUND_Y - 0.008, Math.sin(ang) * rad);
-      dummy.rotation.set(0, i * 0.9, 0);
-      dummy.scale.set(sx, sy, sx * 0.92);
-      dummy.updateMatrix();
-      instPeakBases.setMatrixAt(i, dummy.matrix);
-      instPeakCaps.setMatrixAt(i, dummy.matrix);
-    }
-    instPeakBases.instanceMatrix.needsUpdate = true;
-    instPeakCaps.instanceMatrix.needsUpdate = true;
-    instPeakBases.computeBoundingSphere();
-    instPeakCaps.computeBoundingSphere();
-    rootGroup.add(instPeakBases, instPeakCaps);
-
-    // 4. 3D Moving Alpine Gondola / Cable-Car Lift Spanning High Across the Valley
+  } else if (safeMapId === 'canyon') {
+    // Chamonix Glacier: Moving Alpine Gondola Cable-Car + Gentle Snowflakes
+    // (Real 3D Snowy Mountain Ranges & 3D Forest Trees are mounted in Section 8 below!)
     gondolaSpanStart = new THREE.Vector3(-0.36, BASE_GROUND_Y + 0.135, -0.22);
     gondolaSpanEnd = new THREE.Vector3(0.38, BASE_GROUND_Y + 0.165, 0.24);
     const pylonGeo = trackGeo(new THREE.CylinderGeometry(0.0022, 0.0045, 0.16, 6));
@@ -2585,7 +2442,6 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
       gondolaCabins.push({ group: gGroup, offset: gIdx / 4 });
     }
 
-    // 5. Gentle Drifting 3D Alpine Snowflakes
     const snowCount = 320;
     const snowPos = new Float32Array(snowCount * 3);
     for (let i = 0; i < snowCount; i++) {
@@ -2609,50 +2465,374 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
   }
 
   // -------------------------------------------------------------------------
-  // 8. POLY HAVEN PHOTOGRAMMETRY 3D HERO PROPS (SINGLE-DRAW-CALL INSTANCEDMESH)
+  // 8. AAA 3D GLB ENVIRONMENT SCENES & PHOTOGRAMMETRY 3D HERO PROPS
   // -------------------------------------------------------------------------
   const photogrammetryGroup = new THREE.Group();
   photogrammetryGroup.name = 'PhotogrammetryHeroProps';
   rootGroup.add(photogrammetryGroup);
 
   const heroDummy = new THREE.Object3D();
-  // 1) Photogrammetry weathered Concrete Road Barriers lining start/finish pit & apexes (1 draw call)
-  loadPhotogrammetryPropTemplate('concrete_road_barrier').then((tpl) => {
-    if (isDisposed || !tpl) return;
-    const placements = [];
-    const barrierFractions = [0.02, 0.045, 0.07, 0.26, 0.285, 0.54, 0.565, 0.78, 0.805, 0.94, 0.965];
-    for (let i = 0; i < barrierFractions.length; i++) {
-      const idx = Math.floor(barrierFractions[i] * N) % N;
-      const s = samples[idx];
-      if (!s) continue;
-      const hw = s.half_width_m || 0.024;
-      const side = i % 2 === 0 ? 1 : -1;
-      const lat = side * (hw + 0.0085);
-      const bx = s.position[0] + s.right[0] * lat;
-      const bz = s.position[2] + s.right[2] * lat;
-      const by = Math.max(getTerrainHeightAt(bx, bz), s.position[1] - 0.0025);
-      const yaw = Math.atan2(s.tangent[0], s.tangent[2]);
-      placements.push({ x: bx, y: by, z: bz, yaw, scale: 0.014 });
+
+  // Helper to spawn a multi-part 3D GLB prop template as 1 InstancedMesh per sub-part
+  function spawnMultiPartInstancedProp(tplOrParts, placements, opts = {}) {
+    const parts = Array.isArray(tplOrParts) ? tplOrParts : tplOrParts?.parts;
+    if (!Array.isArray(parts) || parts.length === 0 || placements.length === 0) return;
+    for (const part of parts) {
+      let mat = part.material;
+      if (opts.materialOverride) {
+        mat = opts.materialOverride(part.material, part.name);
+      }
+      const inst = new THREE.InstancedMesh(part.geometry, mat, placements.length);
+      inst.castShadow = Boolean(opts.castShadow);
+      inst.receiveShadow = true;
+      for (let i = 0; i < placements.length; i++) {
+        const p = placements[i];
+        heroDummy.position.set(p.x, p.y, p.z);
+        heroDummy.rotation.set(p.rotX || 0, p.yaw || 0, p.rotZ || 0);
+        if (p.scaleXYZ) {
+          heroDummy.scale.set(p.scaleXYZ[0], p.scaleXYZ[1], p.scaleXYZ[2]);
+        } else {
+          heroDummy.scale.setScalar(p.scale);
+        }
+        heroDummy.updateMatrix();
+        inst.setMatrixAt(i, heroDummy.matrix);
+      }
+      inst.instanceMatrix.needsUpdate = true;
+      inst.computeBoundingSphere();
+      photogrammetryGroup.add(inst);
     }
-    if (placements.length === 0) return;
-    const inst = new THREE.InstancedMesh(tpl.geometry, tpl.material, placements.length);
-    inst.castShadow = false;
-    inst.receiveShadow = true;
-    for (let i = 0; i < placements.length; i++) {
-      const p = placements[i];
-      heroDummy.position.set(p.x, p.y, p.z);
-      heroDummy.rotation.set(0, p.yaw, 0);
-      heroDummy.scale.setScalar(p.scale);
-      heroDummy.updateMatrix();
-      inst.setMatrixAt(i, heroDummy.matrix);
+  }
+
+  // 1) Photogrammetry Weathered Concrete Road Barriers lining start/finish pit & apexes
+  if (safeMapId !== 'drift') {
+    loadPhotogrammetryPropTemplate('concrete_road_barrier').then((tpl) => {
+      if (isDisposed || !tpl) return;
+      const placements = [];
+      const barrierFractions = [0.02, 0.045, 0.07, 0.26, 0.285, 0.54, 0.565, 0.78, 0.805, 0.94, 0.965];
+      for (let i = 0; i < barrierFractions.length; i++) {
+        const idx = Math.floor(barrierFractions[i] * N) % N;
+        const s = samples[idx];
+        if (!s) continue;
+        const hw = s.half_width_m || 0.024;
+        const side = i % 2 === 0 ? 1 : -1;
+        const lat = side * (hw + 0.0085);
+        const bx = s.position[0] + s.right[0] * lat;
+        const bz = s.position[2] + s.right[2] * lat;
+        const by = Math.max(getTerrainHeightAt(bx, bz), s.position[1] - 0.0025);
+        const yaw = Math.atan2(s.tangent[0], s.tangent[2]);
+        placements.push({ x: bx, y: by, z: bz, yaw, scale: 0.014 });
+      }
+      if (placements.length === 0) return;
+      const inst = new THREE.InstancedMesh(tpl.geometry, tpl.material, placements.length);
+      inst.castShadow = false;
+      inst.receiveShadow = true;
+      for (let i = 0; i < placements.length; i++) {
+        const p = placements[i];
+        heroDummy.position.set(p.x, p.y, p.z);
+        heroDummy.rotation.set(0, p.yaw, 0);
+        heroDummy.scale.setScalar(p.scale);
+        heroDummy.updateMatrix();
+        inst.setMatrixAt(i, heroDummy.matrix);
+      }
+      inst.instanceMatrix.needsUpdate = true;
+      inst.computeBoundingSphere();
+      photogrammetryGroup.add(inst);
+    });
+  }
+
+  // 2) Real 3D Multi-Part Normal-Mapped Forest Trees (`forest_tree_01.glb` from user's uploaded Forest Scene)
+  if (
+    safeMapId === 'forest' ||
+    safeMapId === 'coast' ||
+    safeMapId === 'drift' ||
+    safeMapId === 'canyon'
+  ) {
+    loadMultiPartPropTemplate('forest_tree_01').then((parts) => {
+      if (isDisposed || !parts) return;
+      const treePlacements = [];
+      const strideStep = safeMapId === 'forest' ? 5 : safeMapId === 'canyon' ? 7 : 10;
+      const maxRows = safeMapId === 'forest' ? 3 : 2;
+
+      for (let i = 0; i < N; i += strideStep) {
+        const s = samples[i];
+        const hw = s.half_width_m || 0.022;
+        for (const side of [-1, 1]) {
+          for (let row = 0; row < maxRows; row++) {
+            if (row === 1 && i % (strideStep * 2) !== 0) continue;
+            if (row === 2 && i % (strideStep * 3) !== 0) continue;
+            const distOut =
+              hw +
+              (safeMapId === 'drift' ? 0.042 : 0.026) +
+              row * 0.032 +
+              ((i * 19 + (side > 0 ? 4 : 0) + row * 3) % 6) * 0.0075;
+            const tx = s.position[0] + s.right[0] * side * distOut;
+            const tz = s.position[2] + s.right[2] * side * distOut;
+            if (isClearOfTrack(tx, tz, 0.016)) {
+              const ty = Math.max(BASE_GROUND_Y - 0.0018, getTerrainHeightAt(tx, tz) - 0.0012);
+              const sc = 0.026 + row * 0.007 + ((i + row * 2) % 5) * 0.0045;
+              treePlacements.push({
+                x: tx,
+                y: ty,
+                z: tz,
+                yaw: i * 1.37 + side + row,
+                scale: sc,
+              });
+            }
+          }
+        }
+      }
+
+      spawnMultiPartInstancedProp(parts, treePlacements, {
+        castShadow: true,
+        materialOverride: (baseMat) => {
+          if (safeMapId === 'canyon') {
+            // Frost-dusted alpine evergreen tint for Chamonix Glacier
+            const frostyMat = baseMat.clone();
+            frostyMat.color.lerp(new THREE.Color(0xdbeafe), 0.38);
+            trackMat(frostyMat);
+            return frostyMat;
+          }
+          return baseMat;
+        },
+      });
+    });
+  }
+
+  // 3) User's 22-Tree 3D Forest Grove Island Scene (`forest_trees_scene.glb`) on Hakone Touge & Amalfi Riviera
+  if (safeMapId === 'forest' || safeMapId === 'coast') {
+    loadEnvironmentSceneGlb('forest_trees_scene').then((sceneTemplate) => {
+      if (isDisposed || !sceneTemplate) return;
+      const groveSpots =
+        safeMapId === 'forest'
+          ? [
+              { x: 0.0, z: 0.0, scale: 0.011, yaw: 0.3 },
+              { x: -0.26, z: 0.14, scale: 0.0095, yaw: 1.8 },
+              { x: 0.24, z: -0.16, scale: 0.0095, yaw: -1.1 },
+            ]
+          : [{ x: -0.18, z: 0.12, scale: 0.0085, yaw: 0.75 }];
+
+      for (const spot of groveSpots) {
+        if (!isClearOfTrack(spot.x, spot.z, 0.075)) continue;
+        const groveClone = sceneTemplate.clone(true);
+        const gy = Math.max(BASE_GROUND_Y - 0.002, getTerrainHeightAt(spot.x, spot.z) - 0.002);
+        groveClone.position.set(spot.x, gy, spot.z);
+        groveClone.rotation.y = spot.yaw;
+        groveClone.scale.setScalar(spot.scale);
+        photogrammetryGroup.add(groveClone);
+      }
+    });
+  }
+
+  // 4) User's 3D Snowy Mountain Road Scene & 360° 3D Mountain Massifs (`snowy_mountain_scene.glb`)
+  // Replaces ALL old 6-sided ConeGeometry pyramid mountains across outdoor tracks!
+  if (safeMapId !== 'city') {
+    loadEnvironmentSceneGlb('snowy_mountain_scene').then((snowScene) => {
+      if (isDisposed || !snowScene) return;
+
+      // On Chamonix Glacier ('canyon'), mount the detailed 3D Snowy Mountain Road Pass diorama in the alpine valley
+      if (safeMapId === 'canyon') {
+        const passClone = snowScene.clone(true);
+        passClone.scale.setScalar(0.00145);
+        passClone.position.set(-0.08, BASE_GROUND_Y - 0.004, 0.04);
+        passClone.rotation.y = 0.42;
+        photogrammetryGroup.add(passClone);
+      }
+
+      // Extract the massive 3D `SnowyMountainMassif` (535m x 955m x 196m) & `SnowyMountainForest`
+      let massifMesh = null;
+      let forestMesh = null;
+      snowScene.traverse((child) => {
+        if (!child.isMesh) return;
+        const n = (child.name || '').toLowerCase();
+        if (n.includes('mountainmassif') || n.includes('mountain_mountain')) {
+          massifMesh = child;
+        } else if (n.includes('mountainforest') || n === 'background_trees_background_trees_0') {
+          forestMesh = child;
+        }
+      });
+
+      if (massifMesh && massifMesh.geometry) {
+        const ringCount = 6;
+        let massifMat = massifMesh.material;
+
+        // Re-theme the 3D mountain range PBR material for non-snow biomes (Mojave Red Canyon, Hakone Forest, Amalfi Coast, Autodrome)
+        if (safeMapId === 'desert') {
+          massifMat = trackMat(
+            new THREE.MeshStandardMaterial({
+              color: 0xb45328,
+              normalMap: massifMesh.material?.normalMap || null,
+              roughness: 0.86,
+              metalness: 0.06,
+            })
+          );
+        } else if (safeMapId === 'forest') {
+          massifMat = trackMat(
+            new THREE.MeshStandardMaterial({
+              color: 0x1e3f2b,
+              normalMap: massifMesh.material?.normalMap || null,
+              roughness: 0.82,
+              metalness: 0.06,
+            })
+          );
+        } else if (safeMapId === 'coast' || safeMapId === 'drift') {
+          massifMat = trackMat(
+            new THREE.MeshStandardMaterial({
+              color: safeMapId === 'coast' ? 0x243447 : 0x263829,
+              normalMap: massifMesh.material?.normalMap || null,
+              roughness: 0.84,
+              metalness: 0.08,
+            })
+          );
+        }
+
+        const instMassifs = new THREE.InstancedMesh(massifMesh.geometry, massifMat, ringCount);
+        instMassifs.receiveShadow = true;
+
+        const instForest =
+          safeMapId === 'canyon' && forestMesh && forestMesh.geometry
+            ? new THREE.InstancedMesh(forestMesh.geometry, forestMesh.material, ringCount)
+            : null;
+
+        for (let i = 0; i < ringCount; i++) {
+          const ang = (i / ringCount) * Math.PI * 2.0 + 0.25;
+          const rad = 1.08 + (i % 2) * 0.16;
+          const sc = 0.00145 + (i % 3) * 0.00022;
+          heroDummy.position.set(
+            Math.cos(ang) * rad,
+            BASE_GROUND_Y + 0.075,
+            Math.sin(ang) * rad
+          );
+          heroDummy.rotation.set(0, ang + Math.PI * 0.5, 0);
+          heroDummy.scale.set(sc, sc * (0.95 + (i % 2) * 0.18), sc);
+          heroDummy.updateMatrix();
+          instMassifs.setMatrixAt(i, heroDummy.matrix);
+          if (instForest) instForest.setMatrixAt(i, heroDummy.matrix);
+        }
+        instMassifs.instanceMatrix.needsUpdate = true;
+        instMassifs.computeBoundingSphere();
+        photogrammetryGroup.add(instMassifs);
+
+        if (instForest) {
+          instForest.instanceMatrix.needsUpdate = true;
+          instForest.computeBoundingSphere();
+          photogrammetryGroup.add(instForest);
+        }
+      }
+    });
+  }
+
+  // 5) Poly Haven 3D Photogrammetry Canyon Cliffs (`canyon_cliff_01.glb`) & Rock Faces (`rock_face_01.glb`)
+  if (
+    safeMapId === 'desert' ||
+    safeMapId === 'coast' ||
+    safeMapId === 'canyon' ||
+    safeMapId === 'forest'
+  ) {
+    loadMultiPartPropTemplate('canyon_cliff_01').then((parts) => {
+      if (isDisposed || !parts) return;
+      const cliffPlacements = [];
+      const stride = safeMapId === 'desert' ? 14 : 26;
+      for (let i = 6; i < N; i += stride) {
+        const s = samples[i];
+        const hw = s.half_width_m || 0.022;
+        for (const side of [-1, 1]) {
+          if (safeMapId !== 'desert' && side < 0 && i % (stride * 2) !== 6) continue;
+          const distOut = hw + (safeMapId === 'desert' ? 0.048 : 0.058) + ((i * 7) % 4) * 0.015;
+          const cx = s.position[0] + s.right[0] * side * distOut;
+          const cz = s.position[2] + s.right[2] * side * distOut;
+          if (isClearOfTrack(cx, cz, 0.028)) {
+            const cy = Math.max(BASE_GROUND_Y - 0.004, getTerrainHeightAt(cx, cz) - 0.003);
+            const sc = (safeMapId === 'desert' ? 0.068 : 0.052) + (i % 4) * 0.016;
+            const yaw =
+              Math.atan2(s.tangent[0], s.tangent[2]) + (side > 0 ? -Math.PI / 2 : Math.PI / 2);
+            cliffPlacements.push({
+              x: cx,
+              y: cy,
+              z: cz,
+              yaw,
+              scaleXYZ: [sc * 1.25, sc * (0.95 + (i % 3) * 0.25), sc],
+            });
+          }
+        }
+      }
+      spawnMultiPartInstancedProp(parts, cliffPlacements, { castShadow: true });
+    });
+
+    loadMultiPartPropTemplate('rock_face_01').then((parts) => {
+      if (isDisposed || !parts) return;
+      const rockPlacements = [];
+      const stride = safeMapId === 'desert' ? 16 : 24;
+      for (let i = 12; i < N; i += stride) {
+        const s = samples[i];
+        const hw = s.half_width_m || 0.022;
+        const side = (i / stride) % 2 === 0 ? 1 : -1;
+        const distOut = hw + 0.036 + ((i * 11) % 5) * 0.012;
+        const rx = s.position[0] + s.right[0] * side * distOut;
+        const rz = s.position[2] + s.right[2] * side * distOut;
+        if (isClearOfTrack(rx, rz, 0.022)) {
+          const ry = Math.max(BASE_GROUND_Y - 0.003, getTerrainHeightAt(rx, rz) - 0.002);
+          const sc = 0.042 + (i % 3) * 0.014;
+          const yaw = Math.atan2(s.tangent[0], s.tangent[2]) + i * 0.7;
+          rockPlacements.push({ x: rx, y: ry, z: rz, yaw, scale: sc });
+        }
+      }
+      spawnMultiPartInstancedProp(parts, rockPlacements, { castShadow: false });
+    });
+  }
+
+  // 6) Poly Haven 3D Photogrammetry Desert Trees (`desert_tree_01.glb` — Quiver Trees) for Mojave Red Canyon
+  if (safeMapId === 'desert') {
+    loadMultiPartPropTemplate('desert_tree_01').then((parts) => {
+      if (isDisposed || !parts) return;
+      const desertTreePlacements = [];
+      for (let i = 0; i < N; i += 8) {
+        const s = samples[i];
+        const hw = s.half_width_m || 0.022;
+        for (const side of [-1, 1]) {
+          const distOut = hw + 0.025 + ((i * 13 + (side > 0 ? 3 : 0)) % 6) * 0.009;
+          const tx = s.position[0] + s.right[0] * side * distOut;
+          const tz = s.position[2] + s.right[2] * side * distOut;
+          if (isClearOfTrack(tx, tz, 0.015)) {
+            const ty = Math.max(BASE_GROUND_Y - 0.0015, getTerrainHeightAt(tx, tz) - 0.001);
+            const sc = 0.022 + ((i * 5) % 5) * 0.0045;
+            desertTreePlacements.push({
+              x: tx,
+              y: ty,
+              z: tz,
+              yaw: i * 1.4 + side,
+              scale: sc,
+            });
+          }
+        }
+      }
+      spawnMultiPartInstancedProp(parts, desertTreePlacements, { castShadow: true });
+    });
+  }
+
+  // 7) Poly Haven 3D Photogrammetry Street Lamps (`street_lamp_01.glb`) along trackside
+  loadMultiPartPropTemplate('street_lamp_01').then((parts) => {
+    if (isDisposed || !parts) return;
+    const lampPlacements = [];
+    const lampStride = safeMapId === 'city' ? 16 : 24;
+    for (let i = 8; i < N; i += lampStride) {
+      const s = samples[i];
+      if (s.position[1] > BASE_GROUND_Y + 0.0045) continue;
+      const hw = s.half_width_m || 0.0175;
+      for (const side of [-1, 1]) {
+        const outDist = hw + (safeMapId === 'drift' ? 0.014 : 0.0068);
+        const lx = s.position[0] + s.right[0] * side * outDist;
+        const lz = s.position[2] + s.right[2] * side * outDist;
+        const ly = s.position[1] - 0.0005;
+        const yaw =
+          Math.atan2(s.tangent[0], s.tangent[2]) + (side > 0 ? -Math.PI / 2 : Math.PI / 2);
+        lampPlacements.push({ x: lx, y: ly, z: lz, yaw, scale: 0.022 });
+      }
     }
-    inst.instanceMatrix.needsUpdate = true;
-    inst.computeBoundingSphere();
-    photogrammetryGroup.add(inst);
+    spawnMultiPartInstancedProp(parts, lampPlacements, { castShadow: false });
   });
 
-  // 2) Photogrammetry Coastal / Alpine Boulders flanking outer turns (1 draw call, coast & canyon)
-  if (safeMapId === 'coast' || safeMapId === 'canyon') {
+  // 8) Photogrammetry Coastal / Alpine / Desert Boulders flanking outer turns
+  if (safeMapId !== 'city') {
     loadPhotogrammetryPropTemplate('boulder_01').then((tpl) => {
       if (isDisposed || !tpl) return;
       const boulderFractions = [0.11, 0.19, 0.34, 0.43, 0.62, 0.71, 0.85, 0.91];
@@ -2729,12 +2909,11 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
     }
   }
 
-  // Base dry road & sky color snapshots for smooth rain/wetness modulation
-  const baseRoadRoughness = roadMat ? roadMat.roughness : 0.45;
-  const baseRoadMetalness = roadMat ? roadMat.metalness : 0.15;
-  const baseRoadEnvIntensity = roadMat ? (roadMat.envMapIntensity ?? 1.2) : 1.2;
-  const dryRoadColor = new THREE.Color(0xffffff);
-  const wetRoadColor = new THREE.Color(0xb8c7d9);
+  const baseRoadRoughness = roadMat ? roadMat.roughness : 0.54;
+  const baseRoadMetalness = roadMat ? roadMat.metalness : 0.12;
+  const baseRoadEnvIntensity = roadMat ? (roadMat.envMapIntensity ?? 0.68) : 0.68;
+  const dryRoadColor = new THREE.Color(0xadb8c6);
+  const wetRoadColor = new THREE.Color(0x7c8ea4);
   const baseSkyTop = new THREE.Color(skyCfg.top);
   const baseSkyMid = new THREE.Color(skyCfg.mid);
   const baseSkyBottom = new THREE.Color(skyCfg.bottom);
@@ -2750,23 +2929,21 @@ export function buildRealWorldMap(mapId = 'coast', splineData, scene) {
     if (Math.abs(w - lastAppliedWetness) < 0.004) return;
     lastAppliedWetness = w;
 
-    // Drive single-pass wet-puddle roughness modulation on BOTH fallback & GLB road shaders
-    roadWetnessUniform.value = safeMapId === 'city' ? Math.max(0.55, w) : w;
+    roadWetnessUniform.value =
+      safeMapId === 'city' ? Math.max(0.55, w) : safeMapId === 'forest' ? Math.max(0.25, w) : w;
 
-    // Subtle wet-road sheen: darker damp tarmac with controlled low roughness & zero blinding glare hotspots
     const activeRoadMats = [roadMat, glbRoadMat].filter(Boolean);
     for (let i = 0; i < activeRoadMats.length; i++) {
       const rm = activeRoadMats[i];
-      const targetWetRough = safeMapId === 'city' ? 0.34 : 0.38;
-      const targetWetMetal = safeMapId === 'city' ? 0.24 : 0.18;
-      const targetWetEnv = safeMapId === 'city' ? 0.95 : 0.86;
+      const targetWetRough = safeMapId === 'city' ? 0.36 : 0.42;
+      const targetWetMetal = safeMapId === 'city' ? 0.22 : 0.16;
+      const targetWetEnv = safeMapId === 'city' ? 0.85 : 0.78;
       rm.roughness = THREE.MathUtils.lerp(baseRoadRoughness, targetWetRough, w);
       rm.metalness = THREE.MathUtils.lerp(baseRoadMetalness, targetWetMetal, w);
       rm.envMapIntensity = THREE.MathUtils.lerp(baseRoadEnvIntensity, targetWetEnv, w);
-      rm.color.copy(dryRoadColor).lerp(wetRoadColor, w * 0.85);
+      rm.color.copy(dryRoadColor).lerp(wetRoadColor, w * 0.88);
     }
 
-    // Moody darkened storm sky dome with denser overcast cloud deck
     if (skyMat && skyMat.uniforms) {
       if (skyMat.uniforms.uTopColor) {
         skyMat.uniforms.uTopColor.value.copy(baseSkyTop).lerp(stormSkyTop, w * 0.82);

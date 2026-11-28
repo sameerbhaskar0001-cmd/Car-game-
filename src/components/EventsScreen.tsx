@@ -93,7 +93,7 @@ export const EventsScreen: React.FC<EventsScreenProps> = ({
           <div className="flex items-center gap-2 shrink-0">
             <div className="hidden md:flex items-center gap-1.5 px-3 h-9 rounded-lg bg-slate-900/90 border border-white/10 text-xs font-mono text-slate-200 tabular-nums whitespace-nowrap">
               <Trophy className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <span>{totalStars}/9 ★</span>
+              <span>{totalStars}/{MAP_SPECS.length * 3} ★</span>
             </div>
 
             <div className="h-9 flex items-center gap-1.5 px-3 rounded-lg bg-slate-900 border border-amber-400/45 shrink-0 whitespace-nowrap">

@@ -207,10 +207,10 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
           </div>
         )}
 
-      {/* TOP BAR: Single-Line Sleek Asphalt HUD (Never wraps or blocks track!) */}
-      <header className="flex items-center justify-between gap-2 w-full">
+      {/* TOP BAR: Single-Line Sleek Asphalt HUD (Fits cleanly on 360px portrait mobile without clipping!) */}
+      <header className="flex items-center justify-between gap-1 sm:gap-2 w-full min-w-0">
         {/* Top-Left: Compact Menu, Settings, Audio, Auto-Gas Toggle & Position Rank */}
-        <div className="pointer-events-auto flex items-center gap-1.5 shrink-0">
+        <div className="pointer-events-auto flex items-center gap-1 sm:gap-1.5 shrink-0">
           <button
             type="button"
             onClick={(e) => {
@@ -220,7 +220,7 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
             }}
             style={{ touchAction: 'manipulation' }}
             aria-label="Menu"
-            className="w-8 h-8 sm:w-auto sm:px-2.5 rounded-xl bg-slate-950/75 border border-white/20 active:border-cyan-400 font-['Orbitron'] italic font-bold text-[11px] text-white flex items-center justify-center cursor-pointer shadow-lg active:scale-95"
+            className="w-7 h-7 sm:w-auto sm:h-8 sm:px-2.5 rounded-lg sm:rounded-xl bg-slate-950/75 border border-white/20 active:border-cyan-400 font-['Orbitron'] italic font-bold text-[10px] sm:text-[11px] text-white flex items-center justify-center cursor-pointer shadow-lg active:scale-95"
           >
             <span>←</span>
             <span className="hidden sm:inline ml-1">MENU</span>
@@ -234,7 +234,7 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
             }}
             style={{ touchAction: 'manipulation' }}
             aria-label="Settings"
-            className="w-8 h-8 rounded-xl bg-slate-950/75 border border-white/20 active:border-cyan-400 text-slate-200 flex items-center justify-center cursor-pointer shadow-lg active:scale-95 text-sm"
+            className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg sm:rounded-xl bg-slate-950/75 border border-white/20 active:border-cyan-400 text-slate-200 flex items-center justify-center cursor-pointer shadow-lg active:scale-95 text-xs sm:text-sm"
           >
             ⚙
           </button>
@@ -249,13 +249,13 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
             style={{ touchAction: 'manipulation' }}
             aria-label={audioOn ? 'Mute Audio' : 'Unmute Audio'}
             title={audioOn ? 'Audio On (Tap to Mute)' : 'Audio Muted (Tap to Unmute)'}
-            className={`w-8 h-8 rounded-xl border flex items-center justify-center cursor-pointer shadow-lg active:scale-95 transition-colors ${
+            className={`w-7 h-7 sm:w-8 sm:h-8 rounded-lg sm:rounded-xl border flex items-center justify-center cursor-pointer shadow-lg active:scale-95 transition-colors ${
               audioOn
                 ? 'bg-slate-950/80 border-cyan-400/60 text-cyan-300'
                 : 'bg-slate-950/80 border-rose-400/50 text-rose-300'
             }`}
           >
-            {audioOn ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+            {audioOn ? <Volume2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <VolumeX className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
           </button>
 
           {/* Compact Auto-Gas / Manual Pedal Toggle */}
@@ -267,7 +267,7 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
             }}
             style={{ touchAction: 'manipulation' }}
             title="Switch between Asphalt Auto-Gas & Manual Gas Pedal"
-            className={`px-2 py-1.5 rounded-xl border font-['Orbitron'] italic font-extrabold text-[9px] tracking-wider uppercase cursor-pointer shadow-lg active:scale-95 transition-colors whitespace-nowrap ${
+            className={`h-7 sm:h-8 px-1.5 sm:px-2 rounded-lg sm:rounded-xl border font-['Orbitron'] italic font-extrabold text-[8px] sm:text-[9px] tracking-wider uppercase cursor-pointer shadow-lg active:scale-95 transition-colors whitespace-nowrap ${
               autoGasEnabled
                 ? 'bg-emerald-950/80 border-emerald-400/70 text-emerald-300'
                 : 'bg-slate-950/80 border-amber-400/60 text-amber-300'
@@ -287,7 +287,7 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
               style={{ touchAction: 'manipulation' }}
               title="Toggle Personal Best Ghost Car"
               aria-label="Toggle Personal Best Ghost Car"
-              className={`h-8 px-2 rounded-xl border flex items-center gap-1 cursor-pointer shadow-lg active:scale-95 transition-colors whitespace-nowrap ${
+              className={`w-7 h-7 sm:w-auto sm:h-8 sm:px-2 rounded-lg sm:rounded-xl border flex items-center justify-center gap-1 cursor-pointer shadow-lg active:scale-95 transition-colors whitespace-nowrap ${
                 telemetry.ghostEnabled
                   ? 'bg-cyan-950/80 border-cyan-400/70 text-cyan-200'
                   : 'bg-slate-950/75 border-white/20 text-slate-400'
@@ -302,15 +302,15 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
 
           {/* DYNAMIC POSITION RANK BADGE (or SOLO badge in Time Attack) */}
           {activeModeId === 'time_attack' ? (
-            <div className="flex items-center px-2.5 py-1.5 rounded-xl bg-sky-950/85 border border-sky-400/70 font-['Orbitron'] italic font-black text-[10px] sm:text-xs text-sky-200 tracking-wider shadow-lg">
+            <div className="flex items-center h-7 sm:h-8 px-1.5 sm:px-2.5 rounded-lg sm:rounded-xl bg-sky-950/85 border border-sky-400/70 font-['Orbitron'] italic font-black text-[9px] sm:text-xs text-sky-200 tracking-wider shadow-lg">
               SOLO
             </div>
           ) : (
             <div
-              className={`flex items-baseline gap-0.5 px-2.5 py-1 rounded-xl bg-gradient-to-r border font-['Orbitron'] italic font-black shadow-lg ${rankBadgeColor}`}
+              className={`flex items-baseline gap-0.5 px-1.5 sm:px-2.5 py-1 rounded-lg sm:rounded-xl bg-gradient-to-r border font-['Orbitron'] italic font-black shadow-lg ${rankBadgeColor}`}
             >
-              <span className="text-base sm:text-lg leading-none">{rank}</span>
-              <span className="text-[8px] sm:text-[9px] font-black tracking-widest">
+              <span className="text-sm sm:text-lg leading-none">{rank}</span>
+              <span className="text-[7px] sm:text-[9px] font-black tracking-wider">
                 {rankSuffix}
               </span>
             </div>
@@ -320,40 +320,40 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
         {/* TOP-CENTER: EVENT MODE OBJECTIVE WIDGET */}
         {activeModeId === 'elimination' && (
           <div
-            className={`flex items-center gap-2 px-2.5 sm:px-3 py-1 rounded-xl border shadow-lg backdrop-blur-sm transition-colors ${
+            className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 rounded-xl border shadow-lg backdrop-blur-sm transition-colors ${
               elimDanger
                 ? 'bg-rose-950/90 border-rose-400 text-rose-100 animate-pulse shadow-[0_0_16px_rgba(244,63,94,0.65)]'
                 : 'bg-slate-950/80 border-orange-400/60 text-orange-200'
             }`}
           >
             <div className="flex flex-col leading-none">
-              <span className="font-['Orbitron'] italic font-black text-[8px] tracking-widest uppercase text-orange-300">
-                ELIMINATION
+              <span className="font-['Orbitron'] italic font-black text-[7px] sm:text-[8px] tracking-widest uppercase text-orange-300">
+                ELIM
               </span>
-              <span className="font-mono font-bold text-[10px] text-slate-300 mt-0.5">
-                {remainingRacers}/4 LEFT
+              <span className="font-mono font-bold text-[9px] sm:text-[10px] text-slate-300 mt-0.5">
+                {remainingRacers}/4
               </span>
             </div>
-            <div className="font-['Orbitron'] italic font-black text-base sm:text-lg tabular-nums leading-none text-white border-l border-white/15 pl-2">
-              {telemetry.countdownStep > 0 ? 'READY' : `${elimTimer.toFixed(1)}s`}
+            <div className="font-['Orbitron'] italic font-black text-sm sm:text-lg tabular-nums leading-none text-white border-l border-white/15 pl-1.5 sm:pl-2">
+              {telemetry.countdownStep > 0 ? 'GO' : `${elimTimer.toFixed(1)}s`}
             </div>
           </div>
         )}
 
         {activeModeId === 'drift' && (
-          <div className="flex flex-col items-center justify-center px-3 py-1 rounded-xl bg-slate-950/85 border border-amber-400/60 shadow-lg backdrop-blur-sm min-w-[126px] sm:min-w-[168px]">
-            <div className="w-full flex items-baseline justify-between gap-2 leading-none">
-              <span className="font-['Orbitron'] italic font-black text-[9px] text-amber-300 tracking-wider">
+          <div className="flex flex-col items-center justify-center px-2 sm:px-3 py-1 rounded-xl bg-slate-950/85 border border-amber-400/60 shadow-lg backdrop-blur-sm min-w-[96px] sm:min-w-[168px]">
+            <div className="w-full flex items-baseline justify-between gap-1.5 sm:gap-2 leading-none">
+              <span className="font-['Orbitron'] italic font-black text-[8px] sm:text-[9px] text-amber-300 tracking-wider">
                 DRIFT
               </span>
-              <div className="flex items-baseline gap-1.5">
+              <div className="flex items-baseline gap-1 sm:gap-1.5">
                 {currentDriftPts > 0 && (
-                  <span className="font-mono font-bold text-[10px] text-cyan-300 tabular-nums">
+                  <span className="font-mono font-bold text-[9px] sm:text-[10px] text-cyan-300 tabular-nums">
                     +{currentDriftPts}
                     {driftCombo > 1 ? ` ×${driftCombo}` : ''}
                   </span>
                 )}
-                <span className="font-['Orbitron'] italic font-black text-xs sm:text-sm text-white tabular-nums">
+                <span className="font-['Orbitron'] italic font-black text-[11px] sm:text-sm text-white tabular-nums">
                   {totalDriftScore.toLocaleString()}
                 </span>
                 <span className="font-mono text-[9px] text-slate-400 hidden sm:inline">
@@ -375,13 +375,13 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
 
         {activeModeId === 'time_attack' && (
           <div
-            className={`flex items-center gap-2 px-3 py-1 rounded-xl bg-slate-950/85 border shadow-lg backdrop-blur-sm ${timeAttackTarget.colorClass}`}
+            className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 rounded-xl bg-slate-950/85 border shadow-lg backdrop-blur-sm ${timeAttackTarget.colorClass}`}
           >
             <div className="flex flex-col leading-none">
-              <span className="font-['Orbitron'] italic font-black text-[8px] tracking-widest uppercase">
-                {timeAttackTarget.label} TARGET
+              <span className="font-['Orbitron'] italic font-black text-[7px] sm:text-[8px] tracking-widest uppercase">
+                {timeAttackTarget.label}
               </span>
-              <span className="font-mono font-bold text-[10px] sm:text-xs text-white tabular-nums mt-0.5">
+              <span className="font-mono font-bold text-[9px] sm:text-xs text-white tabular-nums mt-0.5">
                 {formatRaceTime(timeAttackTarget.target)}
               </span>
             </div>
@@ -393,10 +393,10 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
         )}
 
         {/* Top-Right: Streamlined Speedometer & Lap Counter */}
-        <div className="flex items-center gap-2 sm:gap-3 bg-slate-950/75 border border-white/15 rounded-xl px-2.5 py-1 shadow-lg shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-3 bg-slate-950/75 border border-white/15 rounded-lg sm:rounded-xl px-1.5 sm:px-2.5 py-1 shadow-lg shrink-0">
           <div className="flex items-baseline gap-0.5">
             <span
-              className="font-['Orbitron'] italic font-black text-xl sm:text-2xl text-white tabular-nums leading-none"
+              className="font-['Orbitron'] italic font-black text-base sm:text-2xl text-white tabular-nums leading-none"
               style={{
                 textShadow: isShockwave
                   ? '0 0 18px rgba(232, 121, 249, 0.98)'
@@ -407,16 +407,16 @@ export const RaceHUD: React.FC<RaceHUDProps> = ({
             >
               {telemetry.speedKmh}
             </span>
-            <span className="font-['Orbitron'] italic font-extrabold text-[8px] text-cyan-300 tracking-wider">
+            <span className="font-['Orbitron'] italic font-extrabold text-[7px] sm:text-[8px] text-cyan-300 tracking-tight sm:tracking-wider">
               KM/H
             </span>
           </div>
 
-          <div className="flex flex-col items-end border-l border-white/15 pl-2">
-            <div className="font-['Orbitron'] italic font-black text-[10px] sm:text-xs tracking-wider text-white leading-none">
+          <div className="flex flex-col items-end border-l border-white/15 pl-1.5 sm:pl-2">
+            <div className="font-['Orbitron'] italic font-black text-[9px] sm:text-xs tracking-tight sm:tracking-wider text-white leading-none whitespace-nowrap">
               LAP <span className="text-cyan-400">{telemetry.lapCount}</span>/3
             </div>
-            <div className="font-mono font-bold text-[9px] sm:text-[11px] text-amber-300 tabular-nums tracking-tight mt-0.5 leading-none">
+            <div className="font-mono font-bold text-[8px] sm:text-[11px] text-amber-300 tabular-nums tracking-tight mt-0.5 leading-none whitespace-nowrap">
               {formatRaceTime(telemetry.totalRaceTime || telemetry.currentLapTime)}
             </div>
           </div>

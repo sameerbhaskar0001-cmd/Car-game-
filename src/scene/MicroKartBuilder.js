@@ -120,15 +120,15 @@ export function buildMicroKart() {
     new THREE.MeshBasicMaterial({
       map: kartShadowTex,
       transparent: true,
-      opacity: 0.95,
+      opacity: 0.90,
       depthWrite: false,
       polygonOffset: true,
-      polygonOffsetFactor: -8,
-      polygonOffsetUnits: -8,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
     })
   );
   kartShadowQuad.rotation.x = -Math.PI / 2;
-  kartShadowQuad.position.set(0, 0.00048, -0.0002);
+  kartShadowQuad.position.set(0, 0.00002, -0.0002);
   kartShadowQuad.castShadow = false;
   kartShadowQuad.receiveShadow = false;
   kartRoot.add(kartShadowQuad);
@@ -676,6 +676,20 @@ export function buildMicroKart() {
     const stuntSpin = state.stuntSpinAngle || 0.0;
     const stuntRoll = state.stuntRollAngle || 0.0;
 
+    // Visceral suspension weight transfer: rear squat under acceleration/nitro, nose dive under braking
+    const accelSquat =
+      !isIdleShowroom && !state.countdownLocked
+        ? (state.shockwaveTimer || 0) > 0
+          ? -0.052
+          : (state.boostActive || 0) > 0
+            ? -0.036
+            : isBraking
+              ? 0.042
+              : state.speed > 0.04
+                ? -0.012
+                : 0.0
+        : 0.0;
+
     smoothDriftYaw = THREE.MathUtils.lerp(
       smoothDriftYaw,
       state.driftAngle || 0.0,
@@ -683,12 +697,16 @@ export function buildMicroKart() {
     );
     smoothBodyRoll = THREE.MathUtils.lerp(
       smoothBodyRoll,
-      (state.steerInput || 0.0) * 0.11 + (state.driftAngle || 0.0) * 0.13 + tumbleRoll,
+      (state.steerInput || 0.0) * 0.125 + (state.driftAngle || 0.0) * 0.145 + tumbleRoll,
       Math.min(1, dt * 14)
     );
     smoothChassisPitch = THREE.MathUtils.lerp(
       smoothChassisPitch,
-      (state.terrainPitch || 0.0) + (state.rampPitch || 0.0) + landingSquatPitch + tumblePitch,
+      (state.terrainPitch || 0.0) +
+        (state.rampPitch || 0.0) +
+        landingSquatPitch +
+        accelSquat +
+        tumblePitch,
       Math.min(1, dt * 18)
     );
 
@@ -713,7 +731,7 @@ export function buildMicroKart() {
     kartShadowQuad.position.y = 0.00028 - hopH / kScaleCurrent;
     kartShadowQuad.rotation.z = -smoothDriftYaw;
     if (kartShadowQuad.material) {
-      kartShadowQuad.material.opacity = Math.max(0.0, 0.48 - hopH * 95.0);
+      kartShadowQuad.material.opacity = Math.max(0.0, 0.86 - hopH * 140.0);
     }
 
     // 4. Volumetric Twin Nitro Exhaust Flames:
@@ -874,6 +892,7 @@ export function buildMicroKart() {
   let attachedS64Car = null;
   let cockpitRoadOnly = false;
   let isIdleShowroom = true;
+  let isOnTurntable = false;
 
   const KIT_DEFAULT_PARTS = {
     kit1: { bodyId: 'kit1', rimId: 'rim0', spoilerId: 'spoiler0' },
@@ -933,7 +952,10 @@ export function buildMicroKart() {
 
   function syncActiveCarVisibility() {
     const hasAnyCarModel = Boolean(attachedCosmoCar || attachedS64Car || attachedGlbScene);
-    kartShadowQuad.visible = !cockpitRoadOnly && hasAnyCarModel;
+    const isSupercarAttached = Boolean(attachedCosmoCar && attachedCosmoCar.isSupercar);
+    // Supercars carry their own precision contact shadow; in showroom mode the turntable provides the shadow disc
+    kartShadowQuad.visible =
+      !cockpitRoadOnly && !isIdleShowroom && hasAnyCarModel && !isSupercarAttached;
     const isS64Selected =
       currentBodyKit === 's64' ||
       currentBodyKit === 'kit1' ||
@@ -952,7 +974,11 @@ export function buildMicroKart() {
     } else if (attachedCosmoCar) {
       attachedCosmoCar.assemblyRoot.visible = !cockpitRoadOnly;
       attachedCosmoCar.assemblyRoot.traverse((c) => {
-        c.visible = true;
+        if (c.userData && c.userData.isContactShadow) {
+          c.visible = !isOnTurntable && !cockpitRoadOnly;
+        } else {
+          c.visible = true;
+        }
       });
       if (attachedS64Car) {
         attachedS64Car.carAssemblyRoot.visible = false;
@@ -974,7 +1000,6 @@ export function buildMicroKart() {
       placeholderGroup.visible = false;
     }
 
-    const showLights = !cockpitRoadOnly && hasAnyCarModel && !isIdleShowroom;
     // Keep procedural box meshes (tailLampMeshes & headlightLenses) hidden whenever a 3D car model is attached
     // so they never float in front of or behind the sculpted car bumpers!
     for (const lamp of tailLampMeshes) {
@@ -991,10 +1016,16 @@ export function buildMicroKart() {
     }
   }
 
-  function setIdleShowroomMode(idle) {
+  function setIdleShowroomMode(idle, onTurntable = false) {
     const nextIdle = Boolean(idle);
-    const changed = nextIdle !== isIdleShowroom;
+    const nextTurntable = Boolean(onTurntable);
+    const changed = nextIdle !== isIdleShowroom || nextTurntable !== isOnTurntable;
     isIdleShowroom = nextIdle;
+    isOnTurntable = nextTurntable;
+
+    if (changed) {
+      syncActiveCarVisibility();
+    }
 
     if (nextIdle) {
       for (const pGroup of flameCones) {

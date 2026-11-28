@@ -24,6 +24,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [autoGas, setAutoGas] = useState<boolean>(() => {
     return window.__theRaceEngine?.getAutoGas ? window.__theRaceEngine.getAutoGas() : true;
   });
+  const [showCredits, setShowCredits] = useState<boolean>(false);
 
   const handleSetQuality = (quality: 'performance' | 'ultra') => {
     setVisualQuality(quality);
@@ -212,6 +213,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 Ultra
               </button>
             </div>
+          </div>
+
+          {/* 4. 3D Asset Attribution (CC-BY / CC0 License Compliance) */}
+          <div className="p-2.5 rounded-xl bg-slate-900/90 border border-white/10 flex flex-col gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                window.__theRaceEngine?.playUiClick('click');
+                setShowCredits((prev) => !prev);
+              }}
+              style={{ touchAction: 'manipulation' }}
+              className="flex items-center justify-between w-full text-left cursor-pointer"
+            >
+              <span className="font-['Orbitron'] italic font-bold text-xs text-white uppercase">
+                3D Model Credits
+              </span>
+              <span className="text-[11px] text-cyan-300 font-semibold">
+                {showCredits ? 'Hide ▲' : 'CC-BY / CC0 ▼'}
+              </span>
+            </button>
+            {showCredits && (
+              <div className="text-[10px] leading-relaxed text-slate-400 border-t border-white/10 pt-1.5 space-y-0.5">
+                <p>V12 Goblin — ollitei (CC-BY 4.0, Sketchfab)</p>
+                <p>Apex G82 Adro &amp; Razor F82 — vecarz / kevin (CC-BY 4.0, Sketchfab)</p>
+                <p>Solstice V12 — kevin (CC-BY 4.0, Sketchfab)</p>
+                <p>Valkyr Aero — Res1n (CC-BY 4.0, Sketchfab)</p>
+                <p>HDRI Skies, PBR Asphalt &amp; Props — Poly Haven (CC0)</p>
+              </div>
+            )}
           </div>
         </div>
 

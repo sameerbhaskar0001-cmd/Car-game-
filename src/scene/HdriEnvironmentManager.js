@@ -10,12 +10,18 @@ const HDRI_URLS = {
   coast: '/assets/hdri/coast.hdr',
   city: '/assets/hdri/city.hdr',
   canyon: '/assets/hdri/canyon.hdr',
+  drift: '/assets/hdri/coast.hdr',
+  desert: '/assets/hdri/coast.hdr',
+  forest: '/assets/hdri/canyon.hdr',
 };
 
 const BASE_ENV_INTENSITY = {
   coast: 1.05,
   city: 1.18,
   canyon: 1.02,
+  drift: 1.10,
+  desert: 1.08,
+  forest: 1.04,
 };
 
 export function createHdriEnvironmentManager(renderer, scene, fallbackEnvTex = null) {

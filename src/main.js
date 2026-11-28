@@ -103,9 +103,10 @@ async function initApp() {
     }
   }
 
-  let currentPixelRatio = isSoftwareGl || isScreenshotUrl
+  const garageHdPixelRatio = isSoftwareGl || isScreenshotUrl
     ? 1.0
-    : Math.min(window.devicePixelRatio || 1, 1.35);
+    : Math.min(window.devicePixelRatio || 1, 2.0);
+  let currentPixelRatio = garageHdPixelRatio;
   renderer.setPixelRatio(currentPixelRatio);
   renderer.shadowMap.enabled = !isSoftwareGl;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -346,7 +347,7 @@ async function initApp() {
   // -------------------------------------------------------------------------
   let currentMapId = 'coast';
   let currentWeather = 'dust';
-  let initialSavedKitId = 'ferrari';
+  let initialSavedKitId = 'v12_goblin';
   let initialSavedPaintHex = null;
   try {
     const savedMap = window.localStorage.getItem('the_race_3d_selected_map_v1');
@@ -496,24 +497,29 @@ async function initApp() {
   showroomGroup.add(showroomPlatform);
 
   const pedestalMat = new THREE.MeshStandardMaterial({
-    color: 0x0c101a,
-    roughness: 0.22,
-    metalness: 0.82,
+    color: 0x0d131f,
+    roughness: 0.26,
+    metalness: 0.76,
+    envMapIntensity: 1.15,
   });
   const pedestalBase = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.0155, 0.0178, 0.0022, 64),
+    new THREE.CylinderGeometry(0.0162, 0.0180, 0.0020, 72),
     pedestalMat
   );
-  pedestalBase.position.y = -0.0011;
+  pedestalBase.position.y = -0.0010;
   showroomPlatform.add(pedestalBase);
 
-  const topPlateMat = new THREE.MeshStandardMaterial({
-    color: 0x1a2336,
+  const topPlateMat = new THREE.MeshPhysicalMaterial({
+    color: 0x242f40,
     roughness: 0.22,
-    metalness: 0.62,
+    metalness: 0.38,
+    clearcoat: 0.68,
+    clearcoatRoughness: 0.16,
+    reflectivity: 0.86,
+    envMapIntensity: 1.12,
   });
   const topPlate = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.0138, 0.0142, 0.0005, 64),
+    new THREE.CylinderGeometry(0.0148, 0.0152, 0.0005, 72),
     topPlateMat
   );
   topPlate.position.y = 0.0001;
@@ -521,7 +527,7 @@ async function initApp() {
   pedestalBase.receiveShadow = true;
   showroomPlatform.add(topPlate);
 
-  // Studio Overhead Contact-Shadow Disc under the Car on the Turntable Plate
+  // Studio Overhead Contact-Shadow Disc flush on the Turntable Plate (zero negative polygonOffset bleed!)
   const srShadowCanvas = document.createElement('canvas');
   srShadowCanvas.width = 256;
   srShadowCanvas.height = 256;
@@ -530,93 +536,104 @@ async function initApp() {
     srCtx.clearRect(0, 0, 256, 256);
     srCtx.save();
     srCtx.translate(128, 128);
-    srCtx.scale(0.72, 1.08);
-    const gOuter = srCtx.createRadialGradient(0, 0, 12, 0, 0, 114);
-    gOuter.addColorStop(0.0, 'rgba(0, 0, 0, 0.96)');
-    gOuter.addColorStop(0.45, 'rgba(1, 3, 8, 0.88)');
-    gOuter.addColorStop(0.75, 'rgba(2, 6, 14, 0.45)');
+    srCtx.scale(0.68, 1.04);
+    const gOuter = srCtx.createRadialGradient(0, 0, 12, 0, 0, 110);
+    gOuter.addColorStop(0.0, 'rgba(0, 0, 0, 0.94)');
+    gOuter.addColorStop(0.45, 'rgba(1, 3, 8, 0.82)');
+    gOuter.addColorStop(0.75, 'rgba(2, 6, 14, 0.36)');
     gOuter.addColorStop(1.0, 'rgba(2, 6, 14, 0.0)');
     srCtx.fillStyle = gOuter;
     srCtx.beginPath();
-    srCtx.arc(0, 0, 114, 0, Math.PI * 2);
+    srCtx.arc(0, 0, 110, 0, Math.PI * 2);
     srCtx.fill();
     srCtx.restore();
   }
   const srShadowTex = new THREE.CanvasTexture(srShadowCanvas);
   const showroomCarShadowDisc = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.022, 0.026),
+    new THREE.PlaneGeometry(0.020, 0.0245),
     new THREE.MeshBasicMaterial({
       map: srShadowTex,
       transparent: true,
-      opacity: 0.95,
+      opacity: 0.88,
       depthWrite: false,
-      polygonOffset: true,
-      polygonOffsetFactor: -6,
-      polygonOffsetUnits: -6,
+      polygonOffset: false,
     })
   );
   showroomCarShadowDisc.rotation.x = -Math.PI / 2;
-  showroomCarShadowDisc.position.set(0, 0.00042, 0);
+  showroomCarShadowDisc.position.set(0, 0.000352, 0);
   showroomGroup.add(showroomCarShadowDisc);
 
-  // Outer Glowing Cyan Neon Ring (toneMapped so it stays razor-sharp without white bloom washout)
+  // Brushed Titanium Beveled Plinth Rim (luxury minimalist museum showroom look)
+  const brushedBevelMat = new THREE.MeshStandardMaterial({
+    color: 0x334155,
+    roughness: 0.20,
+    metalness: 0.92,
+    envMapIntensity: 1.4,
+  });
+  const bevelRing = new THREE.Mesh(
+    new THREE.TorusGeometry(0.0151, 0.00028, 16, 80),
+    brushedBevelMat
+  );
+  bevelRing.rotation.x = Math.PI / 2;
+  bevelRing.position.y = 0.00026;
+  showroomPlatform.add(bevelRing);
+
+  // Razor-thin Recessed Ice-White / Platinum Underglow Rim (no thick toy cyan/yellow rings!)
   const outerRingMat = new THREE.MeshStandardMaterial({
-    color: 0x06b6d4,
-    emissive: new THREE.Color(0x00d4f0),
-    emissiveIntensity: 0.92,
-    roughness: 0.16,
-    metalness: 0.2,
+    color: 0xe0f2fe,
+    emissive: new THREE.Color(0x38bdf8),
+    emissiveIntensity: 0.78,
+    roughness: 0.14,
+    metalness: 0.25,
     toneMapped: true,
   });
   const outerNeonRing = new THREE.Mesh(
-    new THREE.TorusGeometry(0.0156, 0.00034, 16, 72),
+    new THREE.TorusGeometry(0.0159, 0.00014, 14, 80),
     outerRingMat
   );
   outerNeonRing.rotation.x = Math.PI / 2;
-  outerNeonRing.position.y = 0.00015;
+  outerNeonRing.position.y = -0.00185;
   showroomPlatform.add(outerNeonRing);
 
-  // Inner Glowing Amber/Gold Accent Ring
-  const innerRingMat = new THREE.MeshStandardMaterial({
-    color: 0xf59e0b,
-    emissive: new THREE.Color(0xf59e0b),
-    emissiveIntensity: 0.82,
-    roughness: 0.18,
-    metalness: 0.3,
-    toneMapped: true,
+  // Subtle recessed metallic compass hairline ring inside top plate so rotation reads cleanly
+  const innerHairlineMat = new THREE.MeshStandardMaterial({
+    color: 0x1e293b,
+    roughness: 0.24,
+    metalness: 0.85,
+    envMapIntensity: 1.15,
   });
   const innerNeonRing = new THREE.Mesh(
-    new THREE.TorusGeometry(0.0114, 0.00022, 16, 64),
-    innerRingMat
+    new THREE.TorusGeometry(0.0124, 0.00008, 12, 72),
+    innerHairlineMat
   );
   innerNeonRing.rotation.x = Math.PI / 2;
-  innerNeonRing.position.y = 0.00036;
+  innerNeonRing.position.y = 0.00031;
   showroomPlatform.add(innerNeonRing);
 
-  // 12 radial tick bars on the turntable surface so rotation is visually unmistakable
-  for (let i = 0; i < 12; i++) {
-    const angle = (i / 12) * Math.PI * 2;
+  // 4 subtle machined titanium index markers on the plinth edge (minimalist, refined)
+  for (let i = 0; i < 4; i++) {
+    const angle = (i / 4) * Math.PI * 2;
     const tick = new THREE.Mesh(
-      new THREE.BoxGeometry(0.00045, 0.00018, 0.0024),
-      i % 2 === 0 ? outerRingMat : innerRingMat
+      new THREE.BoxGeometry(0.00032, 0.00012, 0.0014),
+      brushedBevelMat
     );
     tick.position.set(
-      Math.sin(angle) * 0.0132,
+      Math.sin(angle) * 0.0138,
       0.00038,
-      Math.cos(angle) * 0.0132
+      Math.cos(angle) * 0.0138
     );
     tick.rotation.y = angle;
     showroomPlatform.add(tick);
   }
 
-  // Dedicated 3-Point Showroom Studio Lighting Rig + Overhead Spotlight aimed directly at the car
+  // Dedicated 4-Point Automotive Photography Studio Lighting Rig aimed directly at the supercar
   const showroomLightTarget = new THREE.Object3D();
-  showroomLightTarget.position.set(0.0, 0.0025, 0.0);
+  showroomLightTarget.position.set(0.0, 0.0028, 0.0);
   showroomGroup.add(showroomLightTarget);
 
-  // 1. Direct Overhead Studio Directional Light + Crisp Contact Shadow Mapping
-  const showroomOverheadDirLight = new THREE.DirectionalLight(0xffffff, 0.26);
-  showroomOverheadDirLight.position.set(0.0, 0.095, 0.002);
+  // 1. Direct Overhead Studio Softbox Directional Light + Crisp Contact Shadow Mapping
+  const showroomOverheadDirLight = new THREE.DirectionalLight(0xf8fafc, 0.84);
+  showroomOverheadDirLight.position.set(0.0, 0.095, 0.008);
   showroomOverheadDirLight.target = showroomLightTarget;
   showroomOverheadDirLight.castShadow = true;
   showroomOverheadDirLight.shadow.mapSize.set(1024, 1024);
@@ -630,31 +647,31 @@ async function initApp() {
   showroomOverheadDirLight.shadow.normalBias = 0.0008;
   showroomGroup.add(showroomOverheadDirLight);
 
-  // 2. Front-Right Warm Key Light (sculpts 3D hood bevels & side character lines)
-  const showroomKeyLight = new THREE.DirectionalLight(0xfff7ed, 0.46);
-  showroomKeyLight.position.set(0.024, 0.036, 0.032);
+  // 2. Front-Right Sculpting Key Light (sharp crisp studio highlights without overexposing!)
+  const showroomKeyLight = new THREE.DirectionalLight(0xfffaf2, 1.06);
+  showroomKeyLight.position.set(0.028, 0.030, 0.034);
   showroomKeyLight.target = showroomLightTarget;
   showroomGroup.add(showroomKeyLight);
 
-  // 3. Front-Left Cool Sky Fill Light (shadow side stays deeply 3D)
-  const showroomFillLight = new THREE.DirectionalLight(0x93c5fd, 0.16);
-  showroomFillLight.position.set(-0.026, 0.024, 0.026);
+  // 3. Front-Left Cool Architectural Fill Light (rich contrast on side panels & brake calipers)
+  const showroomFillLight = new THREE.DirectionalLight(0xbce0ff, 0.46);
+  showroomFillLight.position.set(-0.030, 0.022, 0.028);
   showroomFillLight.target = showroomLightTarget;
   showroomGroup.add(showroomFillLight);
 
-  // 4. Rear-Top Golden Rim Backlight (crisp edge silhouette along roofline & rear spoiler)
-  const showroomRimLight = new THREE.DirectionalLight(0xfde68a, 0.24);
-  showroomRimLight.position.set(0.0, 0.032, -0.030);
+  // 4. Rear-Top Studio Backlight (razor-sharp roofline, rear wing & fender rim separation)
+  const showroomRimLight = new THREE.DirectionalLight(0xe2e8f0, 0.86);
+  showroomRimLight.position.set(-0.010, 0.032, -0.032);
   showroomRimLight.target = showroomLightTarget;
   showroomGroup.add(showroomRimLight);
 
-  // 5. Subtle Cyan Bounce Light from glowing turntable ring (kept low so it never washes out front grille)
-  const showroomUnderFill = new THREE.PointLight(0x38bdf8, 0.025, 0.05, 1.6);
-  showroomUnderFill.position.set(0.0, 0.0045, 0.018);
+  // 5. Subtle Studio Plinth Bounce Light (reveals lower carbon splitter & wheel spokes)
+  const showroomUnderFill = new THREE.PointLight(0xdbeafe, 0.055, 0.058, 1.4);
+  showroomUnderFill.position.set(0.0, 0.0044, 0.020);
   showroomGroup.add(showroomUnderFill);
 
   let currentAppScreen = 'SPLASH';
-  let turntableAngle = 0.45;
+  let turntableAngle = 0.62;
   let manualTurntableCooldown = 0.0;
   const telemetryListeners = new Set();
   const raceFinishListeners = new Set();
@@ -1834,18 +1851,25 @@ async function initApp() {
       const followDist = chaseFollowDistSmooth;
       const camLift = 0.0044 + portraitLift;
 
-      // Dynamic Corner & Drift Lateral Swing:
+      // Dynamic Corner & Drift Lateral Swing (punchy Asphalt 9 wide slide framing)
       const camSwingLat = THREE.MathUtils.clamp(
-        (st.driftAngle || 0.0) * 0.0042 - (st.steerSmooth || 0.0) * 0.0011,
-        -0.0034,
-        0.0034
+        (st.driftAngle || 0.0) * 0.0054 - (st.steerSmooth || 0.0) * 0.0014,
+        -0.0042,
+        0.0042
       );
+
+      // Subtle High-Speed Asphalt Micro-Vibration above ~180 km/h for raw speed feel
+      const highSpeedRatio = THREE.MathUtils.clamp((speedNorm - 0.62) / 0.38, 0.0, 1.0);
+      const vibAmp = (highSpeedRatio * 0.00014 + (isShockwaveNow ? 0.00018 : isBoostingNow ? 0.00009 : 0.0)) * (st.hopHeight > 0.0006 ? 0.15 : 1.0);
+      const vibT = performance.now() * 0.045;
+      const roadVibRight = vibAmp > 0 ? Math.sin(vibT * 1.7) * vibAmp : 0.0;
+      const roadVibUp = vibAmp > 0 ? Math.cos(vibT * 2.3) * vibAmp * 0.75 : 0.0;
 
       _camDesiredPos
         .copy(st.position)
         .addScaledVector(camForward, -followDist)
-        .addScaledVector(st.right, camSwingLat)
-        .addScaledVector(st.normal, camLift);
+        .addScaledVector(st.right, camSwingLat + roadVibRight)
+        .addScaledVector(st.normal, camLift + roadVibUp);
       if (totalShakeRight !== 0.0 || totalShakeUp !== 0.0) {
         _camDesiredPos
           .addScaledVector(st.right, totalShakeRight * 0.35)
@@ -1899,26 +1923,26 @@ async function initApp() {
           .addScaledVector(st.normal, speedShakeUp);
       }
 
-      // Smooth Dynamic FOV Sense of Speed: resting 60° -> ~74° at top speed -> ~78° during Nitro/Shockwave
-      const speedFovGain = THREE.MathUtils.clamp(Math.pow(speedNorm, 1.15) * 12.8, 0.0, 14.0);
-      const boostFovBonus = isShockwaveNow ? 4.2 : isBoostingNow ? 2.8 : 0.0;
-      const driftFovBonus = st.isDrifting ? 1.4 : 0.0;
-      const brakeFovTrim = isBrakingNow && !isBoostingNow ? -1.5 : 0.0;
+      // Asphalt 9 Dynamic Speed FOV Punch: tight 56° launch -> 72° top speed -> 79° Nitro/Shockwave warp!
+      const speedFovGain = THREE.MathUtils.clamp(Math.pow(speedNorm, 1.08) * 16.0, 0.0, 16.5);
+      const boostFovBonus = isShockwaveNow ? 6.8 : isBoostingNow ? 4.4 : 0.0;
+      const driftFovBonus = st.isDrifting ? 1.8 : 0.0;
+      const brakeFovTrim = isBrakingNow && !isBoostingNow ? -2.2 : 0.0;
       const targetArcadeFov = THREE.MathUtils.clamp(
-        60.0 + speedFovGain + boostFovBonus + driftFovBonus + brakeFovTrim,
-        58.5,
-        78.0
+        56.0 + speedFovGain + boostFovBonus + driftFovBonus + brakeFovTrim,
+        54.0,
+        79.5
       );
       if (Math.abs(camera.fov - targetArcadeFov) > 0.05) {
-        camera.fov = THREE.MathUtils.lerp(camera.fov, targetArcadeFov, 1.0 - Math.exp(-dt * 8.0));
+        camera.fov = THREE.MathUtils.lerp(camera.fov, targetArcadeFov, 1.0 - Math.exp(-dt * 8.5));
         camera.updateProjectionMatrix();
       }
 
-      // Subtle Horizon Roll / Lean into high-speed turns & power slides
+      // Dynamic Horizon Roll / Lean into high-speed turns & power slides
       const camBankRoll = THREE.MathUtils.clamp(
-        -(st.steerSmooth || 0.0) * 0.028 + (st.driftAngle || 0.0) * 0.042,
-        -0.052,
-        0.052
+        -(st.steerSmooth || 0.0) * 0.036 + (st.driftAngle || 0.0) * 0.056,
+        -0.068,
+        0.068
       );
       const smoothUp = isScreenshotMode ? 1.0 : 1.0 - Math.exp(-dt * 12.0);
       _camBlendedUp
@@ -3802,8 +3826,9 @@ async function initApp() {
         settings.visualQuality = newSettings.visualQuality;
         const targetDpr =
           newSettings.visualQuality === 'ultra'
-            ? Math.min(window.devicePixelRatio || 1, 2.0)
-            : Math.min(window.devicePixelRatio || 1, 1.35);
+            ? Math.min(window.devicePixelRatio || 1, 2.25)
+            : Math.min(window.devicePixelRatio || 1, 1.75);
+        currentPixelRatio = targetDpr;
         renderer.setPixelRatio(targetDpr);
       }
       if (typeof newSettings.bloomStrength === 'number') {
@@ -3891,10 +3916,15 @@ async function initApp() {
         currentAppScreen === 'MISSIONS');
 
     if (isGarageMode) {
-      // GARAGE BACKGROUND: Indoor Automotive Pit-Lane Workshop Bay & Spinning Turntable
-      scene.environmentIntensity = 0.28;
-      bloomPass.threshold = 1.35;
-      bloomPass.strength = Math.min(settings.bloomStrength ?? 0.02, 0.02);
+      // GARAGE BACKGROUND: Asphalt 9 / Legends Unite Backlit Hexagon Studio Showroom
+      // Always lock full HD DPR in Garage so every supercar looks tack-sharp!
+      if (!isSoftwareGl && currentPixelRatio < garageHdPixelRatio) {
+        currentPixelRatio = garageHdPixelRatio;
+        renderer.setPixelRatio(currentPixelRatio);
+      }
+      scene.environmentIntensity = 0.98;
+      bloomPass.threshold = 1.25;
+      bloomPass.strength = Math.min(settings.bloomStrength ?? 0.03, 0.03);
       showroomGroup.visible = true;
       pitGarage.rootGroup.visible = true;
       if (activeWorldMap) activeWorldMap.rootGroup.visible = false;
@@ -3905,7 +3935,7 @@ async function initApp() {
       if (manualTurntableCooldown > 0) {
         manualTurntableCooldown = Math.max(0.0, manualTurntableCooldown - dt);
       } else {
-        turntableAngle += dt * 0.58;
+        turntableAngle += dt * 0.36;
       }
       showroomPlatform.rotation.y = turntableAngle;
       showroomCarShadowDisc.rotation.z = -(turntableAngle + Math.PI * 0.22);
@@ -3915,31 +3945,32 @@ async function initApp() {
       }
       const bounceOffset = Math.sin(showroomPreviewBounce * Math.PI) * 0.0012;
 
-      if (microKart.setIdleShowroomMode) microKart.setIdleShowroomMode(true);
+      if (microKart.setIdleShowroomMode) microKart.setIdleShowroomMode(true, true);
       microKart.setCockpitRoadOnly(false);
-      microKart.kartRoot.scale.setScalar(0.94);
-      microKart.kartRoot.position.set(0.0, 0.0884 + bounceOffset, 0.22);
+      microKart.kartRoot.scale.setScalar(0.98);
+      microKart.kartRoot.position.set(0.0, 0.088358 + bounceOffset, 0.22);
       microKart.kartRoot.rotation.set(0, turntableAngle + Math.PI * 0.22, 0);
       microKart.chassisGroup.rotation.set(0, 0, 0);
-      microKart.chassisGroup.position.y = Math.sin(elapsedTime * 2.5) * 0.00012;
-      microKart.updateWheels(dt, 0.0, Math.sin(elapsedTime * 1.1) * 0.16);
+      microKart.chassisGroup.position.y = 0.0;
+      microKart.updateWheels(dt, 0.0, Math.sin(elapsedTime * 0.95) * 0.14);
       if (microKart.sparkPoints) microKart.sparkPoints.visible = false;
       if (microKart.driftSmokeMesh) microKart.driftSmokeMesh.visible = false;
 
       orbitControls.enabled = false;
       const isPortraitScreen = camera.aspect < 0.95;
-      const targetGarageFov = isPortraitScreen ? 48.0 : 44.0;
+      // Crisp Telephoto Automotive Studio Framing (zero wide-angle distortion + lifts full car & tires cleanly above bottom dock!)
+      const targetGarageFov = isPortraitScreen ? 38.0 : 35.5;
       if (Math.abs(camera.fov - targetGarageFov) > 0.2) {
         camera.fov = targetGarageFov;
         camera.updateProjectionMatrix();
       }
       if (isPortraitScreen) {
         const portraitPull = THREE.MathUtils.clamp((0.95 - camera.aspect) / 0.55, 0.0, 1.0);
-        _showroomCamTarget.set(0.0, 0.0972, 0.262 + portraitPull * 0.024);
-        _showroomLookTarget.set(0.0, 0.0868, 0.220);
+        _showroomCamTarget.set(0.0, 0.0946, 0.252 + portraitPull * 0.016);
+        _showroomLookTarget.set(0.0, 0.0882, 0.220);
       } else {
-        _showroomCamTarget.set(0.0, 0.0968, 0.252);
-        _showroomLookTarget.set(0.0, 0.0874, 0.220);
+        _showroomCamTarget.set(0.0, 0.0940, 0.251);
+        _showroomLookTarget.set(0.0, 0.0870, 0.220);
       }
 
       if (lastStageMode !== 'GARAGE') {
@@ -3997,13 +4028,13 @@ async function initApp() {
       const bounceOffset = Math.sin(showroomPreviewBounce * Math.PI) * 0.0008;
 
       const stHome = physics.state;
-      if (microKart.setIdleShowroomMode) microKart.setIdleShowroomMode(true);
+      if (microKart.setIdleShowroomMode) microKart.setIdleShowroomMode(true, false);
       microKart.setCockpitRoadOnly(false);
       microKart.kartRoot.scale.setScalar(0.49);
       microKart.kartRoot.position.copy(stHome.position).addScaledVector(stHome.normal, bounceOffset);
       microKart.kartRoot.quaternion.copy(stHome.quaternion);
       microKart.chassisGroup.rotation.set(0, 0, 0);
-      microKart.chassisGroup.position.y = Math.sin(elapsedTime * 2.2) * 0.00005;
+      microKart.chassisGroup.position.y = 0.0;
       microKart.updateWheels(dt, 0.0, 0.0);
       if (microKart.sparkPoints) microKart.sparkPoints.visible = false;
       if (microKart.driftSmokeMesh) microKart.driftSmokeMesh.visible = false;
@@ -4603,7 +4634,7 @@ async function initApp() {
     renderer.info.autoReset = false;
     renderer.info.reset();
     const usePostComposer =
-      !isSoftwareGl && (bokehPass.enabled || (settings.bloomStrength ?? 0) > 0.12);
+      !isSoftwareGl && !isGarageMode && (bokehPass.enabled || (settings.bloomStrength ?? 0) > 0.12);
     if (usePostComposer) {
       composer.render();
     } else {
@@ -4618,17 +4649,20 @@ async function initApp() {
       }
     }
 
-    // Adaptive FPS Watchdog: protects low-end phones from WebGL crashes / thermal throttling
-    if (!isSoftwareGl && !isScreenshotMode) {
+    // Adaptive FPS Watchdog: protects low-end phones during heavy races WITHOUT ever blurring the Garage or dropping below 1.25x HD!
+    if (!isSoftwareGl && !isScreenshotMode && !isGarageMode) {
       const renderMs = performance.now() - frameStartMs;
-      watchdogSamples += 1;
-      watchdogAccumMs += renderMs;
-      if (watchdogSamples >= 60) {
+      // Ignore one-off asset decode spikes (> 120ms) so switching cars/tracks never triggers a false downgrade
+      if (renderMs < 120) {
+        watchdogSamples += 1;
+        watchdogAccumMs += renderMs;
+      }
+      if (watchdogSamples >= 90) {
         const avgMs = watchdogAccumMs / watchdogSamples;
-        if (avgMs > 26 && currentPixelRatio > 0.9) {
-          currentPixelRatio = Math.max(0.85, Number((currentPixelRatio - 0.2).toFixed(2)));
+        if (avgMs > 34 && currentPixelRatio > 1.25) {
+          currentPixelRatio = Math.max(1.25, Number((currentPixelRatio - 0.15).toFixed(2)));
           renderer.setPixelRatio(currentPixelRatio);
-          if (currentPixelRatio <= 1.0 && !gpuLowPowerTier) {
+          if (currentPixelRatio <= 1.25 && !gpuLowPowerTier) {
             gpuLowPowerTier = true;
             renderer.shadowMap.enabled = false;
             if (activeWorldMap && activeWorldMap.setDetailLevel) {

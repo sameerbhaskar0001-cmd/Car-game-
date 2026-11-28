@@ -27,22 +27,88 @@ export function createVFXManager(scene) {
   const _color = new THREE.Color();
 
   // =========================================================================
-  // 1. DRIFT TIRE SMOKE POOL (InstancedMesh with per-instance alpha fading)
+  // 1. SOFT BILLOWY DRIFT TIRE SMOKE & RAIN MIST POOL (GPU Points Shader, 120 puffs)
+  //    Replaces hard-edged low-poly icosahedrons so tire smoke & wet road spray
+  //    render as silky organic clouds with ZERO flat grey polygon edges!
   // =========================================================================
-  const MAX_SMOKE = 96;
-  const smokeGeo = new THREE.IcosahedronGeometry(0.00105, 1);
+  const MAX_SMOKE = 120;
+  const smokePosArr = new Float32Array(MAX_SMOKE * 3);
   const smokeAlphaArr = new Float32Array(MAX_SMOKE);
-  const smokeAlphaAttr = new THREE.InstancedBufferAttribute(smokeAlphaArr, 1);
-  smokeAlphaAttr.setUsage(THREE.DynamicDrawUsage);
-  smokeGeo.setAttribute('aInstanceAlpha', smokeAlphaAttr);
+  const smokeSizeArr = new Float32Array(MAX_SMOKE);
+  const smokePhaseArr = new Float32Array(MAX_SMOKE);
 
-  const smokeMat = new THREE.MeshBasicMaterial({
-    color: 0xe2e8f0,
+  const smokeGeo = new THREE.BufferGeometry();
+  const smokePosAttr = new THREE.BufferAttribute(smokePosArr, 3);
+  const smokeAlphaAttr = new THREE.BufferAttribute(smokeAlphaArr, 1);
+  const smokeSizeAttr = new THREE.BufferAttribute(smokeSizeArr, 1);
+  const smokePhaseAttr = new THREE.BufferAttribute(smokePhaseArr, 1);
+  smokePosAttr.setUsage(THREE.DynamicDrawUsage);
+  smokeAlphaAttr.setUsage(THREE.DynamicDrawUsage);
+  smokeSizeAttr.setUsage(THREE.DynamicDrawUsage);
+  smokeGeo.setAttribute('position', smokePosAttr);
+  smokeGeo.setAttribute('aAlpha', smokeAlphaAttr);
+  smokeGeo.setAttribute('aSize', smokeSizeAttr);
+  smokeGeo.setAttribute('aPhase', smokePhaseAttr);
+
+  const smokeUniforms = {
+    uPixelRatio: { value: Math.min(window.devicePixelRatio || 1, 2.0) },
+    uSmokeColor: { value: new THREE.Color(0xdbe6f4) },
+  };
+
+  const smokeMat = new THREE.ShaderMaterial({
+    uniforms: smokeUniforms,
     transparent: true,
-    opacity: 1.0,
     depthWrite: false,
+    blending: THREE.NormalBlending,
+    vertexShader: /* glsl */ `
+      attribute float aAlpha;
+      attribute float aSize;
+      attribute float aPhase;
+      uniform float uPixelRatio;
+      varying float vAlpha;
+      varying float vPhase;
+
+      void main() {
+        vAlpha = aAlpha;
+        vPhase = aPhase;
+        if (aAlpha <= 0.002) {
+          gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+          gl_PointSize = 0.0;
+          return;
+        }
+        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        float viewDist = max(0.003, -mvPosition.z);
+        float nearFade = smoothstep(0.0035, 0.011, viewDist);
+        vAlpha = aAlpha * nearFade;
+        gl_Position = projectionMatrix * mvPosition;
+        gl_PointSize = clamp((aSize * 0.42 * uPixelRatio) / max(0.007, viewDist), 2.0, 44.0 * uPixelRatio);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uSmokeColor;
+      varying float vAlpha;
+      varying float vPhase;
+
+      void main() {
+        if (vAlpha <= 0.002) discard;
+        vec2 uv = gl_PointCoord - vec2(0.5);
+        float c = cos(vPhase);
+        float s = sin(vPhase);
+        vec2 ruv = vec2(uv.x * c - uv.y * s, uv.x * s + uv.y * c);
+        // Dual offset soft cloud lobes for organic wispy tire smoke / water mist
+        float d1 = length(ruv - vec2(0.06, 0.03));
+        float d2 = length(ruv + vec2(0.07, -0.04));
+        float wisp = max(smoothstep(0.46, 0.05, d1), smoothstep(0.42, 0.06, d2) * 0.85);
+        float soft = pow(wisp, 2.1);
+        float alpha = soft * vAlpha;
+        if (alpha < 0.004) discard;
+        gl_FragColor = vec4(uSmokeColor, alpha);
+      }
+    `,
   });
-  smokeMat.onBeforeCompile = (shader) => {
+
+  // Shared lightweight instanced-alpha hook for skid marks & sparks below
+  const applyInstancedAlphaShader = (shader) => {
     shader.vertexShader = shader.vertexShader.replace(
       '#include <common>',
       `#include <common>
@@ -66,11 +132,10 @@ export function createVFXManager(scene) {
       #include <dithering_fragment>`
     );
   };
-  smokeMat.customProgramCacheKey = () => 'vfx-instanced-alpha-v1';
 
-  const smokeMesh = new THREE.InstancedMesh(smokeGeo, smokeMat, MAX_SMOKE);
-  smokeMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  const smokeMesh = new THREE.Points(smokeGeo, smokeMat);
   smokeMesh.frustumCulled = false;
+  smokeMesh.renderOrder = 11;
   smokeMesh.name = 'VFXDriftSmokePool';
   rootGroup.add(smokeMesh);
 
@@ -83,6 +148,7 @@ export function createVFXManager(scene) {
   const smokeAge = new Float32Array(MAX_SMOKE);
   const smokeMaxAge = new Float32Array(MAX_SMOKE);
   const smokeStartScale = new Float32Array(MAX_SMOKE);
+  const smokePeakAlpha = new Float32Array(MAX_SMOKE);
   let smokeCursor = 0;
   let smokeEmitAccum = 0;
 
@@ -90,15 +156,16 @@ export function createVFXManager(scene) {
     smokeAge[i] = 999.0;
     smokeMaxAge[i] = 0.55;
     smokeAlphaArr[i] = 0.0;
-    _dummy.position.set(0, -20, 0);
-    _dummy.scale.setScalar(0.0001);
-    _dummy.updateMatrix();
-    smokeMesh.setMatrixAt(i, _dummy.matrix);
+    smokeSizeArr[i] = 0.0;
+    smokePhaseArr[i] = Math.random() * Math.PI * 2.0;
+    smokePosArr[i * 3 + 1] = -20.0;
   }
-  smokeMesh.instanceMatrix.needsUpdate = true;
+  smokePosAttr.needsUpdate = true;
   smokeAlphaAttr.needsUpdate = true;
+  smokeSizeAttr.needsUpdate = true;
+  smokePhaseAttr.needsUpdate = true;
 
-  function spawnSmokePuff(wx, wy, wz, vx, vy, vz, baseScale = 1.0) {
+  function spawnSmokePuff(wx, wy, wz, vx, vy, vz, baseScale = 1.0, peakAlpha = 0.24) {
     const idx = smokeCursor;
     smokeCursor = (smokeCursor + 1) % MAX_SMOKE;
     smokePosX[idx] = wx;
@@ -108,9 +175,15 @@ export function createVFXManager(scene) {
     smokeVelY[idx] = vy;
     smokeVelZ[idx] = vz;
     smokeAge[idx] = 0.0;
-    smokeMaxAge[idx] = 0.44 + Math.random() * 0.22;
-    smokeStartScale[idx] = baseScale * (0.72 + Math.random() * 0.36);
-    smokeAlphaArr[idx] = 0.46;
+    smokeMaxAge[idx] = 0.42 + Math.random() * 0.24;
+    smokeStartScale[idx] = baseScale * (0.75 + Math.random() * 0.45);
+    smokePeakAlpha[idx] = peakAlpha;
+    smokePhaseArr[idx] = Math.random() * Math.PI * 2.0;
+    smokePosArr[idx * 3 + 0] = wx;
+    smokePosArr[idx * 3 + 1] = wy;
+    smokePosArr[idx * 3 + 2] = wz;
+    smokeAlphaArr[idx] = peakAlpha;
+    smokeSizeArr[idx] = smokeStartScale[idx] * 0.65;
   }
 
   // =========================================================================
@@ -135,7 +208,7 @@ export function createVFXManager(scene) {
     polygonOffsetFactor: -4,
     polygonOffsetUnits: -4,
   });
-  skidMat.onBeforeCompile = smokeMat.onBeforeCompile;
+  skidMat.onBeforeCompile = applyInstancedAlphaShader;
   skidMat.customProgramCacheKey = () => 'vfx-instanced-alpha-v1';
 
   const skidMesh = new THREE.InstancedMesh(skidGeo, skidMat, MAX_SKIDS);
@@ -213,7 +286,7 @@ export function createVFXManager(scene) {
     depthWrite: false,
     toneMapped: false,
   });
-  sparkMat.onBeforeCompile = smokeMat.onBeforeCompile;
+  sparkMat.onBeforeCompile = applyInstancedAlphaShader;
   sparkMat.customProgramCacheKey = () => 'vfx-instanced-alpha-v1';
 
   const sparkMesh = new THREE.InstancedMesh(sparkGeo, sparkMat, MAX_SPARKS);
@@ -512,7 +585,7 @@ export function createVFXManager(scene) {
     }
 
     // ---------------------------------------------------------------------
-    // C. Step Pooled Drift Smoke Puffs (Expand & Fade Smoothly)
+    // C. Step Pooled Soft-Cloud Smoke & Rain Mist Puffs (GPU Points Shader)
     // ---------------------------------------------------------------------
     let anySmokeDirty = false;
     for (let i = 0; i < MAX_SMOKE; i++) {
@@ -526,31 +599,32 @@ export function createVFXManager(scene) {
         smokePosY[i] += smokeVelY[i] * clampedDt;
         smokePosZ[i] += smokeVelZ[i] * clampedDt;
 
-        const damp = Math.exp(-3.5 * clampedDt);
+        const damp = Math.exp(-3.4 * clampedDt);
         smokeVelX[i] *= damp;
-        smokeVelY[i] = smokeVelY[i] * damp + 0.010 * clampedDt;
+        smokeVelY[i] = smokeVelY[i] * damp + 0.011 * clampedDt;
         smokeVelZ[i] *= damp;
 
-        const scaleNow = smokeStartScale[i] * (0.65 + t * 1.85);
-        smokeAlphaArr[i] = 0.16 * (1.0 - t) * (1.0 - t * 0.45);
-
-        _dummy.position.set(smokePosX[i], smokePosY[i], smokePosZ[i]);
-        _dummy.rotation.set(t * 1.4, t * 2.1, 0);
-        _dummy.scale.set(scaleNow * 1.25, scaleNow * 0.55, scaleNow * 1.25);
-        _dummy.updateMatrix();
-        smokeMesh.setMatrixAt(i, _dummy.matrix);
+        const scaleNow = smokeStartScale[i] * (0.65 + t * 2.15);
+        const fadeIn = Math.min(1.0, t * 5.0);
+        const fadeOut = (1.0 - t) * (1.0 - t * 0.45);
+        smokeAlphaArr[i] = smokePeakAlpha[i] * fadeIn * fadeOut;
+        smokeSizeArr[i] = scaleNow;
+        smokePosArr[i * 3 + 0] = smokePosX[i];
+        smokePosArr[i * 3 + 1] = smokePosY[i];
+        smokePosArr[i * 3 + 2] = smokePosZ[i];
       } else if (smokeAlphaArr[i] > 0.0) {
         anySmokeDirty = true;
         smokeAlphaArr[i] = 0.0;
-        _dummy.position.set(0, -20, 0);
-        _dummy.scale.setScalar(0.0001);
-        _dummy.updateMatrix();
-        smokeMesh.setMatrixAt(i, _dummy.matrix);
+        smokeSizeArr[i] = 0.0;
+        smokePosArr[i * 3 + 1] = -20.0;
       }
     }
     if (anySmokeDirty) {
-      smokeMesh.instanceMatrix.needsUpdate = true;
+      smokeUniforms.uPixelRatio.value = Math.min(window.devicePixelRatio || 1, 2.0);
+      smokePosAttr.needsUpdate = true;
       smokeAlphaAttr.needsUpdate = true;
+      smokeSizeAttr.needsUpdate = true;
+      smokePhaseAttr.needsUpdate = true;
     }
 
     // ---------------------------------------------------------------------
@@ -745,13 +819,12 @@ export function createVFXManager(scene) {
     for (let i = 0; i < MAX_SMOKE; i++) {
       smokeAge[i] = 999.0;
       smokeAlphaArr[i] = 0.0;
-      _dummy.position.set(0, -20, 0);
-      _dummy.scale.setScalar(0.0001);
-      _dummy.updateMatrix();
-      smokeMesh.setMatrixAt(i, _dummy.matrix);
+      smokeSizeArr[i] = 0.0;
+      smokePosArr[i * 3 + 1] = -20.0;
     }
-    smokeMesh.instanceMatrix.needsUpdate = true;
+    smokePosAttr.needsUpdate = true;
     smokeAlphaAttr.needsUpdate = true;
+    smokeSizeAttr.needsUpdate = true;
 
     for (let i = 0; i < MAX_SKIDS; i++) {
       skidActive[i] = 0;

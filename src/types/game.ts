@@ -11,7 +11,7 @@ export type GameState =
   | 'RACE'
   | 'GAMEOVER';
 
-export type MapId = 'coast' | 'city' | 'canyon';
+export type MapId = 'coast' | 'city' | 'canyon' | 'drift' | 'desert' | 'forest';
 
 export type RaceModeId = 'circuit' | 'elimination' | 'drift' | 'time_attack';
 
@@ -83,15 +83,15 @@ export interface MapSpec {
   description: string;
 }
 
-export const MAP_ORDER: MapId[] = ['coast', 'city', 'canyon'];
+export const MAP_ORDER: MapId[] = ['coast', 'city', 'canyon', 'drift', 'desert', 'forest'];
 
 export const MAP_SPECS: MapSpec[] = [
   {
     id: 'coast',
-    name: 'SUNSET COAST',
-    shortName: 'COAST',
-    subtitle: 'Coastal Asphalt Circuit',
-    environmentTag: 'Asphalt · Banked · Palms',
+    name: 'AMALFI RIVIERA',
+    shortName: 'RIVIERA',
+    subtitle: 'Mediterranean Cliff & Bay Circuit',
+    environmentTag: 'Coastal Tarmac · 3D Cliffs · Harbor',
     lengthLabel: '1.49 KM',
     laps: 3,
     goldTargetSec: 58,
@@ -102,14 +102,14 @@ export const MAP_SPECS: MapSpec[] = [
     fogHex: '#2a2438',
     fogDensity: 0.32,
     previewImage: circuitSunsetCoastImg,
-    description: 'Golden-hour wide coastal asphalt circuit with banked turns, elevation climbs, and sunlit ocean curbs.',
+    description: 'Golden-hour coastal headland circuit flanked by 3D photogrammetry sea cliffs, lush forest groves, and harbor yachts.',
   },
   {
     id: 'city',
-    name: 'NEON CITY',
-    shortName: 'CITY',
-    subtitle: 'Midnight Street Circuit',
-    environmentTag: 'Wet Asphalt · Skyline · Night',
+    name: 'SHIBUYA METROPOLIS',
+    shortName: 'SHIBUYA',
+    subtitle: 'Midnight Cyber Expressway',
+    environmentTag: 'Wet Asphalt · 3D Skyline · Night',
     lengthLabel: '1.49 KM',
     laps: 3,
     goldTargetSec: 56,
@@ -120,14 +120,14 @@ export const MAP_SPECS: MapSpec[] = [
     fogHex: '#080d1d',
     fogDensity: 0.36,
     previewImage: circuitNeonCityImg,
-    description: 'High-speed midnight circuit with glossy wet-asphalt reflections, glowing skyscrapers, and neon barriers.',
+    description: 'High-speed midnight expressway with wet-puddle reflections, multi-tier glass towers, 3D street lamps, and neon portals.',
   },
   {
     id: 'canyon',
-    name: 'ALPINE SNOW',
-    shortName: 'SNOW',
-    subtitle: 'Alpine Mountain Pass',
-    environmentTag: 'Alpine Tarmac · Cliffs · Pines',
+    name: 'CHAMONIX GLACIER',
+    shortName: 'GLACIER',
+    subtitle: '3D Snowy Mountain Pass',
+    environmentTag: 'Snowy Massif · 3D Pines · Cliffs',
     lengthLabel: '1.49 KM',
     laps: 3,
     goldTargetSec: 60,
@@ -138,17 +138,83 @@ export const MAP_SPECS: MapSpec[] = [
     fogHex: '#182436',
     fogDensity: 0.34,
     previewImage: circuitAlpineSnowImg,
-    description: 'Frost-lined mountain pass featuring sweeping banked corners, rocky cliffs, and twilight floodlights.',
+    description: 'High-altitude alpine glacier pass surrounded by real 3D snowy mountain massifs, dense snow-covered pine forests, and rock cliffs.',
+  },
+  {
+    id: 'drift',
+    name: 'AUTODROME ARENA',
+    shortName: 'AUTODROME',
+    subtitle: 'Pro Drift Stadium Circuit',
+    environmentTag: '3D Drift Track · Guardrails · Flags',
+    lengthLabel: '1.67 KM',
+    laps: 3,
+    goldTargetSec: 62,
+    accentHex: '#f43f5e',
+    secondaryHex: '#fbbf24',
+    skyTopHex: '#0f172a',
+    skyHorizonHex: '#f97316',
+    fogHex: '#1e1b2e',
+    fogDensity: 0.28,
+    previewImage: circuitSunsetCoastImg,
+    description: 'Dedicated 3D drift stadium circuit featuring technical hairpin combos, W-beam steel guardrails, racing flags, and sponsor arches.',
+  },
+  {
+    id: 'desert',
+    name: 'MOJAVE RED CANYON',
+    shortName: 'MOJAVE',
+    subtitle: 'Sandstone Gorge & Mesa Run',
+    environmentTag: '3D Canyon Cliffs · Boulders · Mesa',
+    lengthLabel: '1.60 KM',
+    laps: 3,
+    goldTargetSec: 59,
+    accentHex: '#f59e0b',
+    secondaryHex: '#ef4444',
+    skyTopHex: '#451a03',
+    skyHorizonHex: '#f59e0b',
+    fogHex: '#3b1d0e',
+    fogDensity: 0.30,
+    previewImage: circuitSunsetCoastImg,
+    description: 'Blistering desert highway carving through towering 3D photogrammetry red-rock canyon walls, weathered boulders, and desert trees.',
+  },
+  {
+    id: 'forest',
+    name: 'HAKONE TOUGE PASS',
+    shortName: 'HAKONE',
+    subtitle: 'Emerald Forest Mountain Touge',
+    environmentTag: '3D Forest Grove · Viaducts · Touge',
+    lengthLabel: '1.65 KM',
+    laps: 3,
+    goldTargetSec: 61,
+    accentHex: '#10b981',
+    secondaryHex: '#38bdf8',
+    skyTopHex: '#064e3b',
+    skyHorizonHex: '#34d399',
+    fogHex: '#0d2822',
+    fogDensity: 0.32,
+    previewImage: circuitAlpineSnowImg,
+    description: 'Elevated mountain touge winding through lush 3D forest groves, normal-mapped canopy trees, rocky cliff escarpments, and viaduct bridges.',
   },
 ];
 
 export function normalizeMapId(id: string | undefined | null): MapId {
   if (!id) return 'coast';
   const cleaned = String(id).trim().toLowerCase();
-  if (cleaned === 'coast' || cleaned === 'city' || cleaned === 'canyon') return cleaned;
-  if (cleaned.includes('neon') || cleaned.includes('city')) return 'city';
-  if (cleaned.includes('snow') || cleaned.includes('canyon') || cleaned.includes('alpine')) return 'canyon';
-  if (cleaned.includes('asphalt') || cleaned.includes('coast')) return 'coast';
+  if (
+    cleaned === 'coast' ||
+    cleaned === 'city' ||
+    cleaned === 'canyon' ||
+    cleaned === 'drift' ||
+    cleaned === 'desert' ||
+    cleaned === 'forest'
+  ) {
+    return cleaned;
+  }
+  if (cleaned.includes('drift') || cleaned.includes('autodrome')) return 'drift';
+  if (cleaned.includes('desert') || cleaned.includes('mojave')) return 'desert';
+  if (cleaned.includes('forest') || cleaned.includes('hakone') || cleaned.includes('touge')) return 'forest';
+  if (cleaned.includes('neon') || cleaned.includes('city') || cleaned.includes('shibuya')) return 'city';
+  if (cleaned.includes('snow') || cleaned.includes('canyon') || cleaned.includes('alpine') || cleaned.includes('glacier')) return 'canyon';
+  if (cleaned.includes('asphalt') || cleaned.includes('coast') || cleaned.includes('riviera')) return 'coast';
   return 'coast';
 }
 
@@ -159,7 +225,15 @@ export function getNextRotatedMapId(currentId: MapId): MapId {
 }
 
 export type BodyKitId =
+  | 'v12_goblin'
+  | 'apex_g82'
+  | 'solstice_ie'
+  | 'valkyr_aero'
+  | 'razor_f82'
   | 'ferrari'
+  | 'silver_arrow'
+  | 'lemans_proto'
+  | 'scion_gt'
   | 's64'
   | 'coupe'
   | 'kamaro'
@@ -250,6 +324,141 @@ export interface BodyKitSpec {
 
 export const BODY_KITS: BodyKitSpec[] = [
   {
+    id: 'v12_goblin',
+    name: 'V12 GOBLIN',
+    subtitle: 'Bespoke V12 Hypercar',
+    fullLabel: 'V12 GOBLIN',
+    tag: 'AAA HYPERCAR',
+    category: 'HYPERCAR',
+    description: 'Bespoke sculpted V12 hypercar with dual-clearcoat emerald finish, razor aero intakes, and full spinning alloy wheels.',
+    modelFile: '/models/supercars/v12_goblin.glb',
+    primaryColor: '#047857',
+    accentColor: '#0f172a',
+    badgeColor: '#10b981',
+    defaultRimId: 'rim2',
+    defaultSpoilerId: 'spoiler0',
+    stats: {
+      speed: 98,
+      acceleration: 97,
+      handling: 95,
+      drift: 94,
+    },
+    physics: {
+      topSpeedMultiplier: 1.13,
+      accelMultiplier: 1.14,
+      handlingMultiplier: 1.11,
+    },
+    unlockCost: 0,
+  },
+  {
+    id: 'apex_g82',
+    name: 'APEX G82 ADRO',
+    subtitle: 'Carbon Widebody GT',
+    fullLabel: 'APEX G82 ADRO',
+    tag: 'WIDEBODY GT',
+    category: 'SUPERCAR',
+    description: 'Aggressive widebody twin-turbo coupe fitted with exposed carbon-fiber Adro aero kit, rear diffuser, and glowing crimson tailbar.',
+    modelFile: '/models/supercars/apex_g82.glb',
+    primaryColor: '#0ea5e9',
+    accentColor: '#111827',
+    badgeColor: '#38bdf8',
+    defaultRimId: 'rim1',
+    defaultSpoilerId: 'spoiler0',
+    stats: {
+      speed: 95,
+      acceleration: 96,
+      handling: 94,
+      drift: 97,
+    },
+    physics: {
+      topSpeedMultiplier: 1.09,
+      accelMultiplier: 1.12,
+      handlingMultiplier: 1.1,
+    },
+    unlockCost: 0,
+  },
+  {
+    id: 'solstice_ie',
+    name: 'SOLSTICE V12',
+    subtitle: 'Track Carbon Hypercar',
+    fullLabel: 'SOLSTICE V12',
+    tag: 'AAA HYPERCAR',
+    category: 'HYPERCAR',
+    description: 'Extreme track-bred V12 hypercar with triple-vent carbon bodywork, towering GT rear wing, and razor-sharp red LED tail blades.',
+    modelFile: '/models/supercars/solstice_ie.glb',
+    primaryColor: '#ef4444',
+    accentColor: '#090d16',
+    badgeColor: '#f43f5e',
+    defaultRimId: 'rim3',
+    defaultSpoilerId: 'spoiler0',
+    stats: {
+      speed: 99,
+      acceleration: 98,
+      handling: 96,
+      drift: 92,
+    },
+    physics: {
+      topSpeedMultiplier: 1.15,
+      accelMultiplier: 1.16,
+      handlingMultiplier: 1.13,
+    },
+    unlockCost: 0,
+  },
+  {
+    id: 'valkyr_aero',
+    name: 'VALKYR AERO',
+    subtitle: 'F1-Aero Hypercar',
+    fullLabel: 'VALKYR AERO',
+    tag: 'F1 HYPERCAR',
+    category: 'HYPERCAR',
+    description: 'Formula-inspired ground-effect hypercar with open-tunnel carbon floor, teardrop cockpit, and relentless cornering downforce.',
+    modelFile: '/models/supercars/valkyr_aero.glb',
+    primaryColor: '#046342',
+    accentColor: '#0f172a',
+    badgeColor: '#34d399',
+    defaultRimId: 'rim3',
+    defaultSpoilerId: 'spoiler0',
+    stats: {
+      speed: 100,
+      acceleration: 98,
+      handling: 99,
+      drift: 91,
+    },
+    physics: {
+      topSpeedMultiplier: 1.16,
+      accelMultiplier: 1.17,
+      handlingMultiplier: 1.16,
+    },
+    unlockCost: 0,
+  },
+  {
+    id: 'razor_f82',
+    name: 'RAZOR F82',
+    subtitle: 'Street Racing GT',
+    fullLabel: 'RAZOR F82',
+    tag: 'STREET GT',
+    category: 'SUPERCAR',
+    description: 'Street-tuned widebody coupe featuring custom race livery, dual-clearcoat gloss, glowing LED lamps, and drift-ready balance.',
+    modelFile: '/models/supercars/razor_f82.glb',
+    primaryColor: '#f97316',
+    accentColor: '#18181b',
+    badgeColor: '#fb923c',
+    defaultRimId: 'rim1',
+    defaultSpoilerId: 'spoiler0',
+    stats: {
+      speed: 93,
+      acceleration: 94,
+      handling: 93,
+      drift: 96,
+    },
+    physics: {
+      topSpeedMultiplier: 1.08,
+      accelMultiplier: 1.1,
+      handlingMultiplier: 1.09,
+    },
+    unlockCost: 0,
+  },
+  {
     id: 'ferrari',
     name: 'F458 GT',
     subtitle: 'V8 Italian Supercar',
@@ -277,366 +486,99 @@ export const BODY_KITS: BodyKitSpec[] = [
     unlockCost: 0,
   },
   {
-    id: 'coupe',
-    name: 'SWIFT',
-    subtitle: 'Street Coupe',
-    fullLabel: 'SWIFT',
-    tag: 'STARTER',
-    category: 'COUPE',
-    description: 'Balanced twin-turbo street coupe with crisp handling and smooth cornering grip.',
-    modelFile: '/models/cosmo/coupe.glb',
-    primaryColor: '#475569',
-    accentColor: '#161922',
-    badgeColor: '#38bdf8',
-    defaultRimId: 'rim0',
+    id: 'silver_arrow',
+    name: 'SILVER ARROW P1',
+    subtitle: 'F1-Hybrid Hypercar',
+    fullLabel: 'SILVER ARROW P1',
+    tag: 'F1 HYPERCAR',
+    category: 'HYPERCAR',
+    description: 'Formula-derived hybrid hypercar with roof shark-fin aero, active carbon bodywork, razor LED lamps, and extreme cornering grip.',
+    modelFile: '/models/supercars/silver_arrow.glb',
+    primaryColor: '#b8c4d0',
+    accentColor: '#14b8a6',
+    badgeColor: '#2dd4bf',
+    defaultRimId: 'rim3',
     defaultSpoilerId: 'spoiler0',
     stats: {
-      speed: 82,
-      acceleration: 84,
-      handling: 89,
-      drift: 86,
-    },
-    physics: {
-      topSpeedMultiplier: 1.0,
-      accelMultiplier: 1.0,
-      handlingMultiplier: 1.0,
-    },
-    unlockCost: 0,
-  },
-  {
-    id: 's64',
-    name: 'SPORT',
-    subtitle: 'Red GT Coupe',
-    fullLabel: 'SPORT',
-    tag: 'CLASSIC GT',
-    category: 'COUPE',
-    description: 'Custom red GT coupe with twin exhausts and balanced arcade drift control.',
-    modelFile: '/models/cosmo/coupe.glb',
-    primaryColor: '#ff1e26',
-    accentColor: '#161922',
-    badgeColor: '#ff3b30',
-    defaultRimId: 'rim0',
-    defaultSpoilerId: 'spoiler0',
-    stats: {
-      speed: 84,
-      acceleration: 85,
-      handling: 88,
-      drift: 87,
-    },
-    physics: {
-      topSpeedMultiplier: 1.02,
-      accelMultiplier: 1.02,
-      handlingMultiplier: 1.02,
-    },
-    unlockCost: 0,
-  },
-  {
-    id: 'kamaro',
-    name: 'BLAZE',
-    subtitle: 'Muscle V8',
-    fullLabel: 'BLAZE',
-    tag: 'MUSCLE',
-    category: 'MUSCLE',
-    description: 'Supercharged V8 muscle car with strong launch acceleration and wide drifts.',
-    modelFile: '/models/cosmo/kamaro.glb',
-    primaryColor: '#ff8800',
-    accentColor: '#0b1528',
-    badgeColor: '#ff9900',
-    defaultRimId: 'rim1',
-    defaultSpoilerId: 'spoiler1',
-    stats: {
-      speed: 89,
-      acceleration: 88,
-      handling: 80,
+      speed: 100,
+      acceleration: 99,
+      handling: 98,
       drift: 93,
     },
     physics: {
-      topSpeedMultiplier: 1.06,
-      accelMultiplier: 1.08,
-      handlingMultiplier: 0.96,
+      topSpeedMultiplier: 1.17,
+      accelMultiplier: 1.18,
+      handlingMultiplier: 1.15,
     },
-    unlockCost: 35000,
+    unlockCost: 0,
   },
   {
-    id: 'ghini',
-    name: 'BOLT',
-    subtitle: 'V12 Supercar',
-    fullLabel: 'BOLT',
-    tag: 'SUPERCAR',
-    category: 'SUPERCAR',
-    description: 'Sleek mid-engine supercar with fast straightaway speed and sharp cornering.',
-    modelFile: '/models/cosmo/ghini.glb',
-    primaryColor: '#eab308',
-    accentColor: '#1a1a24',
-    badgeColor: '#eab308',
-    defaultRimId: 'rim2',
-    defaultSpoilerId: 'spoiler2',
-    stats: {
-      speed: 95,
-      acceleration: 93,
-      handling: 91,
-      drift: 88,
-    },
-    physics: {
-      topSpeedMultiplier: 1.11,
-      accelMultiplier: 1.14,
-      handlingMultiplier: 1.08,
-    },
-    unlockCost: 150000,
-  },
-  {
-    id: 'fenyr',
-    name: 'APEX',
-    subtitle: 'Pro Hypercar',
-    fullLabel: 'APEX',
-    tag: 'HYPERCAR',
+    id: 'lemans_proto',
+    name: 'LE MANS LMP-X',
+    subtitle: 'Endurance Prototype',
+    fullLabel: 'LE MANS LMP-X',
+    tag: 'PROTOTYPE',
     category: 'HYPERCAR',
-    description: 'Top-tier hypercar built for maximum top speed and razor-sharp track grip.',
-    modelFile: '/models/cosmo/fenyr.glb',
-    primaryColor: '#06b6d4',
-    accentColor: '#0f172a',
-    badgeColor: '#06b6d4',
+    description: 'Pure 24-hour endurance prototype sculpted for maximum downforce, ultra-low center of gravity, and relentless top-end velocity.',
+    modelFile: '/models/supercars/lemans_proto.glb',
+    primaryColor: '#1d4ed8',
+    accentColor: '#f8fafc',
+    badgeColor: '#3b82f6',
     defaultRimId: 'rim3',
-    defaultSpoilerId: 'spoiler2',
+    defaultSpoilerId: 'spoiler0',
     stats: {
-      speed: 99,
+      speed: 100,
       acceleration: 97,
-      handling: 94,
+      handling: 100,
       drift: 90,
     },
     physics: {
-      topSpeedMultiplier: 1.16,
-      accelMultiplier: 1.18,
-      handlingMultiplier: 1.12,
+      topSpeedMultiplier: 1.18,
+      accelMultiplier: 1.16,
+      handlingMultiplier: 1.18,
     },
-    unlockCost: 450000,
+    unlockCost: 0,
   },
   {
-    id: 'police',
-    name: 'PATROL',
-    subtitle: 'Police Cruiser',
-    fullLabel: 'PATROL',
-    tag: 'INTERCEPTOR',
-    category: 'SPECIAL',
-    description: 'High-speed highway patrol cruiser with heavy stability and strong top speed.',
-    modelFile: '/models/cosmo/police.glb',
-    primaryColor: '#2563eb',
-    accentColor: '#ffffff',
-    badgeColor: '#3b82f6',
-    defaultRimId: 'rim0',
+    id: 'scion_gt',
+    name: 'APEX GT-86',
+    subtitle: 'Widebody Street Tuner',
+    fullLabel: 'APEX GT-86',
+    tag: 'DRIFT TUNER',
+    category: 'SUPERCAR',
+    description: 'Aggressive widebody rear-drive street coupe tuned for razor-sharp drift angles, agile weight transfer, and deep metallic gloss.',
+    modelFile: '/models/supercars/scion_gt.glb',
+    primaryColor: '#991b1b',
+    accentColor: '#18181b',
+    badgeColor: '#ef4444',
+    defaultRimId: 'rim1',
     defaultSpoilerId: 'spoiler0',
     stats: {
       speed: 92,
-      acceleration: 90,
-      handling: 87,
-      drift: 86,
-    },
-    physics: {
-      topSpeedMultiplier: 1.08,
-      accelMultiplier: 1.10,
-      handlingMultiplier: 1.04,
-    },
-    unlockCost: 85000,
-  },
-  {
-    id: 'lamb',
-    name: 'FLASH',
-    subtitle: 'Cyber GT',
-    fullLabel: 'FLASH',
-    tag: 'SPORT GT',
-    category: 'SUPERCAR',
-    description: 'Sharp wedge supercar tuned for fast straightaways and responsive corners.',
-    modelFile: '/models/cosmo/lamb.glb',
-    primaryColor: '#ec4899',
-    accentColor: '#18181b',
-    badgeColor: '#ec4899',
-    defaultRimId: 'rim1',
-    defaultSpoilerId: 'spoiler2',
-    stats: {
-      speed: 94,
-      acceleration: 91,
-      handling: 90,
-      drift: 89,
-    },
-    physics: {
-      topSpeedMultiplier: 1.10,
-      accelMultiplier: 1.12,
-      handlingMultiplier: 1.06,
-    },
-    unlockCost: 195000,
-  },
-  {
-    id: 'italia',
-    name: 'REDLINE',
-    subtitle: 'Track Racer',
-    fullLabel: 'REDLINE',
-    tag: 'TRACK PRO',
-    category: 'SUPERCAR',
-    description: 'Track-tuned V8 sports car made for smooth corner exits and clean lap times.',
-    modelFile: '/models/cosmo/italia.glb',
-    primaryColor: '#ef4444',
-    accentColor: '#1c1917',
-    badgeColor: '#ef4444',
-    defaultRimId: 'rim2',
-    defaultSpoilerId: 'spoiler1',
-    stats: {
-      speed: 96,
       acceleration: 94,
       handling: 96,
-      drift: 87,
-    },
-    physics: {
-      topSpeedMultiplier: 1.12,
-      accelMultiplier: 1.15,
-      handlingMultiplier: 1.15,
-    },
-    unlockCost: 260000,
-  },
-  {
-    id: 'rally',
-    name: 'DRIFT',
-    subtitle: 'Rally Turbo',
-    fullLabel: 'DRIFT',
-    tag: 'RALLY AWD',
-    category: 'RALLY',
-    description: 'All-wheel-drive rally hatchback with quick turbo pickup around tight turns.',
-    modelFile: '/models/cosmo/rally.glb',
-    primaryColor: '#10b981',
-    accentColor: '#0f172a',
-    badgeColor: '#10b981',
-    defaultRimId: 'rim0',
-    defaultSpoilerId: 'spoiler1',
-    stats: {
-      speed: 86,
-      acceleration: 93,
-      handling: 97,
       drift: 99,
     },
     physics: {
-      topSpeedMultiplier: 1.04,
-      accelMultiplier: 1.14,
-      handlingMultiplier: 1.18,
+      topSpeedMultiplier: 1.07,
+      accelMultiplier: 1.1,
+      handlingMultiplier: 1.12,
     },
-    unlockCost: 48000,
-  },
-  {
-    id: 'jeep',
-    name: 'ROVER',
-    subtitle: 'Offroad 4x4',
-    fullLabel: 'ROVER',
-    tag: 'OFFROAD',
-    category: 'OFFROAD',
-    description: 'Rugged 4x4 desert truck with high ground clearance and steady traction.',
-    modelFile: '/models/cosmo/jeep.glb',
-    primaryColor: '#84cc16',
-    accentColor: '#1e293b',
-    badgeColor: '#84cc16',
-    defaultRimId: 'rim0',
-    defaultSpoilerId: 'spoiler0',
-    stats: {
-      speed: 80,
-      acceleration: 83,
-      handling: 86,
-      drift: 80,
-    },
-    physics: {
-      topSpeedMultiplier: 1.0,
-      accelMultiplier: 1.04,
-      handlingMultiplier: 1.05,
-    },
-    unlockCost: 55000,
-  },
-  {
-    id: 'armor',
-    name: 'TANK',
-    subtitle: 'Heavy 4x4',
-    fullLabel: 'TANK',
-    tag: 'HEAVY DUTY',
-    category: 'SPECIAL',
-    description: 'Armored heavy truck that holds its racing line firmly in bumper-to-bumper packs.',
-    modelFile: '/models/cosmo/armor.glb',
-    primaryColor: '#64748b',
-    accentColor: '#090d16',
-    badgeColor: '#94a3b8',
-    defaultRimId: 'rim3',
-    defaultSpoilerId: 'spoiler0',
-    stats: {
-      speed: 79,
-      acceleration: 81,
-      handling: 82,
-      drift: 76,
-    },
-    physics: {
-      topSpeedMultiplier: 0.99,
-      accelMultiplier: 1.02,
-      handlingMultiplier: 0.98,
-    },
-    unlockCost: 110000,
-  },
-  {
-    id: 'mobil',
-    name: 'CRUISER',
-    subtitle: 'City Sedan',
-    fullLabel: 'CRUISER',
-    tag: 'STREET',
-    category: 'COUPE',
-    description: 'Low-slung street sedan with clean balance and reliable cornering speed.',
-    modelFile: '/models/cosmo/mobil.glb',
-    primaryColor: '#a855f7',
-    accentColor: '#18181b',
-    badgeColor: '#a855f7',
-    defaultRimId: 'rim0',
-    defaultSpoilerId: 'spoiler0',
-    stats: {
-      speed: 84,
-      acceleration: 83,
-      handling: 86,
-      drift: 85,
-    },
-    physics: {
-      topSpeedMultiplier: 1.02,
-      accelMultiplier: 1.03,
-      handlingMultiplier: 1.03,
-    },
-    unlockCost: 22000,
-  },
-  {
-    id: 'van',
-    name: 'CARGO',
-    subtitle: 'Turbo Van',
-    fullLabel: 'CARGO',
-    tag: 'SLEEPER VAN',
-    category: 'SPECIAL',
-    description: 'Boxy street van hiding a surprisingly punchy turbo engine under the hood.',
-    modelFile: '/models/cosmo/van.glb',
-    primaryColor: '#f59e0b',
-    accentColor: '#1c1917',
-    badgeColor: '#f59e0b',
-    defaultRimId: 'rim1',
-    defaultSpoilerId: 'spoiler0',
-    stats: {
-      speed: 85,
-      acceleration: 87,
-      handling: 82,
-      drift: 85,
-    },
-    physics: {
-      topSpeedMultiplier: 1.03,
-      accelMultiplier: 1.06,
-      handlingMultiplier: 1.0,
-    },
-    unlockCost: 62000,
+    unlockCost: 0,
   },
 ];
 
-// Helper to normalize any legacy kit IDs ('kit1', 'kit2', 'kit3') to the car IDs
+// Helper to normalize any legacy low-poly car IDs ('coupe', 's64', 'kit1', etc.) to the AAA supercar roster
 export function normalizeCarId(id: string | undefined | null): BodyKitId {
-  if (!id) return 'ferrari';
-  if (id === 'kit1') return 'coupe';
-  if (id === 'kit2') return 'kamaro';
-  if (id === 'kit3') return 'ghini';
-  const found = BODY_KITS.find((k) => k.id === id);
-  return found ? found.id : 'ferrari';
+  if (!id) return 'v12_goblin';
+  const cleaned = String(id).trim().toLowerCase();
+  const found = BODY_KITS.find((k) => k.id === cleaned);
+  if (found) return found.id;
+  if (cleaned === 'kamaro' || cleaned === 'kit2' || cleaned === 'rally') return 'razor_f82';
+  if (cleaned === 'ghini' || cleaned === 'kit3' || cleaned === 'italia') return 'ferrari';
+  if (cleaned === 'fenyr' || cleaned === 'lamb') return 'solstice_ie';
+  if (cleaned === 'police' || cleaned === 'mobil') return 'apex_g82';
+  return 'v12_goblin';
 }
 
 export interface RivalRacerData {
@@ -729,6 +671,9 @@ export function pickAutoWeatherForMap(mapId: MapId, seed = 0): WeatherMode {
     coast: ['dust', 'clear', 'drizzle'],
     city: ['drizzle', 'clear'],
     canyon: ['mist', 'clear', 'drizzle'],
+    drift: ['clear', 'dust', 'drizzle'],
+    desert: ['dust', 'clear'],
+    forest: ['mist', 'clear', 'drizzle'],
   };
   const pool = mapPools[mapId] || mapPools.coast;
   const idx = Math.abs(Math.floor(seed)) % pool.length;
@@ -879,6 +824,9 @@ export const DEFAULT_CAREER_STATE: PlayerCareerState = {
     coast: { bestLap: null, bestTotalTime: null, bestStars: 0, racesCompleted: 0, wins: 0 },
     city: { bestLap: null, bestTotalTime: null, bestStars: 0, racesCompleted: 0, wins: 0 },
     canyon: { bestLap: null, bestTotalTime: null, bestStars: 0, racesCompleted: 0, wins: 0 },
+    drift: { bestLap: null, bestTotalTime: null, bestStars: 0, racesCompleted: 0, wins: 0 },
+    desert: { bestLap: null, bestTotalTime: null, bestStars: 0, racesCompleted: 0, wins: 0 },
+    forest: { bestLap: null, bestTotalTime: null, bestStars: 0, racesCompleted: 0, wins: 0 },
   },
 };
 
@@ -963,7 +911,7 @@ export const MISSIONS_LIST: MissionSpec[] = [
   {
     id: 'm_neon_city',
     title: 'Midnight Runner',
-    description: 'Complete a race at Neon City circuit.',
+    description: 'Complete a race at Shibuya Metropolis circuit.',
     category: 'Daily',
     actionTarget: 'events',
     rewardCoins: 10000,
@@ -973,8 +921,8 @@ export const MISSIONS_LIST: MissionSpec[] = [
   },
   {
     id: 'm_alpine_snow',
-    title: 'Alpine Conqueror',
-    description: 'Complete a race at Alpine Snow pass.',
+    title: 'Glacier Conqueror',
+    description: 'Complete a race at Chamonix Glacier pass.',
     category: 'Career',
     actionTarget: 'events',
     rewardCoins: 12000,
@@ -983,14 +931,25 @@ export const MISSIONS_LIST: MissionSpec[] = [
     getProgress: (c) => (c.mapsRaced.includes('canyon') ? 1 : 0),
   },
   {
-    id: 'm_world_tour',
-    title: 'Circuit World Tour',
-    description: 'Race on all 3 circuits (Sunset Coast, Neon City, Alpine Snow).',
+    id: 'm_drift_arena',
+    title: 'Autodrome Drift King',
+    description: 'Complete a race at Autodrome Arena circuit.',
     category: 'Career',
     actionTarget: 'events',
-    rewardCoins: 25000,
-    rewardXp: 220,
-    target: 3,
+    rewardCoins: 15000,
+    rewardXp: 150,
+    target: 1,
+    getProgress: (c) => (c.mapsRaced.includes('drift') ? 1 : 0),
+  },
+  {
+    id: 'm_world_tour',
+    title: 'World Championship Tour',
+    description: 'Race across all 6 global circuits.',
+    category: 'Career',
+    actionTarget: 'events',
+    rewardCoins: 45000,
+    rewardXp: 350,
+    target: 6,
     getProgress: (c) => c.mapsRaced.length,
   },
   {

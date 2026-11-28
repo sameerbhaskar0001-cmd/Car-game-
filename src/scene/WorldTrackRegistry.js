@@ -2,16 +2,22 @@ import * as THREE from 'three';
 import trackAsphaltJson from '../../track_asphalt.json';
 import trackNeonJson from '../../track_neon.json';
 import trackSnowJson from '../../track_snow.json';
+import {
+  DRIFT_GLB_SCALE_FACTOR,
+  trackDriftJson,
+  trackDesertJson,
+  trackForestJson,
+} from './customTrackSplines.js';
 
 /**
- * GameShipKit Custom 3D Track Registry & Spline Builder
- * Supports dynamic map/filename variations:
- *   - 'coast'  | 'track_asphalt' | 'asphalt' -> track_asphalt.glb + track_asphalt.json
- *   - 'city'   | 'track_neon'    | 'neon'    -> track_neon.glb    + track_neon.json
- *   - 'canyon' | 'track_snow'    | 'snow'    -> track_snow.glb    + track_snow.json
- *
- * Parses centerLine waypoints, road width (15.5m..18.46m), segment banking angles (bank),
- * sequential checkpoints (0..7), starting grid slots (1..8), and AI racingLine speed profiles.
+ * GameShipKit & Custom 3D Track Registry & Spline Builder
+ * Supports 6 distinct AAA circuits:
+ *   - 'coast'  -> Amalfi Riviera (track_asphalt.glb + 3D cliffs & forest trees)
+ *   - 'city'   -> Shibuya Metropolis (track_neon.glb + 3D street lamps & cyber skyline)
+ *   - 'canyon' -> Chamonix Glacier (track_snow.glb + 3D snowy_mountain_scene.glb)
+ *   - 'drift'  -> Autodrome Arena (/models/env/drift_race_track.glb + 1:1 extracted spline)
+ *   - 'desert' -> Mojave Red Canyon (3D banked canyon circuit + photogrammetry canyon_cliff_01.glb)
+ *   - 'forest' -> Hakone Touge Pass (3D banked mountain touge + forest_trees_scene.glb & forest_tree_01.glb)
  */
 
 export const WORLD_TRACK_SCALE = 0.0022;
@@ -23,13 +29,50 @@ const SNOW_GLB_BUNDLED_URL = new URL('../../track_snow.glb', import.meta.url).hr
 
 export function resolveTrackThemeKey(rawId = 'coast') {
   const s = String(rawId || 'coast').trim().toLowerCase();
-  if (s.includes('neon') || s.includes('city')) return 'city';
-  if (s.includes('snow') || s.includes('canyon') || s.includes('alpine')) return 'canyon';
+  if (s === 'drift' || s.includes('drift') || s.includes('autodrome')) return 'drift';
+  if (s === 'desert' || s.includes('desert') || s.includes('mojave')) return 'desert';
+  if (s === 'forest' || s.includes('forest') || s.includes('hakone') || s.includes('touge')) return 'forest';
+  if (s.includes('neon') || s.includes('city') || s.includes('shibuya')) return 'city';
+  if (s.includes('snow') || s.includes('canyon') || s.includes('alpine') || s.includes('glacier')) return 'canyon';
   return 'coast';
 }
 
 export function getTrackAssetDescriptor(rawId = 'coast') {
   const mapId = resolveTrackThemeKey(rawId);
+  if (mapId === 'drift') {
+    return {
+      mapId: 'drift',
+      trackKey: 'drift_race_track',
+      surface: 'asphalt',
+      jsonData: trackDriftJson,
+      isCustomDriftGlb: true,
+      customGlbScale: DRIFT_GLB_SCALE_FACTOR * WORLD_TRACK_SCALE,
+      glbCandidateUrls: ['/models/env/drift_race_track.glb'],
+      jsonCandidateUrls: [],
+    };
+  }
+  if (mapId === 'desert') {
+    return {
+      mapId: 'desert',
+      trackKey: 'track_desert',
+      surface: 'canyon',
+      jsonData: trackDesertJson,
+      useProcedural3DTrackMesh: true,
+      glbCandidateUrls: [],
+      jsonCandidateUrls: [],
+    };
+  }
+  if (mapId === 'forest') {
+    return {
+      mapId: 'forest',
+      trackKey: 'track_forest',
+      surface: 'asphalt',
+      jsonData: trackForestJson,
+      useProcedural3DTrackMesh: true,
+      glbCandidateUrls: [],
+      jsonCandidateUrls: [],
+    };
+  }
   if (mapId === 'city') {
     return {
       mapId: 'city',
@@ -92,28 +135,52 @@ export function getTrackAssetDescriptor(rawId = 'coast') {
 
 const SECTOR_NAMES_BY_MAP = {
   coast: [
-    { id: 1, name: 'Oceanfront Harbor Straight' },
-    { id: 2, name: 'Palm Bay Sweeper' },
+    { id: 1, name: 'Amalfi Harbor Straight' },
+    { id: 2, name: 'Emerald Bay Sweeper' },
     { id: 3, name: 'Sunset Cliff Ascent' },
-    { id: 4, name: 'Highland Banked Hairpin' },
+    { id: 4, name: 'Headland Banked Hairpin' },
     { id: 5, name: 'Golden Cove Switchback' },
-    { id: 6, name: 'Coastal Grandstand Gantry' },
+    { id: 6, name: 'Riviera Grandstand Gantry' },
   ],
   city: [
-    { id: 1, name: 'Cyber Plaza Boulevard' },
+    { id: 1, name: 'Shibuya Plaza Boulevard' },
     { id: 2, name: 'Neon Tower Chicane' },
     { id: 3, name: 'Skyline Overpass Climb' },
     { id: 4, name: 'Hologram Banked Bend' },
     { id: 5, name: 'Wet Asphalt Harbor Loop' },
-    { id: 6, name: 'Downtown Finish Straight' },
+    { id: 6, name: 'Metropolis Finish Straight' },
   ],
   canyon: [
-    { id: 1, name: 'Glacier Valley Straight' },
+    { id: 1, name: 'Chamonix Valley Straight' },
     { id: 2, name: 'Frostbite Ridge Curve' },
-    { id: 3, name: 'Summit Snow Climb' },
+    { id: 3, name: 'Glacier Summit Climb' },
     { id: 4, name: 'High-Altitude Banked Turn' },
-    { id: 5, name: 'Evergreen Gorge Descent' },
-    { id: 6, name: 'Alpine Base Gantry' },
+    { id: 5, name: 'Alpine Pine Gorge Descent' },
+    { id: 6, name: 'Glacier Base Gantry' },
+  ],
+  drift: [
+    { id: 1, name: 'Autodrome Main Straight' },
+    { id: 2, name: 'Stadium Outer Clipping Zone' },
+    { id: 3, name: 'Twin Hairpin Transition' },
+    { id: 4, name: 'Infield Technical S-Chicane' },
+    { id: 5, name: 'Guardrail Apex Carousel' },
+    { id: 6, name: 'Paddock Banner Gantry' },
+  ],
+  desert: [
+    { id: 1, name: 'Mojave Badlands Straight' },
+    { id: 2, name: 'Red Sandstone Gorge' },
+    { id: 3, name: 'High Mesa Banked Climb' },
+    { id: 4, name: 'Canyon Overlook Hairpin' },
+    { id: 5, name: 'Copper Ridge Switchback' },
+    { id: 6, name: 'Desert Outpost Gantry' },
+  ],
+  forest: [
+    { id: 1, name: 'Hakone Cedar Straight' },
+    { id: 2, name: 'Emerald Canopy Bend' },
+    { id: 3, name: 'Mountain Viaduct Climb' },
+    { id: 4, name: 'Misty Touge Hairpin' },
+    { id: 5, name: 'Gorge Waterfall Descent' },
+    { id: 6, name: 'Touge Summit Gantry' },
   ],
 };
 
@@ -142,6 +209,30 @@ const BOOST_PAD_CONFIGS_BY_MAP = {
     { sFrac: 0.79, latOffset: -0.0042, color: 0x34d399 },
     { sFrac: 0.92, latOffset: 0.0, color: 0xfbbf24 },
   ],
+  drift: [
+    { sFrac: 0.10, latOffset: 0.0, color: 0xf43f5e },
+    { sFrac: 0.26, latOffset: -0.0035, color: 0xfbbf24 },
+    { sFrac: 0.45, latOffset: 0.0035, color: 0xf43f5e },
+    { sFrac: 0.64, latOffset: -0.0035, color: 0xfbbf24 },
+    { sFrac: 0.80, latOffset: 0.0035, color: 0xf43f5e },
+    { sFrac: 0.93, latOffset: 0.0, color: 0xfbbf24 },
+  ],
+  desert: [
+    { sFrac: 0.13, latOffset: -0.0045, color: 0xf59e0b },
+    { sFrac: 0.29, latOffset: 0.0045, color: 0xef4444 },
+    { sFrac: 0.47, latOffset: -0.0045, color: 0xf59e0b },
+    { sFrac: 0.65, latOffset: 0.0045, color: 0xef4444 },
+    { sFrac: 0.81, latOffset: -0.0045, color: 0xf59e0b },
+    { sFrac: 0.92, latOffset: 0.0, color: 0xef4444 },
+  ],
+  forest: [
+    { sFrac: 0.14, latOffset: 0.0042, color: 0x10b981 },
+    { sFrac: 0.31, latOffset: -0.0042, color: 0x38bdf8 },
+    { sFrac: 0.48, latOffset: 0.0042, color: 0x10b981 },
+    { sFrac: 0.64, latOffset: -0.0042, color: 0x38bdf8 },
+    { sFrac: 0.79, latOffset: 0.0042, color: 0x10b981 },
+    { sFrac: 0.91, latOffset: 0.0, color: 0x38bdf8 },
+  ],
 };
 
 const JUMP_RAMP_CONFIGS_BY_MAP = {
@@ -156,6 +247,18 @@ const JUMP_RAMP_CONFIGS_BY_MAP = {
   canyon: [
     { sFrac: 0.36, latOffset: 0.0 },
     { sFrac: 0.85, latOffset: 0.0 },
+  ],
+  drift: [
+    { sFrac: 0.38, latOffset: 0.0 },
+    { sFrac: 0.86, latOffset: 0.0 },
+  ],
+  desert: [
+    { sFrac: 0.33, latOffset: 0.0 },
+    { sFrac: 0.78, latOffset: 0.0 },
+  ],
+  forest: [
+    { sFrac: 0.37, latOffset: 0.0 },
+    { sFrac: 0.82, latOffset: 0.0 },
   ],
 };
 
@@ -479,13 +582,18 @@ function buildSplineFromGameShipKitJson(rawId, rawJson) {
     };
   });
 
-  // StartLine 3D node transform from the GLB (`[235.649, 0.04, 1.214]`)
+  // StartLine 3D node transform (from json.startLinePos for custom circuits or GLB default)
+  const rawStartPos = Array.isArray(json.startLinePos)
+    ? json.startLinePos
+    : [235.649277, 0.04, 1.213858];
   const startLineWorldPos = [
-    235.649277 * WORLD_TRACK_SCALE,
-    BASE_GROUND_Y + 0.04 * WORLD_TRACK_SCALE,
-    1.213858 * WORLD_TRACK_SCALE,
+    rawStartPos[0] * WORLD_TRACK_SCALE,
+    BASE_GROUND_Y + (rawStartPos[1] || 0) * WORLD_TRACK_SCALE,
+    rawStartPos[2] * WORLD_TRACK_SCALE,
   ];
-  const startLineDir = [0.281425, 0, 0.959583];
+  const startLineDir = Array.isArray(json.startLineDir)
+    ? json.startLineDir
+    : [0.281425, 0, 0.959583];
 
   return {
     mapId,

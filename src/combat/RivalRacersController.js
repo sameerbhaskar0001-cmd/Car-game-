@@ -96,10 +96,10 @@ export function createRivalRacersController(splineData, scene) {
   }
 
   // -------------------------------------------------------------------------
-  // BUILD 3 DISTINCT AI OPPONENT CARS:
-  // 1. Interceptor 911 (Police car with roof beacons)
-  // 2. Kamaro V8 (Raw American Muscle V8)
-  // 3. Ghini Super V12 (Wedge Italian Supercar)
+  // BUILD 3 DISTINCT AAA SUPERCAR AI OPPONENTS (all lightweight Draco supercars):
+  // 1. VIPER  - Le Mans LMP-X (Endurance Prototype, Crimson)
+  // 2. KIRA   - Apex G82 Adro (Carbon Widebody GT, Electric Cyan)
+  // 3. REAPER - Razor F82 (Street Widebody GT, Royal Ultraviolet)
   // -------------------------------------------------------------------------
   const RIVAL_CONFIGS = [
     {
@@ -107,8 +107,8 @@ export function createRivalRacersController(splineData, scene) {
       name: 'VIPER',
       color: '#ef4444',
       paintHex: 0xef4444,
-      carId: 'ghini',
-      bodyId: 'ghini',
+      carId: 'lemans_proto',
+      bodyId: 'lemans_proto',
       startGridOffset: 0.058, // Pole position fierce pack leader
       laneOffset: -0.0042,
       baseSpeed: 0.166,
@@ -119,8 +119,8 @@ export function createRivalRacersController(splineData, scene) {
       name: 'KIRA',
       color: '#06b6d4',
       paintHex: 0x06b6d4,
-      carId: 'kamaro',
-      bodyId: 'kamaro',
+      carId: 'apex_g82',
+      bodyId: 'apex_g82',
       startGridOffset: 0.038, // Fast aggressive mid-pack hunter
       laneOffset: 0.0068,
       baseSpeed: 0.161,
@@ -131,8 +131,8 @@ export function createRivalRacersController(splineData, scene) {
       name: 'REAPER',
       color: '#a855f7',
       paintHex: 0x9333ea,
-      carId: 'police',
-      bodyId: 'police',
+      carId: 'razor_f82',
+      bodyId: 'razor_f82',
       startGridOffset: 0.018, // Relentless close-quarters blocker
       laneOffset: -0.0068,
       baseSpeed: 0.157,
@@ -193,7 +193,7 @@ export function createRivalRacersController(splineData, scene) {
   const rivalShadowMat = new THREE.MeshBasicMaterial({
     map: rivalShadowTex,
     transparent: true,
-    opacity: 0.45,
+    opacity: 0.84,
     depthWrite: false,
     polygonOffset: true,
     polygonOffsetFactor: -3,
@@ -839,8 +839,8 @@ export function createRivalRacersController(splineData, scene) {
             rival.spinoutDir = -pushDir || 1;
             rival.takedownSparkTimer = 0.55;
             rival.bumpCooldown = 0.85;
-            rival.hopVel = 0.032;
-            rival.lateralVel = -pushDir * 0.058;
+            rival.hopVel = 0.011;
+            rival.lateralVel = -pushDir * 0.048;
             rival.speed = Math.max(0.025, rival.speed * 0.34);
             rival.totalDistanceTraveled -= 0.008;
             rival.s = ((gridStartBase + rival.totalDistanceTraveled) % totalLength + totalLength) % totalLength;

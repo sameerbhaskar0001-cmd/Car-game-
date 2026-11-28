@@ -711,7 +711,7 @@ export function buildGoldenHourAtmosphere(scene) {
       baseExposure = 0.88;
       baseEnvInt = 0.72;
     } else if (mapId === 'canyon') {
-      // Alpine Snow Peaks: crisp bright alpine sun + sky bounce + clear rear rim highlight
+      // Chamonix Glacier: crisp bright alpine sun + sky bounce + clear rear rim highlight
       _targetSunCol.setHex(0xfffbeb);
       baseSunInt = 1.95;
       sunLight.position.set(-0.48, 0.78, 0.68);
@@ -730,11 +730,80 @@ export function buildGoldenHourAtmosphere(scene) {
 
       _targetBgCol.setHex(0xc7dff2);
       _targetFogCol.setHex(0xc7dff2);
-      baseFogDensity = 0.07;
+      baseFogDensity = 0.062;
+      baseExposure = 0.96;
+      baseEnvInt = 0.88;
+    } else if (mapId === 'drift') {
+      // Autodrome Arena: high-contrast motorsport stadium daylight + crimson/amber stadium rim
+      _targetSunCol.setHex(0xfff1d6);
+      baseSunInt = 1.92;
+      sunLight.position.set(0.52, 0.76, 0.62);
+
+      _targetHemiSky.setHex(0x93c5fd);
+      _targetHemiGround.setHex(0x334155);
+      baseHemiInt = 0.98;
+
+      goldenFillLight.position.set(-0.48, 0.42, -0.55);
+      _targetFillCol.setHex(0xfda4af);
+      baseFillInt = 0.56;
+
+      rimLight.position.set(0.42, 0.36, -0.64);
+      _targetRimCol.setHex(0xfbbf24);
+      baseRimInt = 0.64;
+
+      _targetBgCol.setHex(0x28354a);
+      _targetFogCol.setHex(0x28354a);
+      baseFogDensity = 0.055;
+      baseExposure = 0.97;
+      baseEnvInt = 0.92;
+    } else if (mapId === 'desert') {
+      // Mojave Red Canyon: blazing copper-gold sun + terracotta canyon bounce + warm amber haze
+      _targetSunCol.setHex(0xffd28a);
+      baseSunInt = 2.02;
+      sunLight.position.set(-0.62, 0.64, 0.66);
+
+      _targetHemiSky.setHex(0xfed7aa);
+      _targetHemiGround.setHex(0x9a3412);
+      baseHemiInt = 0.96;
+
+      goldenFillLight.position.set(0.52, 0.44, -0.52);
+      _targetFillCol.setHex(0xfb923c);
+      baseFillInt = 0.60;
+
+      rimLight.position.set(-0.44, 0.36, -0.64);
+      _targetRimCol.setHex(0xfef08a);
+      baseRimInt = 0.65;
+
+      _targetBgCol.setHex(0xd97736);
+      _targetFogCol.setHex(0xd97736);
+      baseFogDensity = 0.068;
+      baseExposure = 0.96;
+      baseEnvInt = 0.90;
+    } else if (mapId === 'forest') {
+      // Hakone Touge Pass: crisp emerald mountain sunlight + cool mist valley bounce
+      _targetSunCol.setHex(0xfef9c3);
+      baseSunInt = 1.88;
+      sunLight.position.set(0.46, 0.78, 0.68);
+
+      _targetHemiSky.setHex(0xa7f3d0);
+      _targetHemiGround.setHex(0x14532d);
+      baseHemiInt = 0.98;
+
+      goldenFillLight.position.set(-0.45, 0.44, -0.56);
+      _targetFillCol.setHex(0x6ee7b7);
+      baseFillInt = 0.54;
+
+      rimLight.position.set(0.38, 0.36, -0.62);
+      _targetRimCol.setHex(0x7dd3fc);
+      baseRimInt = 0.58;
+
+      _targetBgCol.setHex(0x24423a);
+      _targetFogCol.setHex(0x24423a);
+      baseFogDensity = 0.065;
       baseExposure = 0.96;
       baseEnvInt = 0.88;
     } else {
-      // 'coast': Sunset Coastal Beach Highway — warm golden sunlight + sky-blue fill + crisp rim
+      // 'coast': Amalfi Riviera — warm golden sunlight + sky-blue fill + crisp rim
       _targetSunCol.setHex(0xffe0a6);
       baseSunInt = 1.85;
       sunLight.position.set(-0.55, 0.72, 0.72);

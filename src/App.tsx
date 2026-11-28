@@ -139,23 +139,32 @@ export default function App() {
     return DEFAULT_COINS;
   });
 
-  // Persistent Unlocked Kits (always includes AAA showcase supercar 'ferrari' + starter 'coupe')
+  // Persistent Unlocked Kits (pure AAA supercar roster)
   const [unlockedKits, setUnlockedKits] = useState<BodyKitId[]>(() => {
+    const baseFreeKits: BodyKitId[] = [
+      'v12_goblin',
+      'apex_g82',
+      'solstice_ie',
+      'valkyr_aero',
+      'razor_f82',
+      'ferrari',
+      'silver_arrow',
+      'lemans_proto',
+      'scion_gt',
+    ];
     try {
       const saved = window.localStorage.getItem(STORAGE_UNLOCKED_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
           const mapped = parsed.map((id) => normalizeCarId(id));
-          if (!mapped.includes('coupe')) mapped.unshift('coupe');
-          if (!mapped.includes('ferrari')) mapped.unshift('ferrari');
-          return Array.from(new Set(mapped));
+          return Array.from(new Set([...baseFreeKits, ...mapped]));
         }
       }
     } catch {
       // ignore
     }
-    return ['ferrari', 'coupe', 's64'];
+    return baseFreeKits;
   });
 
   // Persistent Car Performance Upgrades (per BodyKitId)
@@ -185,7 +194,7 @@ export default function App() {
             ...DEFAULT_CAREER_STATE.trackRecords,
             ...(parsed.trackRecords || {}),
           };
-          const mapIds: MapId[] = ['coast', 'city', 'canyon'];
+          const mapIds: MapId[] = ['coast', 'city', 'canyon', 'drift', 'desert', 'forest'];
           // Detect any legacy shared bestLap value (e.g. 12.35s leaked across multiple tracks)
           const lapCounts = new Map<string, number>();
           for (const id of mapIds) {
@@ -199,6 +208,9 @@ export default function App() {
             coast: { ...DEFAULT_CAREER_STATE.trackRecords.coast, ...(rawRecords.coast || {}) },
             city: { ...DEFAULT_CAREER_STATE.trackRecords.city, ...(rawRecords.city || {}) },
             canyon: { ...DEFAULT_CAREER_STATE.trackRecords.canyon, ...(rawRecords.canyon || {}) },
+            drift: { ...DEFAULT_CAREER_STATE.trackRecords.drift, ...(rawRecords.drift || {}) },
+            desert: { ...DEFAULT_CAREER_STATE.trackRecords.desert, ...(rawRecords.desert || {}) },
+            forest: { ...DEFAULT_CAREER_STATE.trackRecords.forest, ...(rawRecords.forest || {}) },
           };
           for (const id of mapIds) {
             const rec = sanitizedRecords[id];
@@ -226,15 +238,15 @@ export default function App() {
   // Persistent Day 1–7 Daily Login Streak
   const [dailyStreak, setDailyStreak] = useState<DailyStreakState>(() => loadDailyStreakState());
 
-  // Persistent Equipped Body Kit (defaults to AAA 'ferrari' showcase on first launch)
+  // Persistent Equipped Body Kit (defaults to AAA 'v12_goblin' hypercar on first launch)
   const [equippedKitId, setEquippedKitId] = useState<BodyKitId>(() => {
     try {
       const saved = window.localStorage.getItem(STORAGE_KIT_KEY) as BodyKitId | null;
-      return saved ? normalizeCarId(saved) : 'ferrari';
+      return saved ? normalizeCarId(saved) : 'v12_goblin';
     } catch {
       // ignore
     }
-    return 'ferrari';
+    return 'v12_goblin';
   });
 
   const equippedKit: BodyKitSpec =

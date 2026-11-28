@@ -38,9 +38,9 @@ export function loadCosmoGlb(carId) {
       },
       undefined,
       (err) => {
-        console.warn(`Failed to load ${url}, falling back to coupe:`, err);
-        if (normId !== 'coupe') {
-          loadCosmoGlb('coupe').then(resolve).catch(reject);
+        console.warn(`Failed to load ${url}, falling back to v12_goblin:`, err);
+        if (normId !== 'v12_goblin') {
+          loadCosmoGlb('v12_goblin').then(resolve).catch(reject);
         } else {
           reject(err);
         }
@@ -566,9 +566,9 @@ export async function createCosmoCarInstance(carId = 'ferrari', customPaintHex =
  * Fast startup preload: loads ONLY the player's equipped car and the 3 rival cars
  * so initial boot is snappy with zero multi-megabyte parse stalls.
  */
-export function preloadCoreCosmoCars(equippedCarId = 'ferrari') {
+export function preloadCoreCosmoCars(equippedCarId = 'v12_goblin') {
   const coreIds = Array.from(
-    new Set([normalizeCarId(equippedCarId), 'ferrari', 'police', 'kamaro', 'ghini'])
+    new Set([normalizeCarId(equippedCarId), 'v12_goblin', 'apex_g82', 'razor_f82'])
   );
   return Promise.all(
     coreIds.map((id) =>
